@@ -1,0 +1,23 @@
+# --------------------------------------------------------
+# ☁️ render.yaml — Configuración de despliegue SRI Robot Audit
+# --------------------------------------------------------
+services:
+  - type: web
+    name: sri-robot-audit
+    env: docker
+    plan: free
+    branch: main
+    buildCommand: ""          # Render usa el Dockerfile automáticamente
+    startCommand: streamlit run aplicacion.py --server.port=8501 --server.address=0.0.0.0
+    envVars:
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /ms-playwright
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "1"
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    healthCheckPath: /
+    autoDeploy: true
+    timeout: 600

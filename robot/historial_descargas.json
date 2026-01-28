@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": "2025-10-18 14:35:12",
+    "ruc": "0999999999001",
+    "origen": "Recibidos",
+    "anio": 2025,
+    "mes": 10,
+    "tipo": "Facturas",
+    "estado": "finalizado",
+    "n_xml": 15,
+    "n_pdf": 15,
+    "n_registros": 15
+  }
+]

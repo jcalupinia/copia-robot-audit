@@ -1,0 +1,11 @@
+.venv/
+.playwright/
+browser_profile/
+descargas/
+historiales/
+__pycache__/
+*.db
+cookies_*.json
+session_cache.json
+user_prefs.json
+*.zip
