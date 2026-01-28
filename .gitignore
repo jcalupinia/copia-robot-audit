@@ -9,3 +9,9 @@ cookies_*.json
 session_cache.json
 user_prefs.json
 *.zip
+
+password_reset_requests.json
+historial_descargas.json
+*.bak
+temp_test.py
+debug_login_persistente.html
