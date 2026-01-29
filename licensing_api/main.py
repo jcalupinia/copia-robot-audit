@@ -120,6 +120,13 @@ def activate_license(
 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Licencia desactivada.")
 
+    # Bloquear activaci?n en otro equipo si ya fue vinculada
+    if license_obj.device_fingerprint and license_obj.device_fingerprint != request.fingerprint:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta licencia ya est? activada en otro equipo.",
+        )
+
     device = (
 
         db.query(models.LicenseDevice)
@@ -135,6 +142,12 @@ def activate_license(
         .first()
 
     )
+
+    if not device and license_obj.device_fingerprint:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta licencia ya est? activada en otro equipo.",
+        )
 
     if not device:
 
