@@ -249,32 +249,10 @@ def _get_or_init_client_device_id() -> str | None:
         device_id = device_id[0] if device_id else None
     if device_id:
         return str(device_id)
-    components.html(
-        """
-        <script>
-        (function() {
-          const key = "sri_device_id";
-          let id = localStorage.getItem(key);
-          if (!id) {
-            if (window.crypto && window.crypto.randomUUID) {
-              id = window.crypto.randomUUID();
-            } else {
-              id = (Date.now().toString(36) + Math.random().toString(36).slice(2));
-            }
-            localStorage.setItem(key, id);
-          }
-          const topWin = window.parent || window;
-          const params = new URLSearchParams(topWin.location.search);
-          if (params.get("device_id") !== id) {
-            params.set("device_id", id);
-            const newUrl = topWin.location.pathname + "?" + params.toString();
-            topWin.location.replace(newUrl);
-          }
-        })();
-        </script>
-        """,
-        height=0,
-    )
+    # Fallback server-side generation (no JS needed)
+    new_id = uuid.uuid4().hex
+    st.query_params["device_id"] = new_id
+    st.rerun()
     return None
 
 
