@@ -14,6 +14,7 @@ import calendar
 import secrets
 import smtplib
 import ssl
+import base64
 from datetime import datetime, timedelta, date
 from pathlib import Path
 from email.message import EmailMessage
@@ -41,6 +42,22 @@ import queue
 if os.name == "nt":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+
+@st.cache_data(show_spinner=False)
+def _get_logo_data_uri():
+    logo_path = Path(__file__).parent / "LogoAUDIT.png"
+    if not logo_path.exists():
+        return None
+    data = logo_path.read_bytes()
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _logo_html(width):
+    data_uri = _get_logo_data_uri()
+    if not data_uri:
+        return ""
+    return f"<div style='text-align:center'><img src='{data_uri}' width='{width}'/></div>"
 def _init_download_state():
     if "download_status" not in st.session_state:
         st.session_state.download_status = "idle"
@@ -423,10 +440,9 @@ def _render_reset_request():
     st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 0.9, 1])
     with col:
-        st.markdown(
-            "<div style='text-align:center'><img src=\"LogoAUDIT.png\" width=\"140\"/></div>",
-            unsafe_allow_html=True,
-        )
+        logo_html = _logo_html(140)
+        if logo_html:
+            st.markdown(logo_html, unsafe_allow_html=True)
         st.markdown("<div class='auth-title'>Recuperar contraseña</div>", unsafe_allow_html=True)
         st.info("Ingresa tu correo registrado y te enviaremos un enlace para restablecer tu contraseña.")
         with st.form("password_request_form"):
@@ -462,10 +478,9 @@ def _render_password_recovery():
     st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 0.9, 1])
     with col:
-        st.markdown(
-            "<div style='text-align:center'><img src=\"LogoAUDIT.png\" width=\"140\"/></div>",
-            unsafe_allow_html=True,
-        )
+        logo_html = _logo_html(140)
+        if logo_html:
+            st.markdown(logo_html, unsafe_allow_html=True)
         st.markdown("<div class='auth-title'>Reestablecer contraseña</div>", unsafe_allow_html=True)
         st.info("Introduce tu nueva contraseña y confírmala para finalizar el proceso.")
         preset_email = st.session_state.get("recovery_email", "")
@@ -516,7 +531,9 @@ def _render_login():
     st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 0.9, 1])
     with col:
-        st.markdown("<div style='text-align:center'><img src=\"LogoAUDIT.png\" width=\"160\"/></div>", unsafe_allow_html=True)
+        logo_html = _logo_html(160)
+        if logo_html:
+            st.markdown(logo_html, unsafe_allow_html=True)
         st.markdown("<div class='auth-title'>Inicia sesión</div>", unsafe_allow_html=True)
         with st.form("login_form"):
             email = st.text_input("Correo electrónico")
@@ -547,10 +564,9 @@ def _render_activation():
     st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
     _, center_col, _ = st.columns([1, 0.9, 1])
     with center_col:
-        st.markdown(
-            "<div style='text-align:center'><img src=\"LogoAUDIT.png\" width=\"130\"/></div>",
-            unsafe_allow_html=True,
-        )
+        logo_html = _logo_html(130)
+        if logo_html:
+            st.markdown(logo_html, unsafe_allow_html=True)
         st.markdown(
             "<h1 style='text-align:center; margin: 0.9rem 0;'>Activación de licencia</h1>",
             unsafe_allow_html=True,
@@ -618,10 +634,9 @@ with st.sidebar:
         st.session_state.clear()
         _clear_cached_session()
 
-    st.image(
-        "LogoAUDIT.png",
-        width=180,
-    )
+    logo_path = Path(__file__).parent / "LogoAUDIT.png"
+    if logo_path.exists():
+        st.image(str(logo_path), width=180)
     st.markdown("###  Auditora Web SRI Robot")
     st.write("Automatiza descargas, valida comprobantes y genera reportes tributarios.")
     st.markdown("---")
