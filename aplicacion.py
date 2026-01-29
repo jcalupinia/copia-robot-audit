@@ -21,6 +21,7 @@ from email.message import EmailMessage
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from robot.downloader import descargar_sri, set_user_notifier, MANUAL_CONSULTA_RECIBIDOS
 from robot.parser import construir_reporte
@@ -240,6 +241,41 @@ RESET_TOKEN_TTL = 3600
 def _generate_device_fingerprint() -> str:
     raw = f"{platform.node()}|{platform.system()}|{platform.release()}|{uuid.getnode()}"
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _get_or_init_client_device_id() -> str | None:
+    device_id = st.query_params.get("device_id")
+    if isinstance(device_id, list):
+        device_id = device_id[0] if device_id else None
+    if device_id:
+        return str(device_id)
+    components.html(
+        """
+        <script>
+        (function() {
+          const key = "sri_device_id";
+          let id = localStorage.getItem(key);
+          if (!id) {
+            if (window.crypto && window.crypto.randomUUID) {
+              id = window.crypto.randomUUID();
+            } else {
+              id = (Date.now().toString(36) + Math.random().toString(36).slice(2));
+            }
+            localStorage.setItem(key, id);
+          }
+          const params = new URLSearchParams(window.location.search);
+          if (params.get("device_id") !== id) {
+            params.set("device_id", id);
+            const newUrl = window.location.pathname + "?" + params.toString();
+            window.history.replaceState(null, "", newUrl);
+            window.location.reload();
+          }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+    return None
 
 
 def _persist_session_state():
@@ -594,7 +630,12 @@ def _render_activation():
             unsafe_allow_html=True,
         )
         st.warning("Introduce tu código de licencia para vincular este equipo.")
-        default_fp = st.session_state.get("device_fingerprint") or _generate_device_fingerprint()
+        client_device_id = _get_or_init_client_device_id()
+        if not client_device_id:
+            st.stop()
+        default_fp = st.session_state.get("device_fingerprint") or hashlib.sha256(
+            client_device_id.encode()
+        ).hexdigest()
         st.session_state["device_fingerprint"] = default_fp
         with st.form("activation_form"):
             code = st.text_input("Código de licencia")
@@ -627,7 +668,12 @@ def _ensure_access():
         _render_login()
         st.stop()
 
-    fingerprint = st.session_state.get("device_fingerprint") or _generate_device_fingerprint()
+    client_device_id = _get_or_init_client_device_id()
+    if not client_device_id:
+        st.stop()
+    fingerprint = st.session_state.get("device_fingerprint") or hashlib.sha256(
+        client_device_id.encode()
+    ).hexdigest()
     st.session_state["device_fingerprint"] = fingerprint
 
     if not st.session_state.get("license_validated"):
