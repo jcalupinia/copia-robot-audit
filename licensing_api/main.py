@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime
+import os
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -22,9 +23,15 @@ app = FastAPI(
     description="API para autenticación y activación de licencias del robot.",
 )
 
-Base.metadata.create_all(bind=engine)
-
-
+Base.metadata.create_all(bind=engine)
+
+
+def require_admin_token(x_admin_token: str | None = Header(default=None)) -> None:
+    expected = os.getenv("LICENSE_ADMIN_TOKEN", "")
+    if not expected or not x_admin_token or x_admin_token != expected:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin token inválido.")
+
+
 def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> models.User:
@@ -90,7 +97,7 @@ def activate_license(
 
 
 @app.post("/license/validate", response_model=schemas.LicenseInfo)
-def validate_license(
+def validate_license(
     request: schemas.LicenseValidationRequest,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -125,4 +132,28 @@ def validate_license(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Licencia no válida o no encontrada.")
     if license_obj.expires_at and license_obj.expires_at < datetime.utcnow():
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Licencia expirada.")
-    return license_obj
+    return license_obj
+
+
+@app.post("/admin/create-user-license", response_model=schemas.UserInfo)
+def admin_create_user_license(
+    request: schemas.AdminCreateUserLicenseRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin_token),
+):
+    user = crud.get_user_by_email(db, email=request.email)
+    if not user:
+        user = crud.create_user(db, email=request.email, password=request.password)
+    else:
+        user.password_hash = lic_security.get_password_hash(request.password)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    license_obj = (
+        db.query(models.License)
+        .filter(models.License.code == request.code, models.License.user_id == user.id)
+        .first()
+    )
+    if not license_obj:
+        crud.create_license(db, user=user, code=request.code, expires_at=request.expires_at)
+    return user

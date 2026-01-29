@@ -52,3 +52,10 @@ class UserInfo(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class AdminCreateUserLicenseRequest(BaseModel):
+    email: EmailStr
+    password: constr(min_length=6)
+    code: str
+    expires_at: Optional[datetime] = None
