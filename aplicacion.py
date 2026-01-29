@@ -263,12 +263,12 @@ def _get_or_init_client_device_id() -> str | None:
             }
             localStorage.setItem(key, id);
           }
-          const params = new URLSearchParams(window.location.search);
+          const topWin = window.parent || window;
+          const params = new URLSearchParams(topWin.location.search);
           if (params.get("device_id") !== id) {
             params.set("device_id", id);
-            const newUrl = window.location.pathname + "?" + params.toString();
-            window.history.replaceState(null, "", newUrl);
-            window.location.reload();
+            const newUrl = topWin.location.pathname + "?" + params.toString();
+            topWin.location.replace(newUrl);
           }
         })();
         </script>
