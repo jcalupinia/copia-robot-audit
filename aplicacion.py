@@ -184,6 +184,21 @@ button[aria-label="Detener proceso"]{
         color:var(--auth-card-muted);
         opacity:0.9;
     }
+    div[data-testid="stForm"] div[data-baseweb="input"] button{
+        background:transparent !important;
+        box-shadow:none !important;
+    }
+    div[data-testid="stForm"] div[data-baseweb="input"] div{
+        background:transparent !important;
+    }
+    div[data-testid="stForm"] div[data-baseweb="input"] > div:last-child{
+        background:var(--secondary-background-color, #151621) !important;
+        border-left:1px solid rgba(255,255,255,0.12) !important;
+    }
+    div[data-testid="stForm"] div[data-baseweb="input"] svg{
+        color:var(--auth-card-text) !important;
+        fill:var(--auth-card-text) !important;
+    }
     div[data-testid="stForm"] button[kind="primaryFormSubmit"],
     div[data-testid="stForm"] button[data-testid="baseButton-primary"]{
         background-color:#101936;
