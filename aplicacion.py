@@ -232,6 +232,7 @@ DESC_DIR = BASE_DIR / "descargas"
 DESC_DIR.mkdir(exist_ok=True, parents=True)
 LICENSE_CLIENT = LicensingClient()
 SESSION_CACHE = BASE_DIR / "session_cache.json"
+ENABLE_SESSION_CACHE = os.getenv("ENABLE_SESSION_CACHE", "1").strip().lower() not in {"0", "false", "no"}
 PREFERENCES_FILE = BASE_DIR / "user_prefs.json"
 RESET_REQUESTS_FILE = BASE_DIR / "password_reset_requests.json"
 RESET_TOKEN_TTL = 3600
@@ -242,6 +243,8 @@ def _generate_device_fingerprint() -> str:
 
 
 def _persist_session_state():
+    if not ENABLE_SESSION_CACHE:
+        return
     payload = {}
     for key in (
         "auth_token",
@@ -257,6 +260,8 @@ def _persist_session_state():
 
 
 def _load_cached_session():
+    if not ENABLE_SESSION_CACHE:
+        return
     if "auth_token" in st.session_state:
         return
     if not SESSION_CACHE.exists():
@@ -270,6 +275,8 @@ def _load_cached_session():
 
 
 def _clear_cached_session():
+    if not ENABLE_SESSION_CACHE:
+        return
     try:
         SESSION_CACHE.unlink(missing_ok=True)
     except Exception:
