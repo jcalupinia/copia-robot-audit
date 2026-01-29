@@ -278,6 +278,15 @@ def _get_or_init_client_device_id() -> str | None:
     return None
 
 
+def _require_client_device_id() -> str | None:
+    device_id = _get_or_init_client_device_id()
+    if device_id:
+        return device_id
+    st.markdown("<div style='height:120px'></div>", unsafe_allow_html=True)
+    st.info("Preparando tu sesión en este equipo...")
+    return None
+
+
 def _persist_session_state():
     if not ENABLE_SESSION_CACHE:
         return
@@ -630,7 +639,7 @@ def _render_activation():
             unsafe_allow_html=True,
         )
         st.warning("Introduce tu código de licencia para vincular este equipo.")
-        client_device_id = _get_or_init_client_device_id()
+        client_device_id = _require_client_device_id()
         if not client_device_id:
             st.stop()
         default_fp = st.session_state.get("device_fingerprint") or hashlib.sha256(
@@ -668,7 +677,7 @@ def _ensure_access():
         _render_login()
         st.stop()
 
-    client_device_id = _get_or_init_client_device_id()
+    client_device_id = _require_client_device_id()
     if not client_device_id:
         st.stop()
     fingerprint = st.session_state.get("device_fingerprint") or hashlib.sha256(
