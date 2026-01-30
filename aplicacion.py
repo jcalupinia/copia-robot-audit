@@ -685,9 +685,15 @@ DEVICE_FINGERPRINT = st.session_state.get("device_fingerprint") or st.session_st
 # SIDEBAR CORPORATIVO
 # ==============================
 with st.sidebar:
-    if st.button("Cerrar sesión"):
-        st.session_state.clear()
-        _clear_cached_session()
+    user_email = st.session_state.get("user_email") or "No disponible"
+    col_user, col_logout = st.columns([3, 1])
+    with col_user:
+        st.markdown("**Usuario conectado**")
+        st.caption(user_email)
+    with col_logout:
+        if st.button("Cerrar sesión"):
+            st.session_state.clear()
+            _clear_cached_session()
 
     logo_path = Path(__file__).parent / "LogoAUDIT.png"
     if logo_path.exists():
