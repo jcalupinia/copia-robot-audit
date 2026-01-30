@@ -244,13 +244,18 @@ def _generate_device_fingerprint() -> str:
 
 
 def _get_or_init_client_device_id() -> str | None:
+    cached_id = st.session_state.get("_device_id")
+    if cached_id:
+        return str(cached_id)
     device_id = st.query_params.get("device_id")
     if isinstance(device_id, list):
         device_id = device_id[0] if device_id else None
     if device_id:
+        st.session_state["_device_id"] = device_id
         return str(device_id)
     # Fallback server-side generation (no JS needed)
     new_id = uuid.uuid4().hex
+    st.session_state["_device_id"] = new_id
     st.query_params["device_id"] = new_id
     st.rerun()
     return None
@@ -262,6 +267,8 @@ def _require_client_device_id() -> str | None:
         return device_id
     st.markdown("<div style='height:120px'></div>", unsafe_allow_html=True)
     st.info("Preparando tu sesión en este equipo...")
+    if st.button("Reintentar"):
+        st.rerun()
     return None
 
 
