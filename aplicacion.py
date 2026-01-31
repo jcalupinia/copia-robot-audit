@@ -131,9 +131,17 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap');
 div[data-testid="stToolbarActions"],
 button[title="Deploy"] {
     display:none !important;
+}
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+div[data-testid="stDecoration"] {
+    display: none !important;
 }
 button[aria-label=" Iniciar proceso"],
 button[aria-label="Iniciar proceso"]{
@@ -152,10 +160,26 @@ button[aria-label="Detener proceso"]{
         --auth-card-text: var(--text-color, #f5f5f5);
         --auth-card-muted: rgba(255,255,255,0.65);
     }
+    .stApp {
+        background: radial-gradient(120% 120% at 10% 10%, rgba(0,128,255,0.35), transparent 50%),
+                    radial-gradient(120% 120% at 90% 20%, rgba(0,255,170,0.25), transparent 55%),
+                    radial-gradient(120% 120% at 30% 80%, rgba(0,80,160,0.35), transparent 55%),
+                    linear-gradient(135deg, #0b0f1a 0%, #0b1f2a 45%, #020508 100%);
+        background-size: 200% 200%;
+        animation: liquidShift 18s ease-in-out infinite;
+    }
+    @keyframes liquidShift {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
     .auth-title{
         text-align:center;
         font-size:2.1rem;
-        font-weight:700;
+        font-weight:800;
+        font-family:'Manrope', sans-serif;
+        letter-spacing:0.02em;
+        color:#ffffff !important;
         margin-bottom:1.4rem;
     }
     div[data-testid="stForm"]{
@@ -586,7 +610,7 @@ def _render_login():
         logo_html = _logo_html(160)
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Inicia sesión</div>", unsafe_allow_html=True)
+        st.markdown("<div class='auth-title'>Iniciar sesión</div>", unsafe_allow_html=True)
         with st.form("login_form"):
             email = st.text_input("Correo electrónico")
             password = st.text_input("Contraseña", type="password")
