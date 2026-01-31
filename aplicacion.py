@@ -525,7 +525,7 @@ def _render_reset_request():
             email = st.text_input("Correo electrónico", value=st.session_state.get("recovery_email", ""))
             col_send, col_cancel = st.columns([1, 1])
             with col_send:
-                send = st.form_submit_button("Enviar enlace de recuperación", type="primary")
+                send = st.form_submit_button("Enviar enlace", type="primary")
             with col_cancel:
                 cancel = st.form_submit_button("Volver al inicio de sesión", type="secondary")
             if cancel:
