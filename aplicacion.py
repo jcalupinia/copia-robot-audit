@@ -343,7 +343,9 @@ BASE_DIR = Path(__file__).parent
 DESC_DIR = BASE_DIR / "descargas"
 DESC_DIR.mkdir(exist_ok=True, parents=True)
 LICENSE_CLIENT = LicensingClient()
-SESSION_CACHE = BASE_DIR / "session_cache.json"
+SESSION_CACHE_DIR = Path(os.getenv("SESSION_CACHE_DIR", BASE_DIR / ".session_cache"))
+SESSION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+SESSION_CACHE = SESSION_CACHE_DIR / "session_cache.json"
 ENABLE_SESSION_CACHE = os.getenv("ENABLE_SESSION_CACHE", "1").strip().lower() not in {"0", "false", "no"}
 PREFERENCES_FILE = BASE_DIR / "user_prefs.json"
 RESET_REQUESTS_FILE = BASE_DIR / "password_reset_requests.json"
@@ -413,7 +415,7 @@ def _session_cache_path(device_id: str | None) -> Path:
     if not device_id:
         return SESSION_CACHE
     safe_id = "".join(ch for ch in device_id if ch.isalnum() or ch in ("-", "_"))
-    return BASE_DIR / f"session_cache_{safe_id}.json"
+    return SESSION_CACHE_DIR / f"session_cache_{safe_id}.json"
 
 
 def _require_client_device_id() -> str | None:
