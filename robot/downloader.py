@@ -57,7 +57,8 @@ else:
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/root/.cache/ms-playwright")
     os.environ.setdefault("PYPPETEER_HOME", "/root/.cache/ms-playwright")
 
-HEADLESS_ENV = os.getenv("PLAYWRIGHT_HEADLESS", "0").strip().lower()
+DEFAULT_HEADLESS = "1" if (os.getenv("RENDER") or not os.getenv("DISPLAY")) else "0"
+HEADLESS_ENV = os.getenv("PLAYWRIGHT_HEADLESS", DEFAULT_HEADLESS).strip().lower()
 HEADLESS = HEADLESS_ENV not in {"0", "false", "no", "off"}
 try:
     SLOW_MO = int(os.getenv("PLAYWRIGHT_SLOWMO", "0"))
