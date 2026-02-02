@@ -168,6 +168,22 @@ button[aria-label="Detener proceso"]{
         background-size: 200% 200%;
         animation: liquidShift 18s ease-in-out infinite;
     }
+    .stApp, .stApp p, .stApp span, .stApp label,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 {
+        color: #e9eef5 !important;
+    }
+    .stApp [data-testid="stMarkdownContainer"] {
+        color: #e9eef5 !important;
+    }
+    .stApp [data-baseweb="tab"] {
+        color: #d7e3f4 !important;
+    }
+    .stApp [data-baseweb="tab"][aria-selected="true"] {
+        color: #ffffff !important;
+    }
+    .stApp [data-testid="stSidebar"] * {
+        color: #1f2937 !important;
+    }
     @keyframes liquidShift {
         0% { background-position: 0% 50%; }
         50% { background-position: 100% 50%; }
@@ -523,9 +539,11 @@ def _render_reset_request():
         st.info("Ingresa tu correo registrado y te enviaremos un enlace para restablecer tu contraseña.")
         with st.form("password_request_form"):
             email = st.text_input("Correo electrónico", value=st.session_state.get("recovery_email", ""))
-            col_send, col_cancel = st.columns([1, 1])
+            col_send, col_spacer, col_cancel = st.columns([1, 1.4, 1])
             with col_send:
                 send = st.form_submit_button("Enviar enlace", type="primary")
+            with col_spacer:
+                st.write("")
             with col_cancel:
                 cancel = st.form_submit_button("Volver al inicio de sesión", type="secondary")
             if cancel:
