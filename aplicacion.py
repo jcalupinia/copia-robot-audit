@@ -348,6 +348,7 @@ ENABLE_SESSION_CACHE = os.getenv("ENABLE_SESSION_CACHE", "1").strip().lower() no
 PREFERENCES_FILE = BASE_DIR / "user_prefs.json"
 RESET_REQUESTS_FILE = BASE_DIR / "password_reset_requests.json"
 RESET_TOKEN_TTL = 3600
+_SESSION_CACHE_MEMORY: dict[str, dict] = {}
 
 def _generate_device_fingerprint() -> str:
     raw = f"{platform.node()}|{platform.system()}|{platform.release()}|{uuid.getnode()}"
@@ -442,6 +443,7 @@ def _persist_session_state():
         if key in st.session_state:
             payload[key] = st.session_state[key]
     if payload:
+        _SESSION_CACHE_MEMORY[str(device_id or "default")] = dict(payload)
         cache_path.write_text(json.dumps(payload))
 
 
@@ -451,11 +453,15 @@ def _load_cached_session(device_id: str | None = None):
     if "auth_token" in st.session_state:
         return
     cache_path = _session_cache_path(device_id)
-    if not cache_path.exists():
-        return
-    try:
-        data = json.loads(cache_path.read_text())
-    except Exception:
+    data = None
+    if cache_path.exists():
+        try:
+            data = json.loads(cache_path.read_text())
+        except Exception:
+            data = None
+    if data is None:
+        data = _SESSION_CACHE_MEMORY.get(str(device_id or "default"))
+    if not data:
         return
     for key, value in data.items():
         st.session_state[key] = value
@@ -466,6 +472,7 @@ def _clear_cached_session():
         return
     device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
     cache_path = _session_cache_path(device_id)
+    _SESSION_CACHE_MEMORY.pop(str(device_id or "default"), None)
     try:
         cache_path.unlink(missing_ok=True)
     except Exception:
