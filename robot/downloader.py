@@ -6301,13 +6301,18 @@ def descargar_sri(
             headless=HEADLESS,
             args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
         )
+        # Prefer Chrome channel when available (local), fallback to bundled Chromium (Render)
         launch_kwargs["channel"] = "chrome"
         if SLOW_MO > 0:
             launch_kwargs["slow_mo"] = SLOW_MO
         if DEVTOOLS:
             launch_kwargs["devtools"] = True
             launch_kwargs["headless"] = False
-        browser = p.chromium.launch(**launch_kwargs)
+        try:
+            browser = p.chromium.launch(**launch_kwargs)
+        except Exception:
+            launch_kwargs.pop("channel", None)
+            browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(accept_downloads=True)
         page = context.new_page()
 
