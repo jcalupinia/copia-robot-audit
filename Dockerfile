@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --------------------------------------------------------
 RUN pip install --upgrade pip==24.2 setuptools wheel && \
     pip install --no-cache-dir playwright==1.47.0 && \
+    python -m playwright install-deps chromium && \
     python -m playwright install chromium && \
     chmod -R 777 /root/.cache/ms-playwright
 
