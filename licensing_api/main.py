@@ -124,7 +124,7 @@ def activate_license(
     if license_obj.device_fingerprint and license_obj.device_fingerprint != request.fingerprint:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Esta licencia ya est? activada en otro equipo.",
+            detail="Esta licencia ya está activada en otro equipo.",
         )
 
     device = (
@@ -146,7 +146,7 @@ def activate_license(
     if not device and license_obj.device_fingerprint:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Esta licencia ya est? activada en otro equipo.",
+            detail="Esta licencia ya está activada en otro equipo.",
         )
 
     if not device:
