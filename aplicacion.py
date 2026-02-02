@@ -168,20 +168,63 @@ button[aria-label="Detener proceso"]{
         background-size: 200% 200%;
         animation: liquidShift 18s ease-in-out infinite;
     }
-    .stApp, .stApp p, .stApp span, .stApp label,
-    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 {
+    body[data-theme="dark"] .stApp, 
+    body[data-theme="dark"] .stApp p, 
+    body[data-theme="dark"] .stApp span, 
+    body[data-theme="dark"] .stApp label,
+    body[data-theme="dark"] .stApp h1, 
+    body[data-theme="dark"] .stApp h2, 
+    body[data-theme="dark"] .stApp h3, 
+    body[data-theme="dark"] .stApp h4, 
+    body[data-theme="dark"] .stApp h5, 
+    body[data-theme="dark"] .stApp h6 {
         color: #e9eef5 !important;
     }
-    .stApp [data-testid="stMarkdownContainer"] {
+    body[data-theme="dark"] .stApp [data-testid="stMarkdownContainer"] {
         color: #e9eef5 !important;
     }
-    .stApp [data-baseweb="tab"] {
+    body[data-theme="dark"] .stApp [data-baseweb="tab"] {
         color: #d7e3f4 !important;
     }
-    .stApp [data-baseweb="tab"][aria-selected="true"] {
+    body[data-theme="dark"] .stApp [data-baseweb="tab"][aria-selected="true"] {
         color: #ffffff !important;
     }
+    body[data-theme="light"] .stApp, 
+    body[data-theme="light"] .stApp p, 
+    body[data-theme="light"] .stApp span, 
+    body[data-theme="light"] .stApp label,
+    body[data-theme="light"] .stApp h1, 
+    body[data-theme="light"] .stApp h2, 
+    body[data-theme="light"] .stApp h3, 
+    body[data-theme="light"] .stApp h4, 
+    body[data-theme="light"] .stApp h5, 
+    body[data-theme="light"] .stApp h6,
+    body[data-theme="light"] .stApp [data-testid="stMarkdownContainer"] {
+        color: #0f172a !important;
+    }
+    body[data-theme="light"] .stApp [data-baseweb="tab"] {
+        color: #1f2937 !important;
+    }
+    body[data-theme="light"] .stApp [data-baseweb="tab"][aria-selected="true"] {
+        color: #0b1f2a !important;
+    }
     body[data-theme="dark"] [data-testid="stSidebar"] * {
+        color: #e9eef5 !important;
+    }
+    body[data-theme="dark"] [data-testid="stSidebar"] {
+        color: #e9eef5 !important;
+    }
+    body[data-theme="dark"] [data-testid="stSidebar"] p,
+    body[data-theme="dark"] [data-testid="stSidebar"] span,
+    body[data-theme="dark"] [data-testid="stSidebar"] label,
+    body[data-theme="dark"] [data-testid="stSidebar"] a,
+    body[data-theme="dark"] [data-testid="stSidebar"] div {
+        color: #e9eef5 !important;
+        opacity: 1 !important;
+    }
+    body[data-theme="dark"] [data-testid="stSidebar"] input,
+    body[data-theme="dark"] [data-testid="stSidebar"] textarea,
+    body[data-theme="dark"] [data-testid="stSidebar"] [data-baseweb="select"] div {
         color: #e9eef5 !important;
     }
     body[data-theme="light"] [data-testid="stSidebar"] * {
