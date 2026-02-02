@@ -333,6 +333,20 @@ def _get_or_init_client_device_id() -> str | None:
     return str(new_id)
 
 
+def _get_device_id_from_query() -> str | None:
+    device_id = st.query_params.get("device_id")
+    if isinstance(device_id, list):
+        device_id = device_id[0] if device_id else None
+    return str(device_id) if device_id else None
+
+
+def _session_cache_path(device_id: str | None) -> Path:
+    if not device_id:
+        return SESSION_CACHE
+    safe_id = "".join(ch for ch in device_id if ch.isalnum() or ch in ("-", "_"))
+    return BASE_DIR / f"session_cache_{safe_id}.json"
+
+
 def _require_client_device_id() -> str | None:
     device_id = _get_or_init_client_device_id()
     if device_id:
@@ -347,6 +361,8 @@ def _require_client_device_id() -> str | None:
 def _persist_session_state():
     if not ENABLE_SESSION_CACHE:
         return
+    device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
+    cache_path = _session_cache_path(device_id)
     payload = {}
     for key in (
         "auth_token",
@@ -358,18 +374,19 @@ def _persist_session_state():
         if key in st.session_state:
             payload[key] = st.session_state[key]
     if payload:
-        SESSION_CACHE.write_text(json.dumps(payload))
+        cache_path.write_text(json.dumps(payload))
 
 
-def _load_cached_session():
+def _load_cached_session(device_id: str | None = None):
     if not ENABLE_SESSION_CACHE:
         return
     if "auth_token" in st.session_state:
         return
-    if not SESSION_CACHE.exists():
+    cache_path = _session_cache_path(device_id)
+    if not cache_path.exists():
         return
     try:
-        data = json.loads(SESSION_CACHE.read_text())
+        data = json.loads(cache_path.read_text())
     except Exception:
         return
     for key, value in data.items():
@@ -379,8 +396,10 @@ def _load_cached_session():
 def _clear_cached_session():
     if not ENABLE_SESSION_CACHE:
         return
+    device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
+    cache_path = _session_cache_path(device_id)
     try:
-        SESSION_CACHE.unlink(missing_ok=True)
+        cache_path.unlink(missing_ok=True)
     except Exception:
         pass
 
@@ -731,7 +750,11 @@ def _render_activation():
                     except Exception as err:
                         st.error(f"No se pudo activar la licencia: {err}")
 def _ensure_access():
-    _load_cached_session()
+    if "auth_token" not in st.session_state:
+        client_device_id = _require_client_device_id()
+        if not client_device_id:
+            st.stop()
+        _load_cached_session(client_device_id)
     if "auth_token" not in st.session_state:
         _render_login()
         st.stop()
