@@ -1028,7 +1028,29 @@ with tab1:
             except Exception as err:
                 st.error(f"No se pudo usar la carpeta indicada: {err}")
         elif error:
-            st.error(error)
+            st.session_state["show_manual_dir"] = True
+            st.session_state["last_manual_dir_error"] = error
+
+    if st.session_state.get("show_manual_dir"):
+        manual_default = st.session_state.get("download_base_dir", str(DESC_DIR))
+        manual_dir = st.text_input("Ruta de carpeta (manual)", value=manual_default)
+        if st.button("Guardar carpeta"):
+            try:
+                nueva_ruta = Path(manual_dir).expanduser()
+                nueva_ruta.mkdir(parents=True, exist_ok=True)
+                st.session_state["download_base_dir"] = str(nueva_ruta)
+                _persist_user_preferences()
+                st.success(f" Carpeta configurada: {nueva_ruta}")
+                st.session_state["show_manual_dir"] = False
+                st.session_state["last_manual_dir_error"] = None
+            except Exception as err:
+                st.error(f"No se pudo usar la carpeta indicada: {err}")
+        last_err = st.session_state.get("last_manual_dir_error")
+        if last_err:
+            if "tk" in str(last_err).lower() or "libtk" in str(last_err).lower():
+                st.info("El selector nativo no está disponible en este entorno. Usa la ruta manual.")
+            else:
+                st.warning(last_err)
     st.caption(
         f"Carpeta activa: `{st.session_state.get('download_base_dir', str(DESC_DIR))}`. Dentro se almacenarán tus descargas."
     )
