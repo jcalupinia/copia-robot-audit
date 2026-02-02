@@ -208,6 +208,23 @@ button[aria-label="Detener proceso"]{
     body[data-theme="light"] .stApp [data-baseweb="tab"][aria-selected="true"] {
         color: #0b1f2a !important;
     }
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"] {
+        color: #e9eef5 !important;
+    }
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main input,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
+        color: #0f172a !important;
+    }
     body[data-theme="light"] .stApp div[data-testid="stForm"],
     body[data-theme="light"] .stApp div[data-testid="stForm"] label,
     body[data-theme="light"] .stApp div[data-testid="stForm"] p,
