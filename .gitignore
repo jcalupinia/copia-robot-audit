@@ -9,6 +9,9 @@ cookies_*.json
 session_cache.json
 user_prefs.json
 *.zip
+dist/
+build/
+*.spec
 
 password_reset_requests.json
 historial_descargas.json
