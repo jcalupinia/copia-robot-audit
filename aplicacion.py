@@ -361,47 +361,25 @@ def _get_or_init_client_device_id() -> str | None:
     cached_id = st.session_state.get("_device_id")
     if cached_id:
         return str(cached_id)
-    device_id = st.query_params.get("device_id")
-    if isinstance(device_id, list):
-        device_id = device_id[0] if device_id else None
+    prefs = {}
+    if PREFERENCES_FILE.exists():
+        try:
+            prefs = json.loads(PREFERENCES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            prefs = {}
+    device_id = prefs.get("device_id")
     if device_id:
         st.session_state["_device_id"] = device_id
         return str(device_id)
-    if not st.session_state.get("_device_id_js_attempted"):
-        st.session_state["_device_id_js_attempted"] = True
-        components.html(
-            """
-            <script>
-            (function() {
-              const key = "sri_device_id";
-              let id = localStorage.getItem(key);
-              if (!id) {
-                if (window.crypto && window.crypto.randomUUID) {
-                  id = window.crypto.randomUUID();
-                } else {
-                  id = (Date.now().toString(36) + Math.random().toString(36).slice(2));
-                }
-                localStorage.setItem(key, id);
-              }
-              let target = window;
-              try { if (window.parent) target = window.parent; } catch (e) {}
-              try { if (window.top) target = window.top; } catch (e) {}
-              const params = new URLSearchParams(target.location.search);
-              if (params.get("device_id") !== id) {
-                params.set("device_id", id);
-                const newUrl = target.location.pathname + "?" + params.toString();
-                target.location.replace(newUrl);
-              }
-            })();
-            </script>
-            """,
-            height=0,
-        )
-        return None
-    # Fallback server-side generation if JS fails (may change between sessions)
-    new_id = uuid.uuid4().hex
-    st.session_state["_device_id"] = new_id
-    return str(new_id)
+    # Create a stable device id and persist it locally (avoids reload loop)
+    device_id = uuid.uuid4().hex
+    st.session_state["_device_id"] = device_id
+    prefs["device_id"] = device_id
+    try:
+        PREFERENCES_FILE.write_text(json.dumps(prefs, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return str(device_id)
 
 
 def _get_device_id_from_query() -> str | None:
@@ -419,14 +397,7 @@ def _session_cache_path(device_id: str | None) -> Path:
 
 
 def _require_client_device_id() -> str | None:
-    device_id = _get_or_init_client_device_id()
-    if device_id:
-        return device_id
-    st.markdown("<div style='height:120px'></div>", unsafe_allow_html=True)
-    st.info("Preparando tu sesión en este equipo...")
-    if st.button("Reintentar"):
-        st.rerun()
-    return None
+    return _get_or_init_client_device_id()
 
 
 def _persist_session_state():
