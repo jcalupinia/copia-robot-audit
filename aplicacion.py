@@ -181,7 +181,10 @@ button[aria-label="Detener proceso"]{
     .stApp [data-baseweb="tab"][aria-selected="true"] {
         color: #ffffff !important;
     }
-    .stApp [data-testid="stSidebar"] * {
+    body[data-theme="dark"] [data-testid="stSidebar"] * {
+        color: #e9eef5 !important;
+    }
+    body[data-theme="light"] [data-testid="stSidebar"] * {
         color: #1f2937 !important;
     }
     @keyframes liquidShift {
