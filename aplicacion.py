@@ -208,6 +208,14 @@ button[aria-label="Detener proceso"]{
     body[data-theme="light"] .stApp [data-baseweb="tab"][aria-selected="true"] {
         color: #0b1f2a !important;
     }
+    body[data-theme="light"] .stApp div[data-testid="stForm"],
+    body[data-theme="light"] .stApp div[data-testid="stForm"] label,
+    body[data-theme="light"] .stApp div[data-testid="stForm"] p,
+    body[data-theme="light"] .stApp div[data-testid="stForm"] span,
+    body[data-theme="light"] .stApp div[data-testid="stForm"] input,
+    body[data-theme="light"] .stApp div[data-testid="stForm"] textarea {
+        color: #ffffff !important;
+    }
     body[data-theme="dark"] [data-testid="stSidebar"] * {
         color: #e9eef5 !important;
     }
