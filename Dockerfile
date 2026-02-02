@@ -21,9 +21,12 @@ COPY requirements.txt .
 # --------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget gnupg unzip curl fonts-liberation \
-    libnss3 libxss1 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
-    libdrm2 libxkbcommon0 libxcomposite1 libxrandr2 libxdamage1 \
-    libpango-1.0-0 libcairo2 libasound2 xvfb \
+    libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libdrm2 libxkbcommon0 libxcomposite1 libxrandr2 libxdamage1 libxfixes3 \
+    libgbm1 libgtk-3-0 libpango-1.0-0 libcairo2 libasound2 \
+    libx11-6 libx11-xcb1 libxext6 libxrender1 libxi6 libxtst6 \
+    libwayland-client0 libwayland-cursor0 libwayland-egl1 libegl1 libgl1 \
+    libxshmfence1 libglib2.0-0 libxss1 xvfb \
     gcc python3-dev libxml2-dev libxslt1-dev && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -32,7 +35,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --------------------------------------------------------
 RUN pip install --upgrade pip==24.2 setuptools wheel && \
     pip install --no-cache-dir playwright==1.47.0 && \
-    python -m playwright install-deps chromium && \
     python -m playwright install chromium && \
     chmod -R 777 /root/.cache/ms-playwright
 
