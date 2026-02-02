@@ -23,6 +23,22 @@ def create_user_and_license(email: str, password: str, code: str | None = None):
     finally:
         db.close()
 
+def add_license(email: str, code: str | None = None):
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        user = crud.get_user_by_email(db, email=email)
+        if not user:
+            raise SystemExit("El usuario no existe.")
+        license_code = code or secrets.token_urlsafe(24)
+        license_obj = crud.create_license(db, user, license_code)
+        print("Licencia creada:")
+        print("Email:", user.email)
+        print("Licencia:", license_obj.code)
+    finally:
+        db.close()
+
+
 
 def main():
     parser = argparse.ArgumentParser(description="Gestión manual de licencias.")
@@ -33,9 +49,15 @@ def main():
     create_cmd.add_argument("--password", required=True)
     create_cmd.add_argument("--code", required=False, help="Código personalizado")
 
+    add_cmd = subparsers.add_parser("add-license", help="Agregar licencia a usuario existente")
+    add_cmd.add_argument("--email", required=True)
+    add_cmd.add_argument("--code", required=False, help="Código personalizado")
+
     args = parser.parse_args()
     if args.command == "create":
         create_user_and_license(args.email, args.password, args.code)
+    elif args.command == "add-license":
+        add_license(args.email, args.code)
 
 
 if __name__ == "__main__":
