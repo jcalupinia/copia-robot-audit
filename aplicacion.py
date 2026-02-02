@@ -347,7 +347,7 @@ SESSION_CACHE_DIR = Path(os.getenv("SESSION_CACHE_DIR", BASE_DIR / ".session_cac
 SESSION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 SESSION_CACHE = SESSION_CACHE_DIR / "session_cache.json"
 ENABLE_SESSION_CACHE = os.getenv("ENABLE_SESSION_CACHE", "1").strip().lower() not in {"0", "false", "no"}
-PREFERENCES_FILE = BASE_DIR / "user_prefs.json"
+PREFERENCES_FILE = Path(os.getenv("USER_PREFS_PATH", SESSION_CACHE_DIR / "user_prefs.json"))
 RESET_REQUESTS_FILE = BASE_DIR / "password_reset_requests.json"
 RESET_TOKEN_TTL = 3600
 _SESSION_CACHE_MEMORY: dict[str, dict] = {}
@@ -361,6 +361,11 @@ def _get_or_init_client_device_id() -> str | None:
     cached_id = st.session_state.get("_device_id")
     if cached_id:
         return str(cached_id)
+    if "device_id" in st.query_params:
+        try:
+            st.query_params.pop("device_id", None)
+        except Exception:
+            st.query_params.clear()
     prefs = {}
     if PREFERENCES_FILE.exists():
         try:
