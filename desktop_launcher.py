@@ -79,14 +79,15 @@ def main():
     except Exception as exc:
         _fatal("No se pudo iniciar Streamlit (faltan dependencias).", exc)
 
+    os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
+    os.environ["STREAMLIT_SERVER_ADDRESS"] = "127.0.0.1"
+    os.environ["STREAMLIT_SERVER_PORT"] = "8501"
+    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+
     sys.argv = [
         "streamlit",
         "run",
         str(BASE_DIR / "aplicacion.py"),
-        "--server.address=127.0.0.1",
-        "--server.port=8501",
-        "--server.headless=true",
-        "--browser.gatherUsageStats=false",
     ]
 
     try:
