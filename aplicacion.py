@@ -220,6 +220,9 @@ button[aria-label="Detener proceso"]{
     body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"] {
         color: #e9eef5 !important;
     }
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main * {
+        color: #f8fafc !important;
+    }
     body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main input,
     body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
     body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
@@ -253,7 +256,17 @@ button[aria-label="Detener proceso"]{
         color: #e9eef5 !important;
     }
     body[data-theme="light"] [data-testid="stSidebar"] * {
-        color: #1f2937 !important;
+        color: #f8fafc !important;
+    }
+    body[data-theme="light"] [data-testid="stSidebar"] {
+        background: #0f172a !important;
+    }
+    [data-testid="stSidebar"] {
+        text-align: center;
+    }
+    [data-testid="stSidebar"] img {
+        display: block;
+        margin: 0 auto;
     }
     @keyframes liquidShift {
         0% { background-position: 0% 50%; }

@@ -96,8 +96,15 @@ def main():
             _fatal("LICENSE_API_URL vacío en desktop_config.json.")
         os.environ["LICENSE_API_URL"] = license_url
 
-    if "SESSION_CACHE_DIR" not in os.environ and config.get("SESSION_CACHE_DIR"):
-        os.environ["SESSION_CACHE_DIR"] = config["SESSION_CACHE_DIR"]
+    session_cache_dir = (config.get("SESSION_CACHE_DIR") or "").strip()
+    if not session_cache_dir:
+        session_cache_dir = str(EXE_DIR / ".session_cache")
+    else:
+        session_cache_path = Path(session_cache_dir)
+        if not session_cache_path.is_absolute():
+            session_cache_dir = str((EXE_DIR / session_cache_path).resolve())
+    os.environ.setdefault("SESSION_CACHE_DIR", session_cache_dir)
+    os.environ.setdefault("USER_PREFS_PATH", str(Path(session_cache_dir) / "user_prefs.json"))
 
     host = "127.0.0.1"
     port = _pick_port()
