@@ -39,7 +39,7 @@ def _load_config():
     for path in candidates:
         if path.exists():
             try:
-                return json.loads(path.read_text(encoding="utf-8"))
+                return json.loads(path.read_text(encoding="utf-8-sig"))
             except Exception as exc:
                 _fatal(f"Config inválido en {path}.", exc)
     _fatal(
