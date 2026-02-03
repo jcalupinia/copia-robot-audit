@@ -6278,6 +6278,7 @@ def descargar_sri(
     anio: int,
     mes: int,
     dia: int,
+    mes_fin: Optional[int] = None,
     tipo: str,
     formatos: list,
     destino: Path,
@@ -6326,127 +6327,251 @@ def descargar_sri(
         if origen == "Recibidos":
             modulo_page = _abrir_modulo_consultas(page, origen)
             destino_objetivo = destino_recibidos
-            resultado = _flujo_recibidos(modulo_page, destino_objetivo, anio, mes, dia, tipo, formatos)
+            mes_fin_val = None
+            try:
+                if mes_fin not in (None, "", 0):
+                    mes_fin_val = int(mes_fin)
+            except Exception:
+                mes_fin_val = None
+            if mes_fin_val and mes_fin_val >= mes and dia in (0, None):
+                formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
+                reportes_xml = []
+                reportes_pdf = []
+                detalle_meses = []
+                total_xml = 0
+                total_pdf = 0
+                mes_inicio = int(mes)
+                mes_fin_val = int(mes_fin_val)
+                resultado_mes = None
+                for mes_actual in range(mes_inicio, mes_fin_val + 1):
+                    _check_cancel("recibidos_mes")
+                    resultado_mes = _flujo_recibidos(modulo_page, destino_objetivo, anio, mes_actual, 0, tipo, formatos)
+                    total_xml += resultado_mes.get("n_xml", 0)
+                    total_pdf += resultado_mes.get("n_pdf", 0)
+                    detalle_meses.append(
+                        {
+                            "mes": mes_actual,
+                            "estado": resultado_mes.get("estado"),
+                            "n_xml": resultado_mes.get("n_xml", 0),
+                            "n_pdf": resultado_mes.get("n_pdf", 0),
+                        }
+                    )
+                    if "XML" in formatos_norm and resultado_mes.get("n_xml", 0) > 0:
+                        try:
+                            xml_folder = Path(
+                                resultado_mes.get("xml_dir")
+                                or (Path(resultado_mes.get("carpeta_tipo") or destino_objetivo) / "XML")
+                            )
+                            tipo_slug = resultado_mes.get(
+                                "tipo_slug",
+                                _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
+                            )
+                            carpeta_tipo_mes = Path(resultado_mes.get("carpeta_tipo") or destino_objetivo)
+                            excel_path = carpeta_tipo_mes / f"reporte_{tipo_slug}_{anio}_{mes_actual:02d}.xlsx"
+                            construir_reporte(xml_folder, excel_path)
+                            if excel_path.exists():
+                                reportes_xml.append(str(excel_path))
+                        except Exception as err:
+                            print(f"[WARN] No se pudo construir reporte XML mensual (recibidos): {err}")
+                    reporte_pdf_mes = resultado_mes.get("reporte_pdf")
+                    if reporte_pdf_mes and Path(reporte_pdf_mes).exists():
+                        reportes_pdf.append(str(reporte_pdf_mes))
+                resultado = dict(resultado_mes or {})
+                resultado["n_xml"] = total_xml
+                resultado["n_pdf"] = total_pdf
+                resultado["estado"] = "sin_resultados" if total_xml == 0 and total_pdf == 0 else "ok"
+                resultado["mensaje"] = f"Procesados {mes_fin_val - mes_inicio + 1} meses"
+                resultado["detalles_meses"] = detalle_meses
+                resultado["rango_meses"] = True
+                resultado["mes_inicio"] = mes_inicio
+                resultado["mes_fin"] = mes_fin_val
+                fecha_inicio = f"01/{mes_inicio:02d}/{anio}"
+                fecha_fin = f"{calendar.monthrange(anio, mes_fin_val)[1]:02d}/{mes_fin_val:02d}/{anio}"
+                resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
+                resultado["reportes_xml"] = reportes_xml
+                resultado["reportes_pdf"] = reportes_pdf
+                resultado.pop("reporte_pdf", None)
+                resultado.pop("reporte_xml", None)
+                carpeta_rango = destino_objetivo / f"{anio:04d}"
+                resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_objetivo)
+            else:
+                resultado = _flujo_recibidos(modulo_page, destino_objetivo, anio, mes, dia, tipo, formatos)
         elif origen == "Emitidos":
             modulo_page = _abrir_modulo_consultas(page, origen)
             _resolver_captcha(modulo_page, f"{origen.lower()}_Modulo")
             destino_objetivo = destino_emitidos
-            dias_consultar = []
-            if dia in (0, None):
-                dias_en_mes = calendar.monthrange(anio, mes)[1]
-                dias_consultar = list(range(1, dias_en_mes + 1))
-            else:
-                dias_consultar = [int(dia)]
-            total_regs = total_xml = total_pdf = 0
-            detalle_dias = []
-            formatos_norm = [
-                (fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)
-            ]
-            descargar_pdf_mes = "PDF" in formatos_norm
-            reportes_dia = []
-            resultado = None
-            for dia_actual in dias_consultar:
-                _check_cancel("emitidos_dia")
-                fecha_actual = f"{dia_actual:02d}/{mes:02d}/{anio}"
-                resultado_dia = _flujo_emitidos(
-                    modulo_page,
-                    destino_objetivo,
-                    fecha_actual,
-                    tipo,
-                    estado_emitidos,
-                    establecimiento,
-                    punto_emision,
-                    formatos,
-                )
-                detalle_dias.append(
-                    {
-                        "dia": dia_actual,
-                        "estado": resultado_dia.get("estado"),
-                        "n_registros": resultado_dia.get("n_registros", 0),
-                    }
-                )
-                total_regs += resultado_dia.get("n_registros", 0)
-                total_xml += resultado_dia.get("n_xml", 0)
-                total_pdf += resultado_dia.get("n_pdf", 0)
-                resultado = resultado_dia
-                if descargar_pdf_mes:
-                    reporte_dia = resultado_dia.get("reporte_pdf")
-                    if reporte_dia and Path(reporte_dia).exists():
-                        reportes_dia.append(reporte_dia)
-            if len(dias_consultar) > 1:
-                resultado = dict(resultado or {})
-                resultado["n_registros"] = total_regs
-                resultado["n_xml"] = total_xml
-                resultado["n_pdf"] = total_pdf
-                resultado["estado"] = "sin_descargas" if total_regs == 0 else "ok"
-                resultado["mensaje"] = f"Procesados {len(dias_consultar)} días del mes"
-                resultado["detalles_dias"] = detalle_dias
-                if "XML" in formatos_norm and total_xml > 0:
-                    estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
-                    estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
-                    estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
-                    tipo_visible = TIPOS_MAP.get(tipo, tipo)
-                    tipo_slug = _slug_tipo(tipo_visible or tipo)
-                    anio_dir = f"{anio:04d}"
-                    mes_dir = _mes_a_texto(mes)
-                    carpeta_mes = destino_emitidos / estado_slug / anio_dir / mes_dir
-                    if carpeta_mes.exists():
-                        xml_report_path = carpeta_mes / f"emitidos_reporte_xml_{tipo_slug}_{anio_dir}{mes:02d}.xlsx"
-                        if xml_report_path.exists():
-                            try:
-                                xml_report_path.unlink()
-                            except PermissionError:
-                                sufijo_xml = 1
-                                while True:
-                                    candidato = carpeta_mes / f"emitidos_reporte_xml_{tipo_slug}_{anio_dir}{mes:02d}_{sufijo_xml}.xlsx"
-                                    if not candidato.exists():
-                                        xml_report_path = candidato
-                                        break
-                                    sufijo_xml += 1
-                        try:
-                            construir_reporte(carpeta_mes, xml_report_path)
-                            resultado["reporte_xml"] = str(xml_report_path)
-                        except Exception as err:
-                            print(f"[WARN] No se pudo construir el reporte XML mensual de emitidos: {err}")
-                if descargar_pdf_mes and reportes_dia:
-                    frames = []
-                    for ruta_excel in reportes_dia:
-                        try:
-                            df_dia = pd.read_excel(ruta_excel)
-                        except Exception as err:
-                            print(f"[WARN] No se pudo leer reporte diario '{ruta_excel}': {err}")
-                            continue
-                        if not df_dia.empty:
-                            frames.append(df_dia)
-                    if frames:
-                        df_mes = pd.concat(frames, ignore_index=True)
+            def _emitidos_por_mes(mes_actual: int, dia_actual: int):
+                dias_consultar = []
+                if dia_actual in (0, None):
+                    dias_en_mes = calendar.monthrange(anio, mes_actual)[1]
+                    dias_consultar = list(range(1, dias_en_mes + 1))
+                else:
+                    dias_consultar = [int(dia_actual)]
+                total_regs = total_xml = total_pdf = 0
+                detalle_dias = []
+                formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
+                descargar_pdf_mes = "PDF" in formatos_norm
+                reportes_dia = []
+                resultado_mes = None
+                for dia_iter in dias_consultar:
+                    _check_cancel("emitidos_dia")
+                    fecha_actual = f"{dia_iter:02d}/{mes_actual:02d}/{anio}"
+                    resultado_dia = _flujo_emitidos(
+                        modulo_page,
+                        destino_objetivo,
+                        fecha_actual,
+                        tipo,
+                        estado_emitidos,
+                        establecimiento,
+                        punto_emision,
+                        formatos,
+                    )
+                    detalle_dias.append(
+                        {
+                            "dia": dia_iter,
+                            "estado": resultado_dia.get("estado"),
+                            "n_registros": resultado_dia.get("n_registros", 0),
+                        }
+                    )
+                    total_regs += resultado_dia.get("n_registros", 0)
+                    total_xml += resultado_dia.get("n_xml", 0)
+                    total_pdf += resultado_dia.get("n_pdf", 0)
+                    resultado_mes = resultado_dia
+                    if descargar_pdf_mes:
+                        reporte_dia = resultado_dia.get("reporte_pdf")
+                        if reporte_dia and Path(reporte_dia).exists():
+                            reportes_dia.append(reporte_dia)
+                if len(dias_consultar) > 1:
+                    resultado_mes = dict(resultado_mes or {})
+                    resultado_mes["n_registros"] = total_regs
+                    resultado_mes["n_xml"] = total_xml
+                    resultado_mes["n_pdf"] = total_pdf
+                    resultado_mes["estado"] = "sin_descargas" if total_regs == 0 else "ok"
+                    resultado_mes["mensaje"] = f"Procesados {len(dias_consultar)} días del mes"
+                    resultado_mes["detalles_dias"] = detalle_dias
+                    if "XML" in formatos_norm and total_xml > 0:
                         estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
                         estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
                         estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
                         tipo_visible = TIPOS_MAP.get(tipo, tipo)
                         tipo_slug = _slug_tipo(tipo_visible or tipo)
                         anio_dir = f"{anio:04d}"
-                        mes_dir = _mes_a_texto(mes)
+                        mes_dir = _mes_a_texto(mes_actual)
                         carpeta_mes = destino_emitidos / estado_slug / anio_dir / mes_dir
-                        carpeta_mes.mkdir(parents=True, exist_ok=True)
-                        pdf_report_path = carpeta_mes / f"emitidos_reporte_pdf_{tipo_slug}_{anio_dir}{mes:02d}.xlsx"
-                        if pdf_report_path.exists():
+                        if carpeta_mes.exists():
+                            xml_report_path = carpeta_mes / f"emitidos_reporte_xml_{tipo_slug}_{anio_dir}{mes_actual:02d}.xlsx"
+                            if xml_report_path.exists():
+                                try:
+                                    xml_report_path.unlink()
+                                except PermissionError:
+                                    sufijo_xml = 1
+                                    while True:
+                                        candidato = carpeta_mes / f"emitidos_reporte_xml_{tipo_slug}_{anio_dir}{mes_actual:02d}_{sufijo_xml}.xlsx"
+                                        if not candidato.exists():
+                                            xml_report_path = candidato
+                                            break
+                                        sufijo_xml += 1
                             try:
-                                pdf_report_path.unlink()
-                            except PermissionError:
-                                sufijo_pdf = 1
-                                while True:
-                                    candidato = carpeta_mes / f"emitidos_reporte_pdf_{tipo_slug}_{anio_dir}{mes:02d}_{sufijo_pdf}.xlsx"
-                                    if not candidato.exists():
-                                        pdf_report_path = candidato
-                                        break
-                                    sufijo_pdf += 1
-                        filas_pdf = df_mes.to_dict(orient="records")
-                        if _es_tipo_retencion(tipo_visible or tipo):
-                            if _guardar_reporte_pdf_retencion_excel(filas_pdf, pdf_report_path):
-                                resultado["reporte_pdf"] = str(pdf_report_path)
-                        elif _guardar_reporte_pdf_excel(filas_pdf, pdf_report_path):
-                            resultado["reporte_pdf"] = str(pdf_report_path)
+                                construir_reporte(carpeta_mes, xml_report_path)
+                                resultado_mes["reporte_xml"] = str(xml_report_path)
+                            except Exception as err:
+                                print(f"[WARN] No se pudo construir el reporte XML mensual de emitidos: {err}")
+                    if descargar_pdf_mes and reportes_dia:
+                        frames = []
+                        for ruta_excel in reportes_dia:
+                            try:
+                                df_dia = pd.read_excel(ruta_excel)
+                            except Exception as err:
+                                print(f"[WARN] No se pudo leer reporte diario '{ruta_excel}': {err}")
+                                continue
+                            if not df_dia.empty:
+                                frames.append(df_dia)
+                        if frames:
+                            df_mes = pd.concat(frames, ignore_index=True)
+                            estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
+                            estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
+                            estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
+                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
+                            tipo_slug = _slug_tipo(tipo_visible or tipo)
+                            anio_dir = f"{anio:04d}"
+                            mes_dir = _mes_a_texto(mes_actual)
+                            carpeta_mes = destino_emitidos / estado_slug / anio_dir / mes_dir
+                            carpeta_mes.mkdir(parents=True, exist_ok=True)
+                            pdf_report_path = carpeta_mes / f"emitidos_reporte_pdf_{tipo_slug}_{anio_dir}{mes_actual:02d}.xlsx"
+                            if pdf_report_path.exists():
+                                try:
+                                    pdf_report_path.unlink()
+                                except PermissionError:
+                                    sufijo_pdf = 1
+                                    while True:
+                                        candidato = carpeta_mes / f"emitidos_reporte_pdf_{tipo_slug}_{anio_dir}{mes_actual:02d}_{sufijo_pdf}.xlsx"
+                                        if not candidato.exists():
+                                            pdf_report_path = candidato
+                                            break
+                                        sufijo_pdf += 1
+                            filas_pdf = df_mes.to_dict(orient="records")
+                            if _es_tipo_retencion(tipo_visible or tipo):
+                                if _guardar_reporte_pdf_retencion_excel(filas_pdf, pdf_report_path):
+                                    resultado_mes["reporte_pdf"] = str(pdf_report_path)
+                            elif _guardar_reporte_pdf_excel(filas_pdf, pdf_report_path):
+                                resultado_mes["reporte_pdf"] = str(pdf_report_path)
+                return resultado_mes
+
+            mes_fin_val = None
+            try:
+                if mes_fin not in (None, "", 0):
+                    mes_fin_val = int(mes_fin)
+            except Exception:
+                mes_fin_val = None
+            if mes_fin_val and mes_fin_val >= mes and dia in (0, None):
+                reportes_xml = []
+                reportes_pdf = []
+                detalle_meses = []
+                total_regs = total_xml = total_pdf = 0
+                mes_inicio = int(mes)
+                mes_fin_val = int(mes_fin_val)
+                resultado_mes = None
+                for mes_actual in range(mes_inicio, mes_fin_val + 1):
+                    _check_cancel("emitidos_mes")
+                    resultado_mes = _emitidos_por_mes(mes_actual, 0)
+                    detalle_meses.append(
+                        {
+                            "mes": mes_actual,
+                            "estado": resultado_mes.get("estado"),
+                            "n_registros": resultado_mes.get("n_registros", 0),
+                        }
+                    )
+                    total_regs += resultado_mes.get("n_registros", 0)
+                    total_xml += resultado_mes.get("n_xml", 0)
+                    total_pdf += resultado_mes.get("n_pdf", 0)
+                    if resultado_mes.get("reporte_xml"):
+                        reportes_xml.append(resultado_mes["reporte_xml"])
+                    if resultado_mes.get("reporte_pdf"):
+                        reportes_pdf.append(resultado_mes["reporte_pdf"])
+                resultado = dict(resultado_mes or {})
+                resultado["n_registros"] = total_regs
+                resultado["n_xml"] = total_xml
+                resultado["n_pdf"] = total_pdf
+                resultado["estado"] = "sin_descargas" if total_regs == 0 else "ok"
+                resultado["mensaje"] = f"Procesados {mes_fin_val - mes_inicio + 1} meses"
+                resultado["detalles_meses"] = detalle_meses
+                resultado["rango_meses"] = True
+                resultado["mes_inicio"] = mes_inicio
+                resultado["mes_fin"] = mes_fin_val
+                fecha_inicio = f"01/{mes_inicio:02d}/{anio}"
+                fecha_fin = f"{calendar.monthrange(anio, mes_fin_val)[1]:02d}/{mes_fin_val:02d}/{anio}"
+                resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
+                resultado["reportes_xml"] = reportes_xml
+                resultado["reportes_pdf"] = reportes_pdf
+                resultado.pop("reporte_pdf", None)
+                resultado.pop("reporte_xml", None)
+                estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
+                estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
+                estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
+                carpeta_rango = destino_emitidos / estado_slug / f"{anio:04d}"
+                resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_emitidos)
+            else:
+                resultado = _emitidos_por_mes(mes, dia)
         else:
             if page.url != destino_url:
                 try:

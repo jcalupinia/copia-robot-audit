@@ -393,6 +393,20 @@ button[aria-label="Detener proceso"]{
     body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
         color: #0f172a !important;
     }
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main label,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main .stMarkdown,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main .stCaption,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main small,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main p,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main span {
+        color: #ffffff !important;
+    }
+    body:not([data-theme="dark"]) .stApp [data-baseweb="tab"] {
+        color: #ffffff !important;
+    }
+    body:not([data-theme="dark"]) .stApp [data-baseweb="tab"][aria-selected="true"] {
+        color: #ffffff !important;
+    }
     body:not([data-theme="dark"]) section[data-testid="stSidebar"] {
         background: #0f172a !important;
     }
@@ -411,6 +425,11 @@ button[aria-label="Detener proceso"]{
     body:not([data-theme="dark"]) section[data-testid="stSidebar"] img {
         margin-left: auto !important;
         margin-right: auto !important;
+    }
+    .app-title,
+    .section-title,
+    .historial-title {
+        color: #ffffff !important;
     }
     </style>
     """,
@@ -946,7 +965,7 @@ with st.sidebar:
 # ==============================
 # INTERFAZ PRINCIPAL
 # ==============================
-st.title(" SRI Robot Audit  Descarga y Reporte Automático")
+st.markdown('<h1 class="app-title">SRI Robot Audit Descarga y Reporte Automático</h1>', unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs([" Descarga de Comprobantes", " Reportes e Historial"])
 
@@ -954,7 +973,7 @@ tab1, tab2 = st.tabs([" Descarga de Comprobantes", " Reportes e Historial"])
 # TAB 1  DESCARGA Y PROCESAMIENTO AUTOMTICO
 # =====================================================
 with tab1:
-    st.markdown("#### Ingreso de Credenciales y Filtros")
+    st.markdown('<h3 class="section-title">Ingreso de Credenciales y Filtros</h3>', unsafe_allow_html=True)
 
     col_base1, col_base2 = st.columns([2, 2])
     with col_base1:
@@ -992,46 +1011,93 @@ with tab1:
     anio_emitidos = datetime.now().year
     mes_emitidos = datetime.now().month
     dia_emitidos = datetime.now().day
+    mes_fin_emitidos = datetime.now().month
     anio_recibidos = datetime.now().year
     mes_recibidos = datetime.now().month
     dia_recibidos = 0
+    mes_fin_recibidos = datetime.now().month
+    modo_fechas_recibidos = "Mes y día"
+    modo_fechas_emitidos = "Mes y día"
 
     if origen == "Recibidos":
-        col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
-        with col_r1:
-            anio_recibidos = st.number_input(
-                "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
-            )
-        with col_r2:
-            mes_recibidos = st.number_input(
-                "Mes (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
-            )
-        with col_r3:
-            dia_recibidos = st.number_input(
-                "Día (0 = Todos)", min_value=0, max_value=31, value=0, step=1,
-                help="Elige 0 para descargar todo el mes o un da específico (1-31).",
-            )
+        modo_fechas_recibidos = st.radio(
+            "Modo de fecha",
+            ["Mes y día", "Rango de meses"],
+            horizontal=True,
+            key="modo_fechas_recibidos",
+        )
+        if modo_fechas_recibidos == "Rango de meses":
+            col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
+            with col_r1:
+                anio_recibidos = st.number_input(
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                )
+            with col_r2:
+                mes_recibidos = st.number_input(
+                    "Mes inicio (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
+                )
+            with col_r3:
+                mes_fin_recibidos = st.number_input(
+                    "Mes fin (1-12)", min_value=1, max_value=12, value=mes_recibidos, step=1
+                )
+            dia_recibidos = 0
+        else:
+            col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
+            with col_r1:
+                anio_recibidos = st.number_input(
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                )
+            with col_r2:
+                mes_recibidos = st.number_input(
+                    "Mes (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
+                )
+            with col_r3:
+                dia_recibidos = st.number_input(
+                    "Día (0 = Todos)", min_value=0, max_value=31, value=0, step=1,
+                    help="Elige 0 para descargar todo el mes o un da específico (1-31).",
+                )
         formatos = st.multiselect("Formatos a descargar", ["XML", "PDF"], default=["XML", "PDF"])
     else:
-        col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
-        col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
-        with col_f1:
-            anio_emitidos = st.number_input(
-                "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
-            )
-        with col_f2:
-            mes_emitidos = st.number_input(
-                "Mes (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
-            )
-        with col_f3:
-            dia_emitidos = st.number_input(
-                "Día (0 = Todos)",
-                min_value=0,
-                max_value=31,
-                value=datetime.now().day,
-                step=1,
-                help="Ingresa 0 para descargar todos los días del mes.",
-            )
+        modo_fechas_emitidos = st.radio(
+            "Modo de fecha",
+            ["Mes y día", "Rango de meses"],
+            horizontal=True,
+            key="modo_fechas_emitidos",
+        )
+        if modo_fechas_emitidos == "Rango de meses":
+            col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
+            with col_f1:
+                anio_emitidos = st.number_input(
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                )
+            with col_f2:
+                mes_emitidos = st.number_input(
+                    "Mes inicio (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
+                )
+            with col_f3:
+                mes_fin_emitidos = st.number_input(
+                    "Mes fin (1-12)", min_value=1, max_value=12, value=mes_emitidos, step=1
+                )
+            dia_emitidos = 0
+        else:
+            col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
+            with col_f1:
+                anio_emitidos = st.number_input(
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                )
+            with col_f2:
+                mes_emitidos = st.number_input(
+                    "Mes (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
+                )
+            with col_f3:
+                dia_emitidos = st.number_input(
+                    "Día (0 = Todos)",
+                    min_value=0,
+                    max_value=31,
+                    value=datetime.now().day,
+                    step=1,
+                    help="Ingresa 0 para descargar todos los días del mes.",
+                )
         estado_emitidos = st.selectbox(
             "Estado de autorización", ["Autorizados", "No autorizados", "Por procesar"], index=0
         )
@@ -1071,7 +1137,7 @@ with tab1:
         if descargar_xml_emitidos:
             formatos.append("XML")
     st.markdown("---")
-    st.markdown("#### Carpeta base donde se guardarán las descargas")
+    st.markdown('<h3 class="section-title">Carpeta base donde se guardarán las descargas</h3>', unsafe_allow_html=True)
     current_dir = st.session_state.get("download_base_dir", str(DESC_DIR))
     st.text_input(
         "Ruta seleccionada",
@@ -1132,6 +1198,7 @@ with tab1:
         if not ruc or not clave:
             st.warning(" Ingresa RUC y clave antes de continuar.")
         else:
+            mes_fin_val = None
             if origen == "Recibidos":
                 formatos_final = formatos
                 if not formatos_final:
@@ -1140,6 +1207,12 @@ with tab1:
                 anio_val = int(anio_recibidos)
                 mes_val = int(mes_recibidos)
                 dia_val = int(dia_recibidos)
+                if modo_fechas_recibidos == "Rango de meses":
+                    mes_fin_val = int(mes_fin_recibidos)
+                    if mes_fin_val < mes_val:
+                        st.error("El mes fin debe ser mayor o igual al mes inicio.")
+                        st.stop()
+                    dia_val = 0
                 fecha_emitidos_val = None
                 estado_emitidos_val = None
                 establecimiento_val = None
@@ -1148,6 +1221,12 @@ with tab1:
                 anio_val = int(anio_emitidos)
                 mes_val = int(mes_emitidos)
                 dia_val = int(dia_emitidos)
+                if modo_fechas_emitidos == "Rango de meses":
+                    mes_fin_val = int(mes_fin_emitidos)
+                    if mes_fin_val < mes_val:
+                        st.error("El mes fin debe ser mayor o igual al mes inicio.")
+                        st.stop()
+                    dia_val = 0
                 dias_en_mes = calendar.monthrange(anio_val, mes_val)[1]
                 if dia_val > dias_en_mes:
                     st.error(f"El día debe estar entre 1 y {dias_en_mes}, o 0 para todos.")
@@ -1187,6 +1266,7 @@ with tab1:
                 "clave": clave,
                 "anio": anio_val,
                 "mes": mes_val,
+                "mes_fin": mes_fin_val,
                 "dia": int(dia_val),
                 "tipo": tipo,
                 "formatos": formatos_final,
@@ -1332,36 +1412,39 @@ with tab1:
                             file_name=Path(txt_path).name,
                             use_container_width=True,
                         )
-                if n_xml > 0:
-                    xml_folder = Path(resultado.get("xml_dir") or (carpeta_tipo / "XML"))
-                    tipo_param = params.get("tipo") or ""
-                    tipo_slug = resultado.get("tipo_slug", tipo_param.lower().replace(" ", "_"))
-                    anio_param = params.get("anio") or 0
-                    mes_param = params.get("mes") or 0
-                    try:
-                        mes_int = int(mes_param)
-                    except Exception:
-                        mes_int = 0
-                    excel_path = carpeta_tipo / f"reporte_{tipo_slug}_{anio_param}_{mes_int:02d}.xlsx"
-                    construir_reporte(xml_folder, excel_path)
-                    if excel_path.exists():
-                        with open(excel_path, "rb") as f:
+                if resultado.get("rango_meses"):
+                    st.info("Se generaron reportes por cada mes en las carpetas correspondientes.")
+                else:
+                    if n_xml > 0:
+                        xml_folder = Path(resultado.get("xml_dir") or (carpeta_tipo / "XML"))
+                        tipo_param = params.get("tipo") or ""
+                        tipo_slug = resultado.get("tipo_slug", tipo_param.lower().replace(" ", "_"))
+                        anio_param = params.get("anio") or 0
+                        mes_param = params.get("mes") or 0
+                        try:
+                            mes_int = int(mes_param)
+                        except Exception:
+                            mes_int = 0
+                        excel_path = carpeta_tipo / f"reporte_{tipo_slug}_{anio_param}_{mes_int:02d}.xlsx"
+                        construir_reporte(xml_folder, excel_path)
+                        if excel_path.exists():
+                            with open(excel_path, "rb") as f:
+                                st.download_button(
+                                    " Descargar reporte Excel (Recibidos)",
+                                    f,
+                                    file_name=excel_path.name,
+                                    use_container_width=True,
+                                )
+
+                    reporte_pdf_path = resultado.get("reporte_pdf")
+                    if reporte_pdf_path and Path(reporte_pdf_path).exists():
+                        with open(reporte_pdf_path, "rb") as f:
                             st.download_button(
-                                " Descargar reporte Excel (Recibidos)",
+                                " Descargar reporte PDF (Recibidos)",
                                 f,
-                                file_name=excel_path.name,
+                                file_name=Path(reporte_pdf_path).name,
                                 use_container_width=True,
                             )
-
-                reporte_pdf_path = resultado.get("reporte_pdf")
-                if reporte_pdf_path and Path(reporte_pdf_path).exists():
-                    with open(reporte_pdf_path, "rb") as f:
-                        st.download_button(
-                            " Descargar reporte PDF (Recibidos)",
-                            f,
-                            file_name=Path(reporte_pdf_path).name,
-                            use_container_width=True,
-                        )
 
                 zip_target = carpeta_tipo
                 zip_path = zip_target.with_suffix(".zip")
@@ -1385,7 +1468,7 @@ with tab1:
             pass
 
 with tab2:
-    st.markdown("####  Historial de ejecuciones recientes")
+    st.markdown('<h3 class="historial-title">Historial de ejecuciones recientes</h3>', unsafe_allow_html=True)
     historial = obtener_historial(DEVICE_FINGERPRINT)
     historial_raw = historial.copy()
 
