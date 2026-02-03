@@ -255,18 +255,53 @@ button[aria-label="Detener proceso"]{
     body[data-theme="dark"] [data-testid="stSidebar"] [data-baseweb="select"] div {
         color: #e9eef5 !important;
     }
-    body[data-theme="light"] [data-testid="stSidebar"] * {
-        color: #f8fafc !important;
-    }
-    body[data-theme="light"] [data-testid="stSidebar"] {
+    body[data-theme="light"] section[data-testid="stSidebar"],
+    html[data-theme="light"] section[data-testid="stSidebar"] {
         background: #0f172a !important;
     }
-    [data-testid="stSidebar"] {
+    body[data-theme="light"] section[data-testid="stSidebar"] *,
+    html[data-theme="light"] section[data-testid="stSidebar"] * {
+        color: #f8fafc !important;
+    }
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+    section[data-testid="stSidebar"] p {
         text-align: center;
     }
-    [data-testid="stSidebar"] img {
-        display: block;
-        margin: 0 auto;
+    section[data-testid="stSidebar"] [data-testid="stImage"] {
+        display: flex;
+        justify-content: center;
+    }
+    section[data-testid="stSidebar"] [data-testid="stImage"] img,
+    section[data-testid="stSidebar"] img {
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"] {
+        color: #f8fafc !important;
     }
     @keyframes liquidShift {
         0% { background-position: 0% 50%; }
@@ -339,6 +374,43 @@ button[aria-label="Detener proceso"]{
         color:rgba(255,255,255,0.6);
         border:1px solid rgba(16,25,54,0.4);
         box-shadow:none;
+    }
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h1,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h2,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h3,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h4,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h5,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h6,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main p,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main span,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main label,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"] {
+        color: #f8fafc !important;
+    }
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main input,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main textarea,
+    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
+        color: #0f172a !important;
+    }
+    body:not([data-theme="dark"]) section[data-testid="stSidebar"] {
+        background: #0f172a !important;
+    }
+    body:not([data-theme="dark"]) section[data-testid="stSidebar"] * {
+        color: #f8fafc !important;
+    }
+    body:not([data-theme="dark"]) section[data-testid="stSidebar"] .stMarkdown,
+    body:not([data-theme="dark"]) section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+    body:not([data-theme="dark"]) section[data-testid="stSidebar"] p {
+        text-align: center;
+    }
+    body:not([data-theme="dark"]) section[data-testid="stSidebar"] [data-testid="stImage"] {
+        display: flex;
+        justify-content: center;
+    }
+    body:not([data-theme="dark"]) section[data-testid="stSidebar"] img {
+        margin-left: auto !important;
+        margin-right: auto !important;
     }
     </style>
     """,
