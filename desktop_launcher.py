@@ -1,13 +1,30 @@
 ﻿import json
 import os
-import subprocess
+import socket
 import sys
 import time
+import threading
 import webbrowser
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "desktop_config.json"
+LOG_PATH = BASE_DIR / "desktop_launcher.log"
+
+
+def _fatal(message: str, exc: Exception | None = None) -> "SystemExit":
+    try:
+        LOG_PATH.write_text(f"{message}\n{exc or ''}\n", encoding="utf-8")
+    except Exception:
+        pass
+    print(message)
+    if exc:
+        print(exc)
+    try:
+        input("Presiona Enter para salir...")
+    except Exception:
+        pass
+    raise SystemExit(1)
 
 
 def _load_config():
@@ -19,13 +36,24 @@ def _load_config():
     return {}
 
 
-def _try_open_browser(url: str, attempts: int = 20, delay: float = 0.3) -> None:
-    for _ in range(attempts):
-        try:
-            webbrowser.open(url, new=0)
+def _port_open(host: str, port: int, timeout: float = 0.2) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _open_browser_when_ready(url: str, timeout: float = 30.0) -> None:
+    start = time.time()
+    while time.time() - start < timeout:
+        if _port_open("127.0.0.1", 8501):
+            try:
+                webbrowser.open(url, new=0)
+            except Exception:
+                pass
             return
-        except Exception:
-            time.sleep(delay)
+        time.sleep(0.3)
 
 
 def main():
@@ -40,9 +68,18 @@ def main():
     if "SESSION_CACHE_DIR" not in os.environ and config.get("SESSION_CACHE_DIR"):
         os.environ["SESSION_CACHE_DIR"] = config["SESSION_CACHE_DIR"]
 
-    cmd = [
-        sys.executable,
-        "-m",
+    threading.Thread(
+        target=_open_browser_when_ready,
+        args=("http://127.0.0.1:8501",),
+        daemon=True,
+    ).start()
+
+    try:
+        import streamlit.web.cli as stcli
+    except Exception as exc:
+        _fatal("No se pudo iniciar Streamlit (faltan dependencias).", exc)
+
+    sys.argv = [
         "streamlit",
         "run",
         str(BASE_DIR / "aplicacion.py"),
@@ -52,12 +89,12 @@ def main():
         "--browser.gatherUsageStats=false",
     ]
 
-    proc = subprocess.Popen(cmd)
-
-    # Wait for Streamlit to be ready before opening browser
-    _try_open_browser("http://127.0.0.1:8501")
-
-    raise SystemExit(proc.wait())
+    try:
+        stcli.main()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _fatal("Error iniciando Streamlit.", exc)
 
 
 if __name__ == "__main__":
