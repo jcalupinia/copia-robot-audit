@@ -75,6 +75,30 @@ def registrar_descarga(ruc, origen, anio, mes, dia, tipo, resultado, device_id=N
                 registro["reporte_pdf"] = str(Path(reporte_pdf_path).resolve())
             except Exception:
                 registro["reporte_pdf"] = str(reporte_pdf_path)
+        reporte_xml_path = resultado.get("reporte_xml")
+        if reporte_xml_path:
+            try:
+                registro["reporte_xml"] = str(Path(reporte_xml_path).resolve())
+            except Exception:
+                registro["reporte_xml"] = str(reporte_xml_path)
+        reporte_pdf_anual = resultado.get("reporte_pdf_anual")
+        if reporte_pdf_anual:
+            try:
+                registro["reporte_pdf_anual"] = str(Path(reporte_pdf_anual).resolve())
+            except Exception:
+                registro["reporte_pdf_anual"] = str(reporte_pdf_anual)
+        reporte_xml_anual = resultado.get("reporte_xml_anual")
+        if reporte_xml_anual:
+            try:
+                registro["reporte_xml_anual"] = str(Path(reporte_xml_anual).resolve())
+            except Exception:
+                registro["reporte_xml_anual"] = str(reporte_xml_anual)
+        reportes_xml = resultado.get("reportes_xml")
+        if reportes_xml:
+            registro["reportes_xml"] = reportes_xml
+        reportes_pdf = resultado.get("reportes_pdf")
+        if reportes_pdf:
+            registro["reportes_pdf"] = reportes_pdf
 
 
     # Leer historial existente o iniciar lista vacía

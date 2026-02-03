@@ -2532,6 +2532,44 @@ def _guardar_reporte_pdf_excel(rows: list[dict], excel_path: Path) -> bool:
         return False
     return True
 
+
+def _consolidar_reportes_excel(reportes: list[str], destino: Path) -> Path | None:
+    rutas = [Path(p) for p in reportes if p and Path(p).exists()]
+    if not rutas:
+        return None
+    dataframes: list[pd.DataFrame] = []
+    columnas: list[str] | None = None
+    for ruta in rutas:
+        try:
+            df = pd.read_excel(ruta)
+        except Exception as err:
+            print(f"[WARN] No se pudo leer reporte para consolidar: {ruta} ({err})")
+            continue
+        if df is None or df.empty:
+            continue
+        if columnas is None:
+            columnas = list(df.columns)
+        else:
+            for col in df.columns:
+                if col not in columnas:
+                    columnas.append(col)
+        dataframes.append(df)
+    if not dataframes or not columnas:
+        return None
+    for idx, df in enumerate(dataframes):
+        for col in columnas:
+            if col not in df.columns:
+                df[col] = ""
+        dataframes[idx] = df[columnas]
+    try:
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        combinado = pd.concat(dataframes, ignore_index=True)
+        combinado.to_excel(destino, index=False)
+        return destino
+    except Exception as err:
+        print(f"[WARN] No se pudo escribir reporte consolidado: {destino} ({err})")
+        return None
+
 EMITIDOS_FECHA_SELECTORS = [
     "input[id$='fecha_input']",
     "input[name$='fecha_input']",
@@ -6390,6 +6428,22 @@ def descargar_sri(
                 resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
                 resultado["reportes_xml"] = reportes_xml
                 resultado["reportes_pdf"] = reportes_pdf
+                if mes_inicio == 1 and mes_fin_val == 12:
+                    tipo_slug = resultado.get(
+                        "tipo_slug",
+                        _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
+                    )
+                    if reportes_xml:
+                        destino_anual_xml = destino_objetivo / f"{anio:04d}" / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                        anual_xml = _consolidar_reportes_excel(reportes_xml, destino_anual_xml)
+                        if anual_xml:
+                            resultado["reporte_xml_anual"] = str(anual_xml)
+                    if reportes_pdf:
+                        destino_anual_pdf = destino_objetivo / f"{anio:04d}" / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}.xlsx"
+                        anual_pdf = _consolidar_reportes_excel(reportes_pdf, destino_anual_pdf)
+                        if anual_pdf:
+                            resultado["reporte_pdf_anual"] = str(anual_pdf)
+                    resultado["anual"] = True
                 resultado.pop("reporte_pdf", None)
                 resultado.pop("reporte_xml", None)
                 carpeta_rango = destino_objetivo / f"{anio:04d}"
@@ -6563,11 +6617,27 @@ def descargar_sri(
                 resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
                 resultado["reportes_xml"] = reportes_xml
                 resultado["reportes_pdf"] = reportes_pdf
-                resultado.pop("reporte_pdf", None)
-                resultado.pop("reporte_xml", None)
                 estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
                 estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
                 estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
+                if mes_inicio == 1 and mes_fin_val == 12:
+                    tipo_slug = resultado.get(
+                        "tipo_slug",
+                        _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
+                    )
+                    if reportes_xml:
+                        destino_anual_xml = destino_emitidos / estado_slug / f"{anio:04d}" / f"emitidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                        anual_xml = _consolidar_reportes_excel(reportes_xml, destino_anual_xml)
+                        if anual_xml:
+                            resultado["reporte_xml_anual"] = str(anual_xml)
+                    if reportes_pdf:
+                        destino_anual_pdf = destino_emitidos / estado_slug / f"{anio:04d}" / f"emitidos_reporte_pdf_{tipo_slug}_{anio:04d}.xlsx"
+                        anual_pdf = _consolidar_reportes_excel(reportes_pdf, destino_anual_pdf)
+                        if anual_pdf:
+                            resultado["reporte_pdf_anual"] = str(anual_pdf)
+                    resultado["anual"] = True
+                resultado.pop("reporte_pdf", None)
+                resultado.pop("reporte_xml", None)
                 carpeta_rango = destino_emitidos / estado_slug / f"{anio:04d}"
                 resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_emitidos)
             else:

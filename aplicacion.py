@@ -10,6 +10,8 @@ import platform
 import time
 import uuid
 import json
+import re
+import unicodedata
 import calendar
 import secrets
 import smtplib
@@ -23,7 +25,15 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from robot.downloader import descargar_sri, set_user_notifier, MANUAL_CONSULTA_RECIBIDOS
+from robot.downloader import (
+    descargar_sri,
+    set_user_notifier,
+    MANUAL_CONSULTA_RECIBIDOS,
+    _consolidar_reportes_excel,
+    _slug_tipo,
+    TIPOS_MAP,
+    ESTADOS_EMITIDOS_MAP,
+)
 from robot.parser import construir_reporte
 from robot.historial import registrar_descarga, obtener_historial   #  FIX import correcto
 from licensing_client import LicensingClient
@@ -59,6 +69,25 @@ def _logo_html(width):
     if not data_uri:
         return ""
     return f"<div style='text-align:center'><img src='{data_uri}' width='{width}'/></div>"
+
+
+def _slug_estado_emitidos(estado: str) -> str:
+    estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado, estado) or "Sin Estado").strip() or "Sin Estado"
+    estado_normalizado = (
+        unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
+    )
+    return re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
+
+
+def _buscar_reportes_mensuales(base_dir: Path, prefix: str) -> list[Path]:
+    if not base_dir.exists():
+        return []
+    regex = re.compile(re.escape(prefix) + r"(\\d{2})(?:_\\d+)?\\.xlsx$", re.IGNORECASE)
+    encontrados: list[Path] = []
+    for ruta in base_dir.rglob(f"{prefix}*.xlsx"):
+        if regex.search(ruta.name):
+            encontrados.append(ruta)
+    return sorted(encontrados, key=lambda p: p.name)
 def _init_download_state():
     if "download_status" not in st.session_state:
         st.session_state.download_status = "idle"
@@ -1022,7 +1051,7 @@ with tab1:
     if origen == "Recibidos":
         modo_fechas_recibidos = st.radio(
             "Modo de fecha",
-            ["Mes y día", "Rango de meses"],
+            ["Mes y día", "Rango de meses", "Año completo"],
             horizontal=True,
             key="modo_fechas_recibidos",
         )
@@ -1040,6 +1069,15 @@ with tab1:
                 mes_fin_recibidos = st.number_input(
                     "Mes fin (1-12)", min_value=1, max_value=12, value=mes_recibidos, step=1
                 )
+            dia_recibidos = 0
+        elif modo_fechas_recibidos == "Año completo":
+            col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
+            with col_r1:
+                anio_recibidos = st.number_input(
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                )
+            mes_recibidos = 1
+            mes_fin_recibidos = 12
             dia_recibidos = 0
         else:
             col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
@@ -1060,7 +1098,7 @@ with tab1:
     else:
         modo_fechas_emitidos = st.radio(
             "Modo de fecha",
-            ["Mes y día", "Rango de meses"],
+            ["Mes y día", "Rango de meses", "Año completo"],
             horizontal=True,
             key="modo_fechas_emitidos",
         )
@@ -1078,6 +1116,15 @@ with tab1:
                 mes_fin_emitidos = st.number_input(
                     "Mes fin (1-12)", min_value=1, max_value=12, value=mes_emitidos, step=1
                 )
+            dia_emitidos = 0
+        elif modo_fechas_emitidos == "Año completo":
+            col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
+            with col_f1:
+                anio_emitidos = st.number_input(
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                )
+            mes_emitidos = 1
+            mes_fin_emitidos = 12
             dia_emitidos = 0
         else:
             col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
@@ -1184,6 +1231,109 @@ with tab1:
         f"Carpeta activa: `{st.session_state.get('download_base_dir', str(DESC_DIR))}`. Dentro se almacenarán tus descargas."
     )
 
+    with st.expander("Consolidar desde carpeta", expanded=False):
+        st.write(
+            "Genera un reporte anual usando los reportes mensuales ya descargados en tu carpeta."
+        )
+        col_c1, col_c2, col_c3 = st.columns([1.2, 1, 1])
+        with col_c1:
+            origen_consolidar = st.selectbox(
+                "Origen a consolidar",
+                ["Recibidos", "Emitidos"],
+                index=0 if origen == "Recibidos" else 1,
+                key="consolidar_origen",
+            )
+        with col_c2:
+            tipos_disponibles = list(TIPOS_MAP.keys()) or [tipo]
+            tipo_consolidar = st.selectbox(
+                "Tipo de comprobante",
+                tipos_disponibles,
+                index=tipos_disponibles.index(tipo) if tipo in tipos_disponibles else 0,
+                key="consolidar_tipo",
+            )
+        with col_c3:
+            anio_consolidar = st.number_input(
+                "Año a consolidar",
+                min_value=2015,
+                max_value=datetime.now().year,
+                value=int(datetime.now().year),
+                step=1,
+                key="consolidar_anio",
+            )
+
+        estado_consolidar = None
+        if origen_consolidar == "Emitidos":
+            estado_default = (
+                st.session_state.get("estado_autorizacion")
+                or (estado_autorizacion if "estado_autorizacion" in locals() else None)
+                or "Autorizados"
+            )
+            estado_consolidar = st.selectbox(
+                "Estado autorización",
+                ["Autorizados", "No Autorizados"],
+                index=0 if estado_default == "Autorizados" else 1,
+                key="consolidar_estado",
+            )
+
+        col_f1, col_f2 = st.columns([1, 1])
+        with col_f1:
+            incluir_xml = st.checkbox("Consolidar XML", value=True, key="consolidar_xml")
+        with col_f2:
+            incluir_pdf = st.checkbox("Consolidar PDF", value=True, key="consolidar_pdf")
+
+        if st.button("Consolidar desde carpeta", use_container_width=True):
+            if not ruc:
+                st.warning("Ingresa el RUC para ubicar la carpeta del usuario.")
+                st.stop()
+            base_dir = Path(st.session_state.get("download_base_dir", str(DESC_DIR)))
+            tipo_visible = TIPOS_MAP.get(tipo_consolidar, tipo_consolidar)
+            tipo_slug = _slug_tipo(tipo_visible or tipo_consolidar)
+            anio_int = int(anio_consolidar)
+
+            if origen_consolidar == "Recibidos":
+                base_search = base_dir / ruc / "Recibidos"
+                destino_anual_dir = base_search / f"{anio_int:04d}"
+                prefix_base = f"recibidos_reporte"
+            else:
+                estado_slug = _slug_estado_emitidos(estado_consolidar or "Sin Estado")
+                base_search = base_dir / ruc / "Emitidos" / estado_slug
+                destino_anual_dir = base_search / f"{anio_int:04d}"
+                prefix_base = f"emitidos_reporte"
+
+            if not base_search.exists():
+                st.warning(f"No se encontró la carpeta base: {base_search}")
+                st.stop()
+
+            if incluir_xml:
+                prefix_xml = f"{prefix_base}_xml_{tipo_slug}_{anio_int:04d}"
+                reportes_xml = _buscar_reportes_mensuales(base_search, prefix_xml)
+                if reportes_xml:
+                    destino_xml = destino_anual_dir / f"{prefix_base}_xml_{tipo_slug}_{anio_int:04d}.xlsx"
+                    anual_xml = _consolidar_reportes_excel(
+                        [str(p) for p in reportes_xml], destino_xml
+                    )
+                    if anual_xml:
+                        st.success(f"Reporte anual XML creado: {anual_xml}")
+                    else:
+                        st.error("No se pudo generar el reporte anual XML.")
+                else:
+                    st.info("No se encontraron reportes XML mensuales para consolidar.")
+
+            if incluir_pdf:
+                prefix_pdf = f"{prefix_base}_pdf_{tipo_slug}_{anio_int:04d}"
+                reportes_pdf = _buscar_reportes_mensuales(base_search, prefix_pdf)
+                if reportes_pdf:
+                    destino_pdf = destino_anual_dir / f"{prefix_base}_pdf_{tipo_slug}_{anio_int:04d}.xlsx"
+                    anual_pdf = _consolidar_reportes_excel(
+                        [str(p) for p in reportes_pdf], destino_pdf
+                    )
+                    if anual_pdf:
+                        st.success(f"Reporte anual PDF creado: {anual_pdf}")
+                    else:
+                        st.error("No se pudo generar el reporte anual PDF.")
+                else:
+                    st.info("No se encontraron reportes PDF mensuales para consolidar.")
+
     start_clicked = st.button(" Iniciar proceso", use_container_width=True, type="primary", key="start_process")
     stop_clicked = st.button(" Detener proceso", use_container_width=True, key="stop_process")
 
@@ -1213,6 +1363,10 @@ with tab1:
                         st.error("El mes fin debe ser mayor o igual al mes inicio.")
                         st.stop()
                     dia_val = 0
+                elif modo_fechas_recibidos == "Año completo":
+                    mes_val = 1
+                    mes_fin_val = 12
+                    dia_val = 0
                 fecha_emitidos_val = None
                 estado_emitidos_val = None
                 establecimiento_val = None
@@ -1227,10 +1381,15 @@ with tab1:
                         st.error("El mes fin debe ser mayor o igual al mes inicio.")
                         st.stop()
                     dia_val = 0
-                dias_en_mes = calendar.monthrange(anio_val, mes_val)[1]
-                if dia_val > dias_en_mes:
-                    st.error(f"El día debe estar entre 1 y {dias_en_mes}, o 0 para todos.")
-                    st.stop()
+                elif modo_fechas_emitidos == "Año completo":
+                    mes_val = 1
+                    mes_fin_val = 12
+                    dia_val = 0
+                if modo_fechas_emitidos == "Mes y día":
+                    dias_en_mes = calendar.monthrange(anio_val, mes_val)[1]
+                    if dia_val > dias_en_mes:
+                        st.error(f"El día debe estar entre 1 y {dias_en_mes}, o 0 para todos.")
+                        st.stop()
                 fecha_emitidos_val = None if dia_val == 0 else f"{dia_val:02d}/{mes_val:02d}/{anio_val}"
                 estado_emitidos_val = estado_emitidos
                 est_clean = (establecimiento_input or "").strip()
@@ -1395,6 +1554,26 @@ with tab1:
                             file_name=Path(reporte_xml_path).name,
                             use_container_width=True,
                         )
+                if resultado.get("rango_meses"):
+                    st.info("Se generaron reportes por cada mes en las carpetas correspondientes.")
+                    reporte_pdf_anual = resultado.get("reporte_pdf_anual")
+                    if reporte_pdf_anual and Path(reporte_pdf_anual).exists():
+                        with open(reporte_pdf_anual, "rb") as f:
+                            st.download_button(
+                                " Descargar reporte PDF anual (Emitidos)",
+                                f,
+                                file_name=Path(reporte_pdf_anual).name,
+                                use_container_width=True,
+                            )
+                    reporte_xml_anual = resultado.get("reporte_xml_anual")
+                    if reporte_xml_anual and Path(reporte_xml_anual).exists():
+                        with open(reporte_xml_anual, "rb") as f:
+                            st.download_button(
+                                " Descargar reporte XML anual (Emitidos)",
+                                f,
+                                file_name=Path(reporte_xml_anual).name,
+                                use_container_width=True,
+                            )
             else:
                 n_xml = resultado.get("n_xml", 0)
                 n_pdf = resultado.get("n_pdf", 0)
@@ -1414,6 +1593,24 @@ with tab1:
                         )
                 if resultado.get("rango_meses"):
                     st.info("Se generaron reportes por cada mes en las carpetas correspondientes.")
+                    reporte_pdf_anual = resultado.get("reporte_pdf_anual")
+                    if reporte_pdf_anual and Path(reporte_pdf_anual).exists():
+                        with open(reporte_pdf_anual, "rb") as f:
+                            st.download_button(
+                                " Descargar reporte PDF anual (Recibidos)",
+                                f,
+                                file_name=Path(reporte_pdf_anual).name,
+                                use_container_width=True,
+                            )
+                    reporte_xml_anual = resultado.get("reporte_xml_anual")
+                    if reporte_xml_anual and Path(reporte_xml_anual).exists():
+                        with open(reporte_xml_anual, "rb") as f:
+                            st.download_button(
+                                " Descargar reporte XML anual (Recibidos)",
+                                f,
+                                file_name=Path(reporte_xml_anual).name,
+                                use_container_width=True,
+                            )
                 else:
                     if n_xml > 0:
                         xml_folder = Path(resultado.get("xml_dir") or (carpeta_tipo / "XML"))
@@ -1722,7 +1919,20 @@ with tab2:
 
         historial = historial.reset_index(drop=True)
         historial = historial.drop(
-            columns=["n_registros", "n_xml", "n_pdf", "reporte", "reporte_xml", "reporte_pdf", "xml_dir", "pdf_dir"],
+            columns=[
+                "n_registros",
+                "n_xml",
+                "n_pdf",
+                "reporte",
+                "reporte_xml",
+                "reporte_pdf",
+                "reporte_pdf_anual",
+                "reporte_xml_anual",
+                "reportes_xml",
+                "reportes_pdf",
+                "xml_dir",
+                "pdf_dir",
+            ],
             errors="ignore",
         )
 
@@ -1742,14 +1952,21 @@ with tab2:
         if isinstance(historial_raw, pd.DataFrame):
             hist_reset = historial_raw.reset_index(drop=True)
             for idx, fila in hist_reset.iterrows():
-                ruta_val = fila.get("reporte") or fila.get("reporte_xml") or fila.get("reporte_pdf")
-                if not ruta_val or not isinstance(ruta_val, (str, Path)):
-                    continue
-                ruta_path = Path(ruta_val).expanduser()
-                if not ruta_path.exists():
-                    continue
-                etiqueta = f"{idx + 1}. {ruta_path.name} ({fila.get('timestamp', '')})"
-                descargables.append((etiqueta, ruta_path))
+                rutas = [
+                    fila.get("reporte"),
+                    fila.get("reporte_xml"),
+                    fila.get("reporte_pdf"),
+                    fila.get("reporte_xml_anual"),
+                    fila.get("reporte_pdf_anual"),
+                ]
+                for ruta_val in rutas:
+                    if not ruta_val or not isinstance(ruta_val, (str, Path)):
+                        continue
+                    ruta_path = Path(ruta_val).expanduser()
+                    if not ruta_path.exists():
+                        continue
+                    etiqueta = f"{idx + 1}. {ruta_path.name} ({fila.get('timestamp', '')})"
+                    descargables.append((etiqueta, ruta_path))
 
         if descargables:
             st.markdown("##### Descargar reporte generado anteriormente")
