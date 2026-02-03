@@ -14,5 +14,12 @@ pyinstaller --noconfirm --onefile --name "ROBOT_AUDIT_SRI" ^
   --collect-all streamlit.runtime ^
   --collect-all streamlit.elements ^
   --collect-all streamlit.components.v1 ^
+  --collect-all playwright ^
+  --add-data "aplicacion.py;." ^
+  --add-data "LogoAUDIT.png;." ^
+  --add-data "licensing_client.py;." ^
+  --add-data "robot;robot" ^
+  --add-data "licensing_api;licensing_api" ^
+  --add-data ".streamlit;.streamlit" ^
   desktop_launcher.py
 endlocal

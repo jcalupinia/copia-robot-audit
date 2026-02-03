@@ -7,9 +7,10 @@ import threading
 import webbrowser
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = BASE_DIR / "desktop_config.json"
-LOG_PATH = BASE_DIR / "desktop_launcher.log"
+APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+EXE_DIR = Path(sys.argv[0]).resolve().parent
+CONFIG_PATH = EXE_DIR / "desktop_config.json"
+LOG_PATH = EXE_DIR / "desktop_launcher.log"
 
 
 def _fatal(message: str, exc: Exception | None = None) -> "SystemExit":
@@ -57,6 +58,11 @@ def _open_browser_when_ready(url: str, timeout: float = 30.0) -> None:
 
 
 def main():
+    # Ensure bundled app files are importable
+    if str(APP_DIR) not in sys.path:
+        sys.path.insert(0, str(APP_DIR))
+        os.environ["PYTHONPATH"] = str(APP_DIR)
+
     config = _load_config()
     os.environ.setdefault("PLAYWRIGHT_HEADLESS", "0")
     os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
@@ -80,14 +86,17 @@ def main():
         _fatal("No se pudo iniciar Streamlit (faltan dependencias).", exc)
 
     os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
-    os.environ["STREAMLIT_SERVER_ADDRESS"] = "127.0.0.1"
-    os.environ["STREAMLIT_SERVER_PORT"] = "8501"
     os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
+
+    app_path = APP_DIR / "aplicacion.py"
+    if not app_path.exists():
+        _fatal(f"No se encontró aplicacion.py en {APP_DIR}")
 
     sys.argv = [
         "streamlit",
         "run",
-        str(BASE_DIR / "aplicacion.py"),
+        str(app_path),
     ]
 
     try:
