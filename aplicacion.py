@@ -83,7 +83,11 @@ def _slug_estado_emitidos(estado: str) -> str:
 def _buscar_reportes_mensuales(base_dir: Path, prefix: str) -> list[Path]:
     if not base_dir.exists():
         return []
-    regex = re.compile(re.escape(prefix) + r"(\\d{2})(?:_\\d+)?\\.xlsx$", re.IGNORECASE)
+    # Permite reportes mensuales (YYYYMM) y diarios (YYYYMMDD)
+    regex = re.compile(
+        re.escape(prefix) + r"(\\d{2}(?:\\d{2})?)(?:_\\d+)?\\.xlsx$",
+        re.IGNORECASE,
+    )
     encontrados: list[Path] = []
     for ruta in base_dir.rglob(f"{prefix}*.xlsx"):
         if regex.search(ruta.name):
@@ -1253,12 +1257,23 @@ with tab1:
                 key="consolidar_origen",
             )
         with col_c2:
-            if "tipo_opciones" in locals():
-                tipos_disponibles = list(dict.fromkeys(tipo_opciones))
+            if origen_consolidar == "Emitidos":
+                tipos_disponibles = [
+                    "Facturas",
+                    "Liquidación de compra",
+                    "Guía de remisión",
+                    "Retención",
+                    "Notas de débito",
+                    "Notas de crédito",
+                ]
             else:
-                tipos_disponibles = []
-            if not tipos_disponibles:
-                tipos_disponibles = [tipo]
+                tipos_disponibles = [
+                    "Retención",
+                    "Facturas",
+                    "Notas de débito",
+                    "Notas de crédito",
+                    "Liquidación de compra",
+                ]
             tipo_consolidar = st.selectbox(
                 "Tipo de comprobante",
                 tipos_disponibles,
@@ -1319,8 +1334,13 @@ with tab1:
                 st.stop()
 
             if incluir_xml:
+                reportes_xml = []
                 prefix_xml = f"{prefix_base}_xml_{tipo_slug}_{anio_int:04d}"
-                reportes_xml = _buscar_reportes_mensuales(base_search, prefix_xml)
+                reportes_xml.extend(_buscar_reportes_mensuales(base_search, prefix_xml))
+                if origen_consolidar == "Recibidos":
+                    prefix_xml_alt = f"reporte_{tipo_slug}_{anio_int:04d}"
+                    reportes_xml.extend(_buscar_reportes_mensuales(base_search, prefix_xml_alt))
+                    reportes_xml = list(dict.fromkeys(reportes_xml))
                 if reportes_xml:
                     destino_xml = destino_anual_dir / f"{prefix_base}_xml_{tipo_slug}_{anio_int:04d}.xlsx"
                     anual_xml = _consolidar_reportes_excel(
