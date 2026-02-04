@@ -6,6 +6,7 @@
 import os
 import shutil
 import hashlib
+import sys
 import platform
 import time
 import uuid
@@ -473,10 +474,14 @@ os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/ms-playwright")
 os.environ.setdefault("PYPPETEER_HOME", "/ms-playwright")
 
 BASE_DIR = Path(__file__).parent
-DESC_DIR = BASE_DIR / "descargas"
+if getattr(sys, "frozen", False):
+    RUNTIME_DIR = Path(os.getenv("APP_RUNTIME_DIR", Path(sys.executable).parent))
+else:
+    RUNTIME_DIR = Path(os.getenv("APP_RUNTIME_DIR", BASE_DIR))
+DESC_DIR = RUNTIME_DIR / "descargas"
 DESC_DIR.mkdir(exist_ok=True, parents=True)
 LICENSE_CLIENT = LicensingClient()
-SESSION_CACHE_DIR = Path(os.getenv("SESSION_CACHE_DIR", BASE_DIR / ".session_cache"))
+SESSION_CACHE_DIR = Path(os.getenv("SESSION_CACHE_DIR", RUNTIME_DIR / ".session_cache"))
 SESSION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 SESSION_CACHE = SESSION_CACHE_DIR / "session_cache.json"
 ENABLE_SESSION_CACHE = os.getenv("ENABLE_SESSION_CACHE", "1").strip().lower() not in {"0", "false", "no"}
@@ -604,9 +609,13 @@ def _load_user_preferences():
 
 
 def _persist_user_preferences():
-    data = {
-        "download_base_dir": st.session_state.get("download_base_dir", str(DESC_DIR)),
-    }
+    data = {}
+    if PREFERENCES_FILE.exists():
+        try:
+            data = json.loads(PREFERENCES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["download_base_dir"] = st.session_state.get("download_base_dir", str(DESC_DIR))
     try:
         PREFERENCES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     except Exception as err:
@@ -1244,7 +1253,12 @@ with tab1:
                 key="consolidar_origen",
             )
         with col_c2:
-            tipos_disponibles = list(TIPOS_MAP.keys()) or [tipo]
+            if "tipo_opciones" in locals():
+                tipos_disponibles = list(dict.fromkeys(tipo_opciones))
+            else:
+                tipos_disponibles = []
+            if not tipos_disponibles:
+                tipos_disponibles = [tipo]
             tipo_consolidar = st.selectbox(
                 "Tipo de comprobante",
                 tipos_disponibles,
@@ -1643,15 +1657,23 @@ with tab1:
                                 use_container_width=True,
                             )
 
-                zip_target = carpeta_tipo
-                zip_path = zip_target.with_suffix(".zip")
-                if zip_path.exists():
+            zip_target = carpeta_tipo
+            zip_path = zip_target.with_suffix(".zip")
+            if zip_path.exists():
+                try:
                     zip_path.unlink()
-                shutil.make_archive(str(zip_target), "zip", zip_target)
-                if zip_path.exists():
-                    with open(zip_path, "rb") as f:
-                        st.download_button(
-                            " Descargar ZIP de la carpeta",
+                except PermissionError:
+                    sufijo = 1
+                    while True:
+                        zip_path = zip_target.with_name(f"{zip_target.name}_{sufijo}").with_suffix(".zip")
+                        if not zip_path.exists():
+                            break
+                        sufijo += 1
+            shutil.make_archive(str(zip_path.with_suffix("")), "zip", zip_target)
+            if zip_path.exists():
+                with open(zip_path, "rb") as f:
+                    st.download_button(
+                        " Descargar ZIP de la carpeta",
                             f,
                             file_name=zip_path.name,
                             use_container_width=True,
