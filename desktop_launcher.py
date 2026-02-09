@@ -311,6 +311,11 @@ def main():
     os.environ.setdefault("APP_VERSION", APP_VERSION)
     os.environ.setdefault("UPDATE_IN_APP", "1")
 
+    for key in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_USE_TLS"):
+        value = (config.get(key) or "").strip() if isinstance(config, dict) else ""
+        if value:
+            os.environ.setdefault(key, value)
+
     if os.environ.get("UPDATE_IN_APP", "1").lower() in ("0", "false", "no"):
         _check_for_update(config)
     os.environ.setdefault("PLAYWRIGHT_HEADLESS", "0")
