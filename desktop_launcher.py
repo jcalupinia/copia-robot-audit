@@ -17,6 +17,8 @@ import requests
 APP_NAME = "ROBOT_AUDIT_SRI"
 VERSION_FILENAME = "version.txt"
 
+DEFAULT_LICENSE_API_URL = os.getenv("DEFAULT_LICENSE_API_URL", "https://sri-robot-audit-ik01.onrender.com")
+
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 if getattr(sys, "frozen", False):
     EXE_DIR = Path(sys.executable).resolve().parent
@@ -110,6 +112,11 @@ def _ensure_installed() -> None:
         config_src = _resolve_config_path()
         if config_src:
             shutil.copy2(config_src, INSTALL_DIR / CONFIG_FILENAME)
+        elif DEFAULT_LICENSE_API_URL:
+            (INSTALL_DIR / CONFIG_FILENAME).write_text(
+                json.dumps({"LICENSE_API_URL": DEFAULT_LICENSE_API_URL}, indent=2),
+                encoding="utf-8",
+            )
 
         subprocess.Popen([str(target_exe)])
     except Exception as exc:
@@ -313,15 +320,7 @@ def main():
     if "LICENSE_API_URL" not in os.environ:
         license_url = (config.get("LICENSE_API_URL") or "").strip()
         if not license_url:
-            license_url = DEFAULT_LICENSE_API_URL
-            if license_url:
-                config["LICENSE_API_URL"] = license_url
-                try:
-                    _save_config(config)
-                except Exception:
-                    pass
-        if not license_url:
-            _fatal("LICENSE_API_URL vac?o en desktop_config.json.")
+            _fatal("LICENSE_API_URL vacío en desktop_config.json.")
         os.environ["LICENSE_API_URL"] = license_url
 
     session_cache_dir = (config.get("SESSION_CACHE_DIR") or "").strip()
