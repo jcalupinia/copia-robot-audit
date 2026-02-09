@@ -1,11 +1,21 @@
-﻿import json
+import hashlib
+import json
 import os
+import re
+import shutil
 import socket
+import subprocess
 import sys
 import time
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.parse import urljoin
+
+import requests
+
+APP_NAME = "ROBOT_AUDIT_SRI"
+VERSION_FILENAME = "version.txt"
 
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 if getattr(sys, "frozen", False):
@@ -14,6 +24,25 @@ else:
     EXE_DIR = Path(__file__).resolve().parent
 CONFIG_FILENAME = "desktop_config.json"
 LOG_PATH = EXE_DIR / "desktop_launcher.log"
+INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / APP_NAME
+
+
+def _load_version() -> str:
+    candidates = [
+        APP_DIR / VERSION_FILENAME,
+        EXE_DIR / VERSION_FILENAME,
+        Path(__file__).resolve().parent / VERSION_FILENAME,
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                return path.read_text(encoding="utf-8-sig").strip() or "0.0.0"
+            except Exception:
+                continue
+    return "0.0.0"
+
+
+APP_VERSION = _load_version()
 
 
 def _fatal(message: str, exc: Exception | None = None) -> "SystemExit":
@@ -29,6 +58,13 @@ def _fatal(message: str, exc: Exception | None = None) -> "SystemExit":
     except Exception:
         pass
     raise SystemExit(1)
+
+
+def _log(message: str) -> None:
+    try:
+        LOG_PATH.write_text(f"{message}\n", encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _load_config():
@@ -47,6 +83,183 @@ def _load_config():
         "(junto al .exe) y vuelve a abrir la app."
     )
     return {}
+
+def _resolve_config_path() -> Path | None:
+    candidates = [EXE_DIR / CONFIG_FILENAME, Path.cwd() / CONFIG_FILENAME]
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
+def _ensure_installed() -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        exe_path = Path(sys.executable).resolve()
+    except Exception:
+        return
+    if exe_path.parent.resolve() == INSTALL_DIR.resolve():
+        return
+
+    try:
+        INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+        target_exe = INSTALL_DIR / f"{APP_NAME}.exe"
+        shutil.copy2(exe_path, target_exe)
+
+        config_src = _resolve_config_path()
+        if config_src:
+            shutil.copy2(config_src, INSTALL_DIR / CONFIG_FILENAME)
+
+        subprocess.Popen([str(target_exe)])
+    except Exception as exc:
+        _fatal("No se pudo instalar la app en AppData.", exc)
+    raise SystemExit(0)
+
+
+def _version_tuple(raw: str) -> tuple[int, ...] | None:
+    if not raw:
+        return None
+    parts = re.findall(r"\d+", raw)
+    if not parts:
+        return None
+    return tuple(int(p) for p in parts)
+
+
+def _is_remote_newer(remote: str, local: str) -> bool:
+    remote_tuple = _version_tuple(remote)
+    local_tuple = _version_tuple(local)
+    if remote_tuple and local_tuple:
+        length = max(len(remote_tuple), len(local_tuple))
+        remote_tuple = remote_tuple + (0,) * (length - len(remote_tuple))
+        local_tuple = local_tuple + (0,) * (length - len(local_tuple))
+        return remote_tuple > local_tuple
+    return remote.strip() != local.strip()
+
+
+def _download_file(url: str, dest: Path, token: str | None = None) -> None:
+    headers = {}
+    if token:
+        headers["X-Update-Token"] = token
+    with requests.get(url, headers=headers, stream=True, timeout=30) as response:
+        if response.status_code >= 400:
+            raise RuntimeError(f"Error descargando actualizacion: {response.status_code}")
+        with dest.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=1024 * 256):
+                if chunk:
+                    handle.write(chunk)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _apply_update(new_exe: Path, hard_exit: bool = False) -> None:
+    current_exe = Path(sys.executable).resolve()
+    backup_exe = current_exe.with_suffix(".old.exe")
+    bat_path = INSTALL_DIR / "update.bat"
+
+    bat_path.write_text(
+        "\n".join(
+            [
+                "@echo off",
+                f"set \"NEW={new_exe}\"",
+                f"set \"CUR={current_exe}\"",
+                f"set \"OLD={backup_exe}\"",
+                "ping 127.0.0.1 -n 3 > nul",
+                ":loop",
+                "del /f /q \"%OLD%\" > nul 2>&1",
+                "move /Y \"%CUR%\" \"%OLD%\" > nul 2>&1",
+                "move /Y \"%NEW%\" \"%CUR%\" > nul 2>&1",
+                "if errorlevel 1 (",
+                "  ping 127.0.0.1 -n 2 > nul",
+                "  goto loop",
+                ")",
+                "start \"\" \"%CUR%\"",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.Popen(["cmd", "/c", str(bat_path)], creationflags=creation_flags)
+    if hard_exit:
+        os._exit(0)
+    raise SystemExit(0)
+
+
+def _check_for_update(config: dict) -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    update_url = (
+        os.environ.get("UPDATE_URL")
+        or (config.get("UPDATE_URL") if isinstance(config, dict) else None)
+    )
+    if not update_url:
+        license_url = (
+            os.environ.get("LICENSE_API_URL")
+            or (config.get("LICENSE_API_URL") if isinstance(config, dict) else "")
+        )
+        if license_url:
+            update_url = license_url.rstrip("/") + "/updates/latest"
+    if not update_url:
+        return
+
+    token = os.environ.get("UPDATE_TOKEN")
+    if not token and isinstance(config, dict):
+        token = (config.get("UPDATE_TOKEN") or "").strip() or None
+
+    headers = {}
+    if token:
+        headers["X-Update-Token"] = token
+
+    try:
+        response = requests.get(update_url, headers=headers, timeout=10)
+        if response.status_code >= 400:
+            return
+        payload = response.json()
+    except Exception:
+        return
+
+    remote_version = str(payload.get("version") or "").strip()
+    if not remote_version:
+        return
+    if not _is_remote_newer(remote_version, APP_VERSION):
+        return
+
+    download_url = str(payload.get("url") or "").strip()
+    if not download_url:
+        return
+    if not re.match(r"^https?://", download_url):
+        download_url = urljoin(update_url, download_url)
+
+    target = INSTALL_DIR / f"{APP_NAME}.new.exe"
+    try:
+        _log("Actualizando...")
+        print("Actualizando...")
+        _download_file(download_url, target, token=token)
+        expected_sha = str(payload.get("sha256") or "").strip()
+        if expected_sha:
+            actual_sha = _sha256_file(target)
+            if actual_sha.lower() != expected_sha.lower():
+                target.unlink(missing_ok=True)
+                return
+        expected_size = payload.get("size")
+        if isinstance(expected_size, int) and expected_size > 0:
+            if target.stat().st_size != expected_size:
+                target.unlink(missing_ok=True)
+                return
+        _apply_update(target)
+    except Exception:
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return
 
 
 def _port_open(host: str, port: int, timeout: float = 0.2) -> bool:
@@ -80,12 +293,19 @@ def _pick_port(preferred: int = 8501) -> int:
 
 
 def main():
+    _ensure_installed()
+
     # Ensure bundled app files are importable
     if str(APP_DIR) not in sys.path:
         sys.path.insert(0, str(APP_DIR))
         os.environ["PYTHONPATH"] = str(APP_DIR)
 
     config = _load_config()
+    os.environ.setdefault("APP_VERSION", APP_VERSION)
+    os.environ.setdefault("UPDATE_IN_APP", "1")
+
+    if os.environ.get("UPDATE_IN_APP", "1").lower() in ("0", "false", "no"):
+        _check_for_update(config)
     os.environ.setdefault("PLAYWRIGHT_HEADLESS", "0")
     os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
     os.environ.setdefault("ENABLE_SESSION_CACHE", "1")

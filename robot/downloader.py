@@ -46,6 +46,32 @@ def _check_cancel(paso: str = "") -> None:
     if CANCEL_EVENT.is_set():
         raise RuntimeError("Proceso cancelado por el usuario.")
 
+def _extraer_clave_fila(celdas) -> str:
+    def _buscar_clave(texto: str) -> str:
+        texto = (texto or "").strip()
+        if not texto:
+            return ""
+        match = re.search(r"\d{49}", texto)
+        if match:
+            return match.group(0)
+        solo_digitos = re.sub(r"\D", "", texto)
+        return solo_digitos if len(solo_digitos) == 49 else ""
+
+    try:
+        total = celdas.count()
+    except Exception:
+        total = 0
+
+    for idx_celda in range(min(total, 6)):
+        try:
+            texto = celdas.nth(idx_celda).inner_text().strip()
+        except Exception:
+            continue
+        clave = _buscar_clave(texto)
+        if clave:
+            return clave
+    return ""
+
 # ====== Configuracion global ======
 if os.name == "nt":
     local_app = os.getenv("LOCALAPPDATA")
@@ -1099,6 +1125,41 @@ def _extraer_datos_pdf(pdf_path: Path) -> dict:
     for campo in campos_ceros:
         if datos.get(campo) in ("", None):
             datos[campo] = "0"
+    # Mejora con layout (cuando el texto no es fiable)
+    try:
+        datos_layout = _extraer_datos_pdf_layout(pdf_path)
+    except Exception:
+        datos_layout = {}
+    if datos_layout:
+        for campo, valor in datos_layout.items():
+            if campo in {
+                "subtotalTarifaEspecial",
+                "subtotal15",
+                "subtotal12",
+                "subtotal8",
+                "subtotal5",
+                "subtotal0",
+                "subtotalNoObjetoIVA",
+                "subtotalExentoIVA",
+                "subtotalSinImpuestos",
+                "totalDescuento",
+                "ivaTarifaEspecial",
+                "iva15",
+                "iva12",
+                "iva8",
+                "iva5",
+                "ice",
+                "irbpnr",
+                "propina",
+                "valorTotal",
+                "valorTotalSinSubsidio",
+                "formaPagoMonto",
+            }:
+                if valor not in ("", None):
+                    datos[campo] = valor
+            else:
+                if not datos.get(campo) and valor not in ("", None):
+                    datos[campo] = valor
     return datos
 
 def _extraer_datos_pdf_retencion(pdf_path: Path) -> dict:
@@ -2599,6 +2660,42 @@ def _mes_a_texto(mes: int) -> str:
     return ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
             "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][mes-1]
 
+
+def _xml_files_por_tipo(base_dir: Path, tipo_prefijo: str) -> list[Path]:
+    if not base_dir.exists():
+        return []
+    tipo_prefijo = (tipo_prefijo or "").strip()
+    encontrados: list[Path] = []
+    for ruta in base_dir.rglob("*.xml"):
+        try:
+            if not tipo_prefijo or tipo_prefijo in ruta.parts:
+                encontrados.append(ruta)
+        except Exception:
+            continue
+    return sorted(encontrados)
+
+
+def _xml_files_por_meses(base_dir: Path, tipo_prefijo: str, meses) -> list[Path]:
+    encontrados: list[Path] = []
+    for mes in meses:
+        try:
+            mes_int = int(mes)
+        except Exception:
+            continue
+        try:
+            mes_dir = base_dir / _mes_a_texto(mes_int)
+        except Exception:
+            continue
+        encontrados.extend(_xml_files_por_tipo(mes_dir, tipo_prefijo))
+    vistos = set()
+    normalizados: list[Path] = []
+    for ruta in encontrados:
+        if ruta in vistos:
+            continue
+        vistos.add(ruta)
+        normalizados.append(ruta)
+    return sorted(normalizados)
+
 def _es_clave(valor: str) -> bool:
     return bool(re.fullmatch(r"\d{49}", (valor or "").strip()))
 
@@ -3459,6 +3556,512 @@ def _parse_datetime_local(texto: str) -> Optional[datetime]:
     return None
 
 
+def _debe_omitir_soap_xml(fecha_emision: str, descargar_xml: bool, dias_limite: int = 30) -> bool:
+    if descargar_xml:
+        return False
+    if not fecha_emision:
+        return False
+    fecha_dt = _parse_datetime_local(fecha_emision)
+    if not fecha_dt:
+        return False
+    try:
+        limite = int(dias_limite)
+    except Exception:
+        limite = 30
+    dias = (datetime.now().date() - fecha_dt.date()).days
+    return dias > limite
+
+
+def _inferir_iva_columna(iva_val: float | None, base_val: float | None) -> str | None:
+    if not iva_val or not base_val:
+        return None
+    if base_val <= 0:
+        return None
+    rate = iva_val / base_val
+    candidatos = [
+        (0.15, "iva15"),
+        (0.12, "iva12"),
+        (0.08, "iva8"),
+        (0.05, "iva5"),
+    ]
+    for esperado, col in candidatos:
+        if abs(rate - esperado) <= 0.01:
+            return col
+    return None
+
+
+def _extraer_datos_emitidos_dom(
+    tipo_visible: str,
+    tipo_serie_texto: str,
+    clave_texto: str,
+    fecha_emision: str,
+    fecha_autorizacion: str,
+    razon_texto: str,
+    valor_sin_impuestos: str,
+    iva_valor: str,
+    importe_total: str,
+    ruc_emisor: str | None = None,
+) -> dict:
+    datos = {col: "" for col in PDF_REPORT_COLUMNS}
+    tipo_val = (tipo_visible or "").strip()
+    if not tipo_val and tipo_serie_texto:
+        tipo_val = tipo_serie_texto.split()[0].strip()
+    datos["tipoDocumento"] = tipo_val
+    datos["razonSocialComprador"] = (razon_texto or "").strip()
+    datos["fechaEmision"] = (fecha_emision or "").strip()
+    datos["fechaAutorizacion"] = (fecha_autorizacion or "").strip()
+    if ruc_emisor:
+        datos["rucEmisor"] = ruc_emisor
+
+    numero = ""
+    if tipo_serie_texto:
+        match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
+        if match:
+            numero = match.group(0)
+    if numero:
+        datos["numeroComprobante"] = numero
+        partes = numero.split("-")
+        if len(partes) == 3:
+            datos["establecimiento"] = partes[0]
+            datos["puntoEmision"] = partes[1]
+            datos["secuencial"] = partes[2]
+
+    if clave_texto:
+        datos["claveAcceso"] = clave_texto
+
+    base_val = _parse_decimal(valor_sin_impuestos) if isinstance(valor_sin_impuestos, str) else None
+    iva_val = _parse_decimal(iva_valor) if isinstance(iva_valor, str) else None
+    total_val = _parse_decimal(importe_total) if isinstance(importe_total, str) else None
+
+    if base_val is not None:
+        datos["subtotalSinImpuestos"] = base_val
+    if total_val is not None:
+        datos["valorTotal"] = total_val
+
+    iva_col = _inferir_iva_columna(iva_val, base_val)
+    if iva_col and iva_val is not None:
+        datos[iva_col] = iva_val
+
+    return datos
+
+
+def _strip_html(texto: str) -> str:
+    if not texto:
+        return ""
+    sin_tags = re.sub(r"<[^>]+>", " ", texto)
+    return re.sub(r"\s+", " ", sin_tags).strip()
+
+
+def _extraer_detalle_emitido_desde_partial(respuesta: str) -> dict:
+    if not respuesta:
+        return {}
+    chunks = re.findall(r"<!\[CDATA\[(.*?)\]\]>", respuesta, flags=re.DOTALL)
+    if not chunks:
+        chunks = [respuesta]
+    html_total = html.unescape(" ".join(chunks))
+    patron = re.compile(
+        r"<td[^>]*formulario-label[^>]*>.*?<label[^>]*>(.*?)</label>.*?</td>\s*"
+        r"<td[^>]*middle[^>]*>(.*?)</td>",
+        re.IGNORECASE | re.DOTALL,
+    )
+    kv: dict[str, str] = {}
+    for etiqueta_html, valor_html in patron.findall(html_total):
+        etiqueta = _strip_html(etiqueta_html)
+        valor = _strip_html(valor_html)
+        if not etiqueta:
+            continue
+        if etiqueta not in kv or not kv.get(etiqueta):
+            kv[etiqueta] = valor
+    return kv
+
+
+def _mapear_detalle_emitido_a_pdf(
+    detalle: dict,
+    tipo_visible: str,
+    tipo_serie_texto: str,
+    clave_texto: str,
+    ruc_emisor: str | None = None,
+) -> dict:
+    datos = {col: "" for col in PDF_REPORT_COLUMNS}
+    datos["tipoDocumento"] = (tipo_visible or "").strip()
+    if ruc_emisor:
+        datos["rucEmisor"] = ruc_emisor
+    if clave_texto:
+        datos["claveAcceso"] = clave_texto
+
+    def _set_text(key: str, value: str):
+        if value is None:
+            return
+        val = str(value).strip()
+        if val:
+            datos[key] = val
+
+    def _set_num(key: str, value: str):
+        if value is None:
+            return
+        val = _parse_decimal(str(value))
+        if val is not None:
+            datos[key] = val
+
+    mapa_directo = {
+        "ambiente": "ambiente",
+        "tipoemision": "emision",
+        "razonsocial": "razonSocialEmisor",
+        "nombrecomercial": "nombreComercial",
+        "numeroruc": "rucEmisor",
+        "claveacceso": "claveAcceso",
+        "establecimiento": "establecimiento",
+        "puntoemision": "puntoEmision",
+        "secuencial": "secuencial",
+        "direccionmatriz": "direccionMatrizEmisor",
+        "direccionestablecimiento": "direccionSucursalEmisor",
+        "fechaemision": "fechaEmision",
+        "contribuyenteespecial": "contribuyenteEspecial",
+        "obligadocontabilidad": "obligadoContabilidad",
+        "contribuyenteregimenrimpe": "tipoContribuyenteRIMPE",
+        "contribuyenterimpe": "tipoContribuyenteRIMPE",
+        "agenteretencionnroresolucion": "agenteRetencion",
+        "razonsocialcomprador": "razonSocialComprador",
+        "identificacioncomprador": "identificacionComprador",
+        "placa": "placa",
+        "placamatricula": "placa",
+        "guiaremision": "guia",
+        "comprobantemodificado": "comprobanteModificado",
+        "fechaemisionmodificado": "fechaEmisionModificado",
+        "razonmodificacion": "razonModificacion",
+        "valormodificacion": "valorModificacion",
+        "informacionadicional": "informacionAdicional",
+        "formadepago": "formaPago",
+    }
+
+    for etiqueta, valor in (detalle or {}).items():
+        token = _normalizar_token(etiqueta)
+        if not token:
+            continue
+        if token in mapa_directo:
+            _set_text(mapa_directo[token], valor)
+            continue
+        if "subtotal" in token:
+            if "tarifaespecial" in token:
+                _set_num("subtotalTarifaEspecial", valor)
+            elif "15" in token:
+                _set_num("subtotal15", valor)
+            elif "12" in token:
+                _set_num("subtotal12", valor)
+            elif "8" in token:
+                _set_num("subtotal8", valor)
+            elif "5" in token:
+                _set_num("subtotal5", valor)
+            elif "0" in token:
+                _set_num("subtotal0", valor)
+            elif "noobjetoiva" in token:
+                _set_num("subtotalNoObjetoIVA", valor)
+            elif "exentoiva" in token:
+                _set_num("subtotalExentoIVA", valor)
+            elif "sinimpuestos" in token or "sinimpuesto" in token:
+                _set_num("subtotalSinImpuestos", valor)
+            continue
+        if token.startswith("iva"):
+            if "tarifaespecial" in token:
+                _set_num("ivaTarifaEspecial", valor)
+            elif "15" in token:
+                _set_num("iva15", valor)
+            elif "12" in token:
+                _set_num("iva12", valor)
+            elif "8" in token:
+                _set_num("iva8", valor)
+            elif "5" in token:
+                _set_num("iva5", valor)
+            continue
+        if "ice" in token:
+            _set_num("ice", valor)
+            continue
+        if "irbpnr" in token:
+            _set_num("irbpnr", valor)
+            continue
+        if "propina" in token:
+            _set_num("propina", valor)
+            continue
+        if "totalsinimpuestos" in token:
+            _set_num("subtotalSinImpuestos", valor)
+            continue
+        if "totaldescuento" in token:
+            _set_num("totalDescuento", valor)
+            continue
+        if "importetotal" in token or "valortotal" in token:
+            _set_num("valorTotal", valor)
+            continue
+        if "valortotalsinsubsidio" in token:
+            _set_num("valorTotalSinSubsidio", valor)
+            continue
+
+    if not datos.get("numeroComprobante"):
+        est = datos.get("establecimiento") or ""
+        pto = datos.get("puntoEmision") or ""
+        sec = datos.get("secuencial") or ""
+        if est and pto and sec:
+            datos["numeroComprobante"] = f"{est}-{pto}-{sec}"
+        elif tipo_serie_texto:
+            match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
+            if match:
+                datos["numeroComprobante"] = match.group(0)
+
+    return datos
+
+
+def _obtener_source_detalle_emitido(page, row_index: int) -> str:
+    try:
+        return page.evaluate(
+            """(idx) => {
+                const rows = document.querySelectorAll("#frmPrincipal\\\\:tablaCompEmitidos_data tr");
+                const row = rows[idx];
+                if (!row) return "";
+                const candidatos = Array.from(row.querySelectorAll("a, button"));
+                const score = (el) => {
+                    const id = el.id || "";
+                    const onclick = (el.getAttribute("onclick") || "").toLowerCase();
+                    const title = (el.getAttribute("title") || "").toLowerCase();
+                    const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+                    const txt = (el.textContent || "").toLowerCase();
+                    if (onclick.includes("panel-detalle-factura") || onclick.includes("detalle")) return 3;
+                    if (title.includes("detalle") || aria.includes("detalle") || txt.includes("detalle") || txt.includes("ver")) return 2;
+                    if (id && !id.includes("lnkPdf") && !id.includes("lnkXml")) return 1;
+                    return 0;
+                };
+                let best = "";
+                let bestScore = 0;
+                for (const el of candidatos) {
+                    if (!el.id) continue;
+                    const s = score(el);
+                    if (s > bestScore) {
+                        bestScore = s;
+                        best = el.id;
+                    }
+                }
+                if (best) return best;
+                const conId = candidatos.find(el => el.id);
+                return conId ? conId.id : "";
+            }""",
+            row_index,
+        )
+    except Exception:
+        return ""
+
+
+def _extraer_lineas_pdf_layout(pdf_path: Path) -> list[dict]:
+    try:
+        from pdfminer.high_level import extract_pages
+        from pdfminer.layout import LTTextContainer, LTTextLine
+    except Exception:
+        return []
+    lineas = []
+    try:
+        for page_layout in extract_pages(str(pdf_path)):
+            for element in page_layout:
+                if isinstance(element, LTTextContainer):
+                    for linea in element:
+                        if isinstance(linea, LTTextLine):
+                            texto = (linea.get_text() or "").strip()
+                            if not texto:
+                                continue
+                            x0, y0, x1, y1 = linea.bbox
+                            lineas.append(
+                                {
+                                    "text": texto,
+                                    "x0": float(x0),
+                                    "x1": float(x1),
+                                    "y0": float(y0),
+                                    "y1": float(y1),
+                                }
+                            )
+    except Exception:
+        return []
+    for linea in lineas:
+        linea["norm"] = _normalizar_label_simple(linea.get("text") or "")
+    return lineas
+
+
+def _extraer_numero_desde_texto(texto: str) -> str:
+    if not texto:
+        return ""
+    match = re.search(r"([0-9][0-9.,]*)", texto)
+    if not match:
+        return ""
+    return match.group(1)
+
+
+def _buscar_valor_layout(lineas: list[dict], etiquetas: list[str], y_tol: float = 2.5) -> str:
+    if not lineas:
+        return ""
+    etiquetas_norm = [_normalizar_label_simple(e) for e in etiquetas if e]
+    for linea in lineas:
+        norm = linea.get("norm") or ""
+        if not any(e in norm for e in etiquetas_norm):
+            continue
+        y_obj = linea["y0"]
+        x_ref = linea["x1"] + 2
+        candidatos = [
+            l
+            for l in lineas
+            if abs(l["y0"] - y_obj) <= y_tol and l["x0"] >= x_ref
+        ]
+        if candidatos:
+            candidatos.sort(key=lambda l: l["x0"])
+            return candidatos[0].get("text", "").strip()
+        candidatos = [
+            l
+            for l in lineas
+            if 0 < (y_obj - l["y0"]) <= 12 and l["x0"] >= linea["x0"]
+        ]
+        if candidatos:
+            candidatos.sort(key=lambda l: (-l["y0"], l["x0"]))
+            return candidatos[0].get("text", "").strip()
+    return ""
+
+
+def _extraer_datos_pdf_layout(pdf_path: Path) -> dict:
+    lineas = _extraer_lineas_pdf_layout(pdf_path)
+    if not lineas:
+        return {}
+    datos = {}
+    # Campos de texto
+    texto_map = {
+        "ambiente": ["AMBIENTE"],
+        "emision": ["EMISION", "TIPO EMISION"],
+        "direccionMatrizEmisor": ["DIRECCION MATRIZ", "DIRECCION MATRIS", "DIRECCION MATRIZ:"],
+        "direccionSucursalEmisor": ["DIRECCION SUCURSAL", "DIRECCION ESTABLECIMIENTO"],
+        "obligadoContabilidad": ["OBLIGADO A LLEVAR CONTABILIDAD", "OBLIGADO CONTABILIDAD"],
+        "agenteRetencion": ["AGENTE DE RETENCION RESOLUCION", "AGENTE RETENCION RESOLUCION"],
+        "contribuyenteEspecial": ["CONTRIBUYENTE ESPECIAL"],
+        "tipoContribuyenteRIMPE": ["CONTRIBUYENTE REGIMEN RIMPE", "CONTRIBUYENTE RIMPE"],
+        "razonSocialComprador": ["RAZON SOCIAL / NOMBRES Y APELLIDOS", "RAZON SOCIAL COMPRADOR"],
+        "identificacionComprador": ["IDENTIFICACION COMPRADOR", "IDENTIFICACION"],
+        "direccionComprador": ["DIRECCION COMPRADOR", "DIRECCION ADQUIRENTE", "DIRECCION:"],
+        "placa": ["PLACA", "MATRICULA"],
+        "guia": ["GUIA REMISION", "GUIA DE REMISION", "GUIA"],
+        "formaPago": ["FORMA PAGO", "FORMA DE PAGO"],
+        "informacionAdicional": ["INFORMACION ADICIONAL"],
+        "fechaEmision": ["FECHA EMISION", "FECHA"],
+        "fechaAutorizacion": ["FECHA Y HORA DE AUTORIZACION", "FECHA Y HORA DE"],
+    }
+    for campo, etiquetas in texto_map.items():
+        valor = _buscar_valor_layout(lineas, etiquetas)
+        if valor:
+            datos[campo] = valor
+
+    # Clave de acceso
+    clave = ""
+    for linea in lineas:
+        match = re.search(r"(\d{49})", linea.get("text", ""))
+        if match:
+            clave = match.group(1)
+            break
+    if clave:
+        datos["claveAcceso"] = clave
+
+    # Numero comprobante
+    for linea in lineas:
+        match = re.search(r"(\d{3}-\d{3}-\d{9})", linea.get("text", ""))
+        if match:
+            datos["numeroComprobante"] = match.group(1)
+            partes = match.group(1).split("-")
+            if len(partes) == 3:
+                datos["establecimiento"] = partes[0]
+                datos["puntoEmision"] = partes[1]
+                datos["secuencial"] = partes[2]
+            break
+
+    # Totales
+    numeric_map = {
+        "subtotalTarifaEspecial": ["SUBTOTAL TARIFA ESPECIAL"],
+        "subtotal15": ["SUBTOTAL 15%"],
+        "subtotal12": ["SUBTOTAL 12%"],
+        "subtotal8": ["SUBTOTAL 8%"],
+        "subtotal5": ["SUBTOTAL 5%"],
+        "subtotal0": ["SUBTOTAL 0%"],
+        "subtotalNoObjetoIVA": ["SUBTOTAL NO OBJETO DE IVA"],
+        "subtotalExentoIVA": ["SUBTOTAL EXENTO DE IVA"],
+        "subtotalSinImpuestos": ["SUBTOTAL SIN IMPUESTOS", "TOTAL SIN IMPUESTOS"],
+        "totalDescuento": ["TOTAL DESCUENTO"],
+        "ivaTarifaEspecial": ["IVA TARIFA ESPECIAL"],
+        "iva15": ["IVA 15%"],
+        "iva12": ["IVA 12%"],
+        "iva8": ["IVA 8%"],
+        "iva5": ["IVA 5%"],
+        "ice": ["ICE"],
+        "irbpnr": ["IRBPNR"],
+        "propina": ["PROPINA"],
+        "valorTotal": ["IMPORTE TOTAL", "VALOR TOTAL"],
+        "valorTotalSinSubsidio": ["VALOR TOTAL SIN SUBSIDIO"],
+    }
+    for campo, etiquetas in numeric_map.items():
+        valor_raw = _buscar_valor_layout(lineas, etiquetas)
+        valor_num = _extraer_numero_desde_texto(valor_raw)
+        if valor_num:
+            datos[campo] = valor_num
+
+    # Forma de pago con monto
+    if datos.get("formaPago"):
+        texto = datos["formaPago"]
+        match = re.search(r"([0-9][0-9.,]+)$", texto)
+        if match:
+            datos["formaPagoMonto"] = match.group(1)
+            datos["formaPago"] = texto[:match.start()].strip(" -")
+
+    return datos
+
+
+def _obtener_detalle_emitido_xhr(
+    page,
+    request_context,
+    source_id: str,
+    payload_base: dict,
+    view_state: str,
+    tipo_visible: str,
+    tipo_serie_texto: str,
+    clave_texto: str,
+    ruc_emisor: str | None = None,
+) -> Optional[dict]:
+    if not source_id or not view_state:
+        return None
+    payload = dict(payload_base or {})
+    payload.update(
+        {
+            "javax.faces.partial.ajax": "true",
+            "javax.faces.source": source_id,
+            "javax.faces.partial.execute": source_id,
+            "javax.faces.partial.render": "form-detalle-factura:panel-detalle-factura",
+            source_id: source_id,
+            "javax.faces.ViewState": view_state,
+        }
+    )
+    payload.setdefault("frmPrincipal", "frmPrincipal")
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Faces-Request": "partial/ajax",
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/xml, text/xml, */*; q=0.01",
+        "Origin": "https://srienlinea.sri.gob.ec",
+        "Referer": page.url,
+    }
+    try:
+        respuesta = request_context.post(RECUPERAR_COMPROBANTES_URL, data=payload, headers=headers)
+    except Exception:
+        return None
+    if respuesta.status != 200:
+        return None
+    try:
+        cuerpo = respuesta.text()
+    except Exception:
+        return None
+    detalle = _extraer_detalle_emitido_desde_partial(cuerpo)
+    if not detalle:
+        return None
+    return _mapear_detalle_emitido_a_pdf(
+        detalle, tipo_visible, tipo_serie_texto, clave_texto, ruc_emisor=ruc_emisor
+    )
+
+
 def _click_texto(page, texto: str) -> bool:
     for metodo in [
         lambda: page.get_by_role("button", name=texto, exact=False),
@@ -3471,6 +4074,54 @@ def _click_texto(page, texto: str) -> bool:
         except Exception:
             continue
     return False
+
+
+def _click_consultar_emitidos(page) -> bool:
+    selectores = [
+        "button#frmPrincipal\\:btnBuscar",
+        "button[id$='consultar']",
+        "input[id$='consultar']",
+        "button:has-text('Consultar')",
+        "input[value='Consultar']",
+        "a:has-text('Consultar')",
+    ]
+    for selector in selectores:
+        try:
+            locator = page.locator(selector)
+            if not locator.count():
+                continue
+            try:
+                locator.first.scroll_into_view_if_needed(timeout=500)
+            except Exception:
+                pass
+            try:
+                locator.first.click(timeout=800, force=True)
+                return True
+            except Exception:
+                continue
+        except Exception:
+            continue
+    try:
+        return bool(
+            page.evaluate(
+                """() => {
+                    const candidatos = Array.from(document.querySelectorAll('button, input, a'));
+                    const normalizar = (t) => (t || '').trim().toLowerCase();
+                    const btn = candidatos.find(el => {
+                        const txt = normalizar(el.textContent);
+                        const val = normalizar(el.value);
+                        return txt === 'consultar' || val === 'consultar';
+                    });
+                    if (btn && typeof btn.click === 'function') {
+                        btn.click();
+                        return true;
+                    }
+                    return false;
+                }"""
+            )
+        )
+    except Exception:
+        return False
 
 def _resolver_destino_unico(base_path: Path, extension: str) -> Path:
     """
@@ -4176,12 +4827,51 @@ def _seleccionar_en_select(page, selector: str, *valores) -> bool:
                             const base = (texto || "").toString().normalize("NFD");
                             return base.replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
                         };
+                        const stopwords = new Set(["de", "del", "la", "el", "los", "las", "y"]);
+                        const singular = (token) => {
+                            if (!token) return token;
+                            if (token.length > 4 && token.endsWith("es")) {
+                                return token.slice(0, -2);
+                            }
+                            if (token.length > 3 && token.endsWith("s")) {
+                                return token.slice(0, -1);
+                            }
+                            return token;
+                        };
+                        const normalizarTokens = (texto) => {
+                            const norm = comparar(texto);
+                            const tokens = norm
+                                .split(/\\s+/)
+                                .filter(t => t && !stopwords.has(t))
+                                .map(singular);
+                            return tokens.join(" ");
+                        };
+                        const compactar = (texto) => {
+                            return (texto || "").replace(/[^a-z0-9]+/g, "");
+                        };
                         for (const opcion of Array.from(el.options)) {
-                            const label = comparar(opcion.label || opcion.textContent || "");
-                            const value = comparar(opcion.value || "");
+                            const labelRaw = opcion.label || opcion.textContent || "";
+                            const valueRaw = opcion.value || "";
+                            const label = comparar(labelRaw);
+                            const value = comparar(valueRaw);
+                            const labelTokens = normalizarTokens(labelRaw);
+                            const valueTokens = normalizarTokens(valueRaw);
+                            const labelCompact = compactar(label);
+                            const valueCompact = compactar(value);
+                            const labelTokensCompact = compactar(labelTokens);
+                            const valueTokensCompact = compactar(valueTokens);
                             for (const objetivo of candidatos) {
                                 const norm = comparar(objetivo);
-                                if (norm && (norm === label || norm === value)) {
+                                const normTokens = normalizarTokens(objetivo);
+                                const normCompact = compactar(norm);
+                                const normTokensCompact = compactar(normTokens);
+                                const matchExact = norm && (norm === label || norm === value);
+                                const matchTokens = normTokens && (normTokens === labelTokens || normTokens === valueTokens);
+                                const matchCompact = normCompact && (normCompact === labelCompact || normCompact === valueCompact);
+                                const matchTokensCompact = normTokensCompact && (normTokensCompact === labelTokensCompact || normTokensCompact === valueTokensCompact);
+                                const matchContains = normTokens && (labelTokens.includes(normTokens) || valueTokens.includes(normTokens));
+                                const matchContainsRev = labelTokens && (normTokens.includes(labelTokens) || normTokens.includes(valueTokens));
+                                if (matchExact || matchTokens || matchCompact || matchTokensCompact || matchContains || matchContainsRev) {
                                     if (el.value !== opcion.value) {
                                         el.value = opcion.value;
                                         el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -5383,6 +6073,39 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 return page.locator("input[name='javax.faces.ViewState']").first.get_attribute("value") or ""
             except Exception:
                 return ""
+
+        def _extraer_clave_fila(celdas) -> str:
+            def _buscar_clave(texto: str) -> str:
+                texto = (texto or "").strip()
+                if not texto:
+                    return ""
+                match = re.search(r"\d{49}", texto)
+                if match:
+                    return match.group(0)
+                solo_digitos = re.sub(r"\D", "", texto)
+                return solo_digitos if len(solo_digitos) == 49 else ""
+
+            try:
+                total = celdas.count()
+            except Exception:
+                total = 0
+
+            for idx_celda in range(min(total, 6)):
+                try:
+                    texto = celdas.nth(idx_celda).inner_text().strip()
+                except Exception:
+                    continue
+                clave = _buscar_clave(texto)
+                if clave:
+                    return clave
+
+            try:
+                texto_fila = " ".join(
+                    celdas.nth(i).inner_text().strip() for i in range(min(total, 8))
+                )
+            except Exception:
+                return ""
+            return _buscar_clave(texto_fila)
         while True:
             _check_cancel("recibidos_pagina")
             page_inicio = time.perf_counter()
@@ -5726,6 +6449,7 @@ def _flujo_emitidos(
     establecimiento: Optional[str],
     punto_emision: Optional[str],
     formatos: list,
+    ruc_emisor: Optional[str] = None,
 ):
     _check_cancel("inicio_emitidos")
     es_retencion = False
@@ -5743,6 +6467,8 @@ def _flujo_emitidos(
     ]
     descargar_pdf = "PDF" in formatos_norm
     descargar_xml = "XML" in formatos_norm
+    selecciono_pdf = descargar_pdf
+    selecciono_xml = descargar_xml
 
     tipo_visible = TIPOS_MAP.get(tipo, tipo)
     try:
@@ -5776,6 +6502,20 @@ def _flujo_emitidos(
                 print(
                     f"[WARN] No se pudo seleccionar el estado de autorizacion '{estado_visible}' en Emitidos."
                 )
+    estado_norm = (
+        unicodedata.normalize("NFKD", estado_visible).encode("ascii", "ignore").decode("ascii").lower()
+        if estado_visible
+        else ""
+    )
+    modo_no_autorizados = "no autoriz" in estado_norm
+    if modo_no_autorizados:
+        if selecciono_pdf and not selecciono_xml:
+            _notificar_usuario_accion(
+                "[INFO] En 'No Autorizados' no hay PDF disponible. Marca 'XML' para descargar."
+            )
+        descargar_pdf = False
+
+    omitir_soap_xml = _debe_omitir_soap_xml(fecha_emision, descargar_xml)
 
     if fecha_emision:
         fecha_selector = "input#frmPrincipal\:calendarFechaDesde_input"
@@ -5872,20 +6612,18 @@ def _flujo_emitidos(
     carpeta_tipo = carpeta_estado / tipo_prefijo
     carpeta_tipo.mkdir(parents=True, exist_ok=True)
     xml_dir = carpeta_tipo / "XML"
-    if descargar_xml:
+    descargar_xml_para_reporte = descargar_xml or descargar_pdf
+    if descargar_xml_para_reporte:
         xml_dir.mkdir(parents=True, exist_ok=True)
     pdf_dir = carpeta_tipo / "PDF"
     if descargar_pdf:
         pdf_dir.mkdir(parents=True, exist_ok=True)
 
-    if not _click_texto(page, "Consultar"):
+    if not _click_consultar_emitidos(page):
         try:
-            page.locator("button[id$='consultar']").first.click()
+            page.keyboard.press("Enter")
         except Exception:
-            try:
-                page.locator("input[id$='consultar']").first.click()
-            except Exception:
-                page.keyboard.press("Enter")
+            pass
 
             try:
                 page.wait_for_load_state("networkidle", timeout=1000)
@@ -6033,7 +6771,8 @@ def _flujo_emitidos(
         })
         return info_base
 
-    if descargar_pdf or descargar_xml:
+    xml_temp_paths = []
+    if descargar_pdf or descargar_xml_para_reporte:
         try:
             tabla_emitidos.wait_for(state="visible", timeout=1000)
         except Exception:
@@ -6042,6 +6781,19 @@ def _flujo_emitidos(
         lote_size = 10
         claves_guardadas = set()
         request_context = page.context.request
+        payload_base = _obtener_form_base_emitidos(page)
+        def _pdf_report_incompleto(datos: dict, min_campos: int = 4) -> bool:
+            if not isinstance(datos, dict) or not datos:
+                return True
+            ignorar = {"numeroComprobante", "fechaEmision", "claveAcceso"}
+            conteo = 0
+            for key, valor in datos.items():
+                if key in ignorar:
+                    continue
+                if valor in (None, "", "No Disponible", "N/A", 0, "0"):
+                    continue
+                conteo += 1
+            return conteo < min_campos
 
         def _obtener_viewstate_actual() -> str:
             try:
@@ -6063,20 +6815,37 @@ def _flujo_emitidos(
                 _check_cancel("emitidos_fila")
                 fila = filas.nth(idx)
                 celdas = fila.locator("td")
-                if celdas.count() < 3:
+                try:
+                    total_celdas = celdas.count()
+                except Exception:
+                    total_celdas = 0
+                if total_celdas < 2:
                     continue
                 try:
                     tipo_serie_texto = celdas.nth(1).inner_text().strip()
                 except Exception:
                     tipo_serie_texto = ""
+                clave_texto = _extraer_clave_fila(celdas)
                 try:
-                    clave_texto = celdas.nth(2).inner_text().strip()
-                except Exception:
-                    clave_texto = ""
-                try:
-                    razon_texto = celdas.nth(4).inner_text().strip() if celdas.count() > 4 else ""
+                    razon_texto = celdas.nth(4).inner_text().strip() if total_celdas > 4 else ""
                 except Exception:
                     razon_texto = ""
+                try:
+                    fecha_aut_texto = celdas.nth(3).inner_text().strip() if total_celdas > 3 else ""
+                except Exception:
+                    fecha_aut_texto = ""
+                try:
+                    valor_sin_imp_texto = celdas.nth(5).inner_text().strip() if total_celdas > 5 else ""
+                except Exception:
+                    valor_sin_imp_texto = ""
+                try:
+                    iva_texto = celdas.nth(6).inner_text().strip() if total_celdas > 6 else ""
+                except Exception:
+                    iva_texto = ""
+                try:
+                    importe_total_texto = celdas.nth(7).inner_text().strip() if total_celdas > 7 else ""
+                except Exception:
+                    importe_total_texto = ""
 
                 tipo_serie_completo = " ".join(
                     fragment for fragment in [tipo_serie_texto, clave_texto] if fragment
@@ -6084,31 +6853,44 @@ def _flujo_emitidos(
                 nombre_base_pdf = _sanear_nombre_archivo(
                     tipo_serie_completo or razon_texto or f"emitido_{pagina}_{idx+1}"
                 )
+                xml_path_report = None
 
                 if es_rechazado:
-                    # En "No Autorizados" el icono XML suele tener id :lnkPdf aunque sea XML.
-                    enlace_xml = fila.locator("a[id$=':lnkPdf'], a[title*='xml' i], img[alt*='xml' i], img[title*='xml' i]")
-                    if enlace_xml.count():
-                        contenedor = enlace_xml.first
-                        # Si es <img>, buscamos su <a> ancestro
-                        if contenedor.locator("xpath=ancestor::a[1]").count():
-                            contenedor = contenedor.locator("xpath=ancestor::a[1]").first
-                        try:
-                            if descargar_xml:
-                                destino_xml = xml_dir / f"{nombre_base_pdf}.xml"
-                                with page.expect_download(timeout=DOWNLOAD_TIMEOUT) as descarga_info:
-                                    contenedor.click(no_wait_after=True)
-                                descarga = descarga_info.value
-                                sugerido = descarga.suggested_filename or destino_xml.name
-                                destino_final = destino_xml.with_suffix(Path(sugerido).suffix or ".xml")
-                                sufijo = 1
-                                while destino_final.exists():
-                                    destino_final = destino_xml.with_name(f"{destino_xml.stem}_{sufijo}{destino_final.suffix}")
-                                    sufijo += 1
-                                descarga.save_as(str(destino_final))
-                                n_xml += 1
-                                lote_xml_ok += 1
-                            elif descargar_pdf:
+                    try:
+                        if descargar_xml_para_reporte:
+                            if clave_texto:
+                                try:
+                                    resultado_xml = _descargar_xml_emitido_por_clave(
+                                        request_context,
+                                        clave_texto,
+                                        xml_dir,
+                                        nombre_base_pdf,
+                                        claves_guardadas,
+                                    )
+                                    if resultado_xml:
+                                        xml_path_report = resultado_xml
+                                        if descargar_xml:
+                                            n_xml += 1
+                                        else:
+                                            xml_temp_paths.append(xml_path_report)
+                                        lote_xml_ok += 1
+                                except Exception as err:
+                                    print(f"[WARN] No se pudo obtener XML SOAP para '{nombre_base_pdf}': {err}")
+                            else:
+                                print(
+                                    f"[WARN] La fila '{nombre_base_pdf}' no tiene clave de acceso para solicitar el XML."
+                                )
+
+                        if descargar_pdf:
+                            # En "No Autorizados" el icono XML suele tener id :lnkPdf aunque sea XML.
+                            enlace_pdf = fila.locator(
+                                "a[id$=':lnkPdf'], a[title*='pdf' i], img[alt*='pdf' i], img[title*='pdf' i]"
+                            )
+                            if enlace_pdf.count():
+                                contenedor = enlace_pdf.first
+                                # Si es <img>, buscamos su <a> ancestro
+                                if contenedor.locator("xpath=ancestor::a[1]").count():
+                                    contenedor = contenedor.locator("xpath=ancestor::a[1]").first
                                 destino_pdf = pdf_dir / f"{nombre_base_pdf}.pdf"
                                 link_id = None
                                 try:
@@ -6134,28 +6916,44 @@ def _flujo_emitidos(
                                     n_pdf += 1
                                     lote_pdf_ok += 1
                                     if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
-                                        if es_retencion:
-                                            datos_pdf = _extraer_datos_pdf_retencion(resultado_pdf)
-                                        elif es_nota_credito:
-                                            datos_pdf = _extraer_datos_pdf_nota_credito(resultado_pdf)
-                                        elif es_nota_debito:
-                                            datos_pdf = _extraer_datos_pdf_nota_debito(resultado_pdf)
-                                        else:
-                                            datos_pdf = _extraer_datos_pdf(resultado_pdf)
-                                        if clave_texto and not datos_pdf.get("claveAcceso"):
-                                            datos_pdf["claveAcceso"] = clave_texto
-                                        if not datos_pdf.get("numeroComprobante"):
-                                            match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
-                                            if match:
-                                                datos_pdf["numeroComprobante"] = match.group(0)
-                                        if fecha_emision and not datos_pdf.get("fechaEmision"):
-                                            datos_pdf["fechaEmision"] = fecha_emision
-                                        pdf_report_rows.append(datos_pdf)
-                        except Exception as err:
-                            print(f"[WARN] No se pudo descargar XML/PDF para '{nombre_base_pdf}': {err}")
+                                        datos_pdf = None
+                                        if xml_path_report:
+                                            try:
+                                                if es_retencion:
+                                                    datos_xml = _extraer_datos_xml_retencion(xml_path_report)
+                                                else:
+                                                    datos_xml = _extraer_datos_xml_pdf_report(xml_path_report)
+                                                datos_pdf = datos_xml
+                                            except Exception as err:
+                                                print(f"[WARN] No se pudo usar XML para el reporte PDF: {err}")
+                                        if datos_pdf is None:
+                                            if es_retencion:
+                                                datos_pdf = _extraer_datos_pdf_retencion(resultado_pdf)
+                                            elif es_nota_credito:
+                                                datos_pdf = _extraer_datos_pdf_nota_credito(resultado_pdf)
+                                            elif es_nota_debito:
+                                                datos_pdf = _extraer_datos_pdf_nota_debito(resultado_pdf)
+                                            else:
+                                                datos_pdf = _extraer_datos_pdf(resultado_pdf)
+                                        if datos_pdf:
+                                            if clave_texto and not datos_pdf.get("claveAcceso"):
+                                                datos_pdf["claveAcceso"] = clave_texto
+                                            if not datos_pdf.get("numeroComprobante"):
+                                                match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
+                                                if match:
+                                                    datos_pdf["numeroComprobante"] = match.group(0)
+                                            if fecha_emision and not datos_pdf.get("fechaEmision"):
+                                                datos_pdf["fechaEmision"] = fecha_emision
+                                            pdf_report_rows.append(datos_pdf)
+                            else:
+                                print(
+                                    f"[WARN] No se encontro enlace PDF para '{nombre_base_pdf}' en No Autorizados."
+                                )
+                    except Exception as err:
+                        print(f"[WARN] No se pudo descargar XML/PDF para '{nombre_base_pdf}': {err}")
                     continue
 
-                if descargar_xml:
+                if descargar_xml_para_reporte and not omitir_soap_xml:
                     if clave_texto:
                         try:
                             resultado_xml = _descargar_xml_emitido_por_clave(
@@ -6166,7 +6964,11 @@ def _flujo_emitidos(
                                 claves_guardadas,
                             )
                             if resultado_xml:
-                                n_xml += 1
+                                xml_path_report = resultado_xml
+                                if descargar_xml:
+                                    n_xml += 1
+                                else:
+                                    xml_temp_paths.append(xml_path_report)
                                 lote_xml_ok += 1
                         except Exception as err:
                             print(f"[WARN] No se pudo obtener XML SOAP para '{nombre_base_pdf}': {err}")
@@ -6205,23 +7007,64 @@ def _flujo_emitidos(
                         n_pdf += 1
                         lote_pdf_ok += 1
                         if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
-                            if es_retencion:
-                                datos_pdf = _extraer_datos_pdf_retencion(resultado_pdf)
-                            elif es_nota_credito:
-                                datos_pdf = _extraer_datos_pdf_nota_credito(resultado_pdf)
-                            elif es_nota_debito:
-                                datos_pdf = _extraer_datos_pdf_nota_debito(resultado_pdf)
-                            else:
-                                datos_pdf = _extraer_datos_pdf(resultado_pdf)
-                            if clave_texto and not datos_pdf.get("claveAcceso"):
-                                datos_pdf["claveAcceso"] = clave_texto
-                            if not datos_pdf.get("numeroComprobante"):
-                                match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
-                                if match:
-                                    datos_pdf["numeroComprobante"] = match.group(0)
-                            if fecha_emision and not datos_pdf.get("fechaEmision"):
-                                datos_pdf["fechaEmision"] = fecha_emision
-                            pdf_report_rows.append(datos_pdf)
+                            datos_pdf = None
+                            if xml_path_report:
+                                try:
+                                    if es_retencion:
+                                        datos_xml = _extraer_datos_xml_retencion(xml_path_report)
+                                    else:
+                                        datos_xml = _extraer_datos_xml_pdf_report(xml_path_report)
+                                    datos_pdf = datos_xml
+                                except Exception as err:
+                                    print(f"[WARN] No se pudo usar XML para el reporte PDF: {err}")
+                            if datos_pdf is None:
+                                source_id_detalle = _obtener_source_detalle_emitido(page, idx)
+                                if source_id_detalle:
+                                    detalle_data = _obtener_detalle_emitido_xhr(
+                                        page,
+                                        request_context,
+                                        source_id_detalle,
+                                        payload_base,
+                                        view_state or _obtener_view_state(page),
+                                        tipo_visible,
+                                        tipo_serie_texto,
+                                        clave_texto,
+                                        ruc_emisor=ruc_emisor,
+                                    )
+                                    if detalle_data:
+                                        datos_pdf = detalle_data
+                            if datos_pdf is None:
+                                datos_pdf = _extraer_datos_emitidos_dom(
+                                    tipo_visible,
+                                    tipo_serie_texto,
+                                    clave_texto,
+                                    fecha_emision,
+                                    fecha_aut_texto,
+                                    razon_texto,
+                                    valor_sin_imp_texto,
+                                    iva_texto,
+                                    importe_total_texto,
+                                    ruc_emisor=ruc_emisor,
+                                )
+                            if datos_pdf is None:
+                                if es_retencion:
+                                    datos_pdf = _extraer_datos_pdf_retencion(resultado_pdf)
+                                elif es_nota_credito:
+                                    datos_pdf = _extraer_datos_pdf_nota_credito(resultado_pdf)
+                                elif es_nota_debito:
+                                    datos_pdf = _extraer_datos_pdf_nota_debito(resultado_pdf)
+                                else:
+                                    datos_pdf = _extraer_datos_pdf(resultado_pdf)
+                            if datos_pdf:
+                                if clave_texto and not datos_pdf.get("claveAcceso"):
+                                    datos_pdf["claveAcceso"] = clave_texto
+                                if not datos_pdf.get("numeroComprobante"):
+                                    match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
+                                    if match:
+                                        datos_pdf["numeroComprobante"] = match.group(0)
+                                if fecha_emision and not datos_pdf.get("fechaEmision"):
+                                    datos_pdf["fechaEmision"] = fecha_emision
+                                pdf_report_rows.append(datos_pdf)
                     else:
                         print(f"[WARN] No se pudo descargar PDF para '{nombre_base_pdf}': no se obtuvo archivo.")
 
@@ -6270,7 +7113,8 @@ def _flujo_emitidos(
                             break
                         sufijo_xml += 1
             try:
-                construir_reporte(xml_dir, xml_report_path)
+                estado_default_reporte = estado_visible if modo_no_autorizados else None
+                construir_reporte(xml_dir, xml_report_path, estado_default_reporte)
                 info_base["reporte_xml"] = str(xml_report_path)
             except Exception as err:
                 print(f"[WARN] No se pudo construir el reporte XML de emitidos: {err}")
@@ -6305,6 +7149,12 @@ def _flujo_emitidos(
             "estado": "sin_resultados",
             "n_registros": 0,
         })
+    if not descargar_xml and xml_temp_paths:
+        for xml_tmp in xml_temp_paths:
+            try:
+                Path(xml_tmp).unlink(missing_ok=True)
+            except Exception:
+                pass
     return info_base
 
 # ============================================================
@@ -6328,6 +7178,8 @@ def descargar_sri(
     punto_emision: Optional[str] = None,
 ):
     _check_cancel("inicio_descarga")
+    hoy = datetime.now().date()
+    aviso_recorte = None
     destino.mkdir(parents=True, exist_ok=True)
     destino_recibidos = destino / "Recibidos"
     destino_emitidos = destino / "Emitidos"
@@ -6371,6 +7223,34 @@ def descargar_sri(
                     mes_fin_val = int(mes_fin)
             except Exception:
                 mes_fin_val = None
+            if anio > hoy.year:
+                return {
+                    "estado": "sin_resultados",
+                    "mensaje": "La fecha solicitada es futura.",
+                    "n_xml": 0,
+                    "n_pdf": 0,
+                }
+            if anio == hoy.year:
+                max_mes = hoy.month
+                if mes_fin_val and mes_fin_val > max_mes:
+                    aviso_recorte = f"Rango ajustado hasta el mes actual ({hoy.month:02d}/{hoy.year})."
+                    mes_fin_val = max_mes
+                if mes > max_mes:
+                    return {
+                        "estado": "sin_resultados",
+                        "mensaje": "La fecha solicitada es futura.",
+                        "n_xml": 0,
+                        "n_pdf": 0,
+                        "aviso_recorte": aviso_recorte,
+                    }
+                if dia not in (0, None) and mes == max_mes and int(dia) > hoy.day:
+                    return {
+                        "estado": "sin_resultados",
+                        "mensaje": "La fecha solicitada es futura.",
+                        "n_xml": 0,
+                        "n_pdf": 0,
+                        "aviso_recorte": aviso_recorte,
+                    }
             if mes_fin_val and mes_fin_val >= mes and dia in (0, None):
                 formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
                 reportes_xml = []
@@ -6419,6 +7299,8 @@ def descargar_sri(
                 resultado["n_pdf"] = total_pdf
                 resultado["estado"] = "sin_resultados" if total_xml == 0 and total_pdf == 0 else "ok"
                 resultado["mensaje"] = f"Procesados {mes_fin_val - mes_inicio + 1} meses"
+                if aviso_recorte:
+                    resultado["aviso_recorte"] = aviso_recorte
                 resultado["detalles_meses"] = detalle_meses
                 resultado["rango_meses"] = True
                 resultado["mes_inicio"] = mes_inicio
@@ -6433,34 +7315,80 @@ def descargar_sri(
                         "tipo_slug",
                         _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
                     )
-                    if reportes_xml:
-                        destino_anual_xml = destino_objetivo / f"{anio:04d}" / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
-                        anual_xml = _consolidar_reportes_excel(reportes_xml, destino_anual_xml)
-                        if anual_xml:
-                            resultado["reporte_xml_anual"] = str(anual_xml)
+                    if "XML" in formatos_norm:
+                        base_anual = destino_objetivo / f"{anio:04d}"
+                        if base_anual.exists():
+                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
+                            _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
+                            xml_files = _xml_files_por_tipo(base_anual, tipo_prefijo)
+                            if xml_files:
+                                destino_anual_xml = base_anual / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                                try:
+                                    construir_reporte(base_anual, destino_anual_xml, None, xml_files=xml_files)
+                                except Exception as err:
+                                    print(f"[WARN] No se pudo construir reporte XML anual (recibidos): {err}")
+                                if destino_anual_xml.exists():
+                                    resultado["reporte_xml_anual"] = str(destino_anual_xml)
+                            elif reportes_xml:
+                                destino_anual_xml = base_anual / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                                anual_xml = _consolidar_reportes_excel(reportes_xml, destino_anual_xml)
+                                if anual_xml:
+                                    resultado["reporte_xml_anual"] = str(anual_xml)
                     if reportes_pdf:
                         destino_anual_pdf = destino_objetivo / f"{anio:04d}" / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}.xlsx"
                         anual_pdf = _consolidar_reportes_excel(reportes_pdf, destino_anual_pdf)
                         if anual_pdf:
                             resultado["reporte_pdf_anual"] = str(anual_pdf)
                     resultado["anual"] = True
+                else:
+                    if "XML" in formatos_norm:
+                        base_rango = destino_objetivo / f"{anio:04d}"
+                        if base_rango.exists():
+                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
+                            _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
+                            meses_rango = range(mes_inicio, mes_fin_val + 1)
+                            xml_files = _xml_files_por_meses(base_rango, tipo_prefijo, meses_rango)
+                            if xml_files:
+                                sufijo_rango = f"{anio:04d}{mes_inicio:02d}{mes_fin_val:02d}"
+                                destino_rango_xml = base_rango / f"recibidos_reporte_xml_{tipo_slug}_{sufijo_rango}.xlsx"
+                                try:
+                                    construir_reporte(base_rango, destino_rango_xml, None, xml_files=xml_files)
+                                except Exception as err:
+                                    print(f"[WARN] No se pudo construir reporte XML del rango (recibidos): {err}")
+                                if destino_rango_xml.exists():
+                                    resultado["reporte_xml_rango"] = str(destino_rango_xml)
                 resultado.pop("reporte_pdf", None)
                 resultado.pop("reporte_xml", None)
                 carpeta_rango = destino_objetivo / f"{anio:04d}"
                 resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_objetivo)
             else:
                 resultado = _flujo_recibidos(modulo_page, destino_objetivo, anio, mes, dia, tipo, formatos)
+                if aviso_recorte:
+                    resultado["aviso_recorte"] = aviso_recorte
         elif origen == "Emitidos":
             modulo_page = _abrir_modulo_consultas(page, origen)
             _resolver_captcha(modulo_page, f"{origen.lower()}_Modulo")
             destino_objetivo = destino_emitidos
             def _emitidos_por_mes(mes_actual: int, dia_actual: int):
+                nonlocal aviso_recorte
+                if anio > hoy.year:
+                    return {"estado": "sin_descargas", "n_registros": 0, "n_xml": 0, "n_pdf": 0}
+                if anio == hoy.year and mes_actual > hoy.month:
+                    return {"estado": "sin_descargas", "n_registros": 0, "n_xml": 0, "n_pdf": 0}
                 dias_consultar = []
+                dias_en_mes = calendar.monthrange(anio, mes_actual)[1]
+                limite_dia = dias_en_mes
+                if anio == hoy.year and mes_actual == hoy.month:
+                    limite_dia = min(limite_dia, hoy.day)
+                    if limite_dia < dias_en_mes:
+                        aviso_recorte = f"Rango ajustado hasta el día actual ({hoy.day:02d}/{hoy.month:02d}/{hoy.year})."
                 if dia_actual in (0, None):
-                    dias_en_mes = calendar.monthrange(anio, mes_actual)[1]
-                    dias_consultar = list(range(1, dias_en_mes + 1))
+                    dias_consultar = list(range(1, limite_dia + 1))
                 else:
-                    dias_consultar = [int(dia_actual)]
+                    dia_int = int(dia_actual)
+                    if dia_int > limite_dia:
+                        return {"estado": "sin_descargas", "n_registros": 0, "n_xml": 0, "n_pdf": 0}
+                    dias_consultar = [dia_int]
                 total_regs = total_xml = total_pdf = 0
                 detalle_dias = []
                 formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
@@ -6479,6 +7407,7 @@ def descargar_sri(
                         establecimiento,
                         punto_emision,
                         formatos,
+                        ruc_emisor=ruc,
                     )
                     detalle_dias.append(
                         {
@@ -6507,6 +7436,8 @@ def descargar_sri(
                         estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
                         estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
                         estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
+                        estado_norm = estado_normalizado.lower()
+                        estado_default_reporte = estado_nombre if "no autoriz" in estado_norm else None
                         tipo_visible = TIPOS_MAP.get(tipo, tipo)
                         tipo_slug = _slug_tipo(tipo_visible or tipo)
                         anio_dir = f"{anio:04d}"
@@ -6526,7 +7457,7 @@ def descargar_sri(
                                             break
                                         sufijo_xml += 1
                             try:
-                                construir_reporte(carpeta_mes, xml_report_path)
+                                construir_reporte(carpeta_mes, xml_report_path, estado_default_reporte)
                                 resultado_mes["reporte_xml"] = str(xml_report_path)
                             except Exception as err:
                                 print(f"[WARN] No se pudo construir el reporte XML mensual de emitidos: {err}")
@@ -6577,6 +7508,15 @@ def descargar_sri(
                     mes_fin_val = int(mes_fin)
             except Exception:
                 mes_fin_val = None
+            if anio > hoy.year:
+                return {"estado": "sin_descargas", "n_registros": 0, "n_xml": 0, "n_pdf": 0}
+            if anio == hoy.year:
+                max_mes = hoy.month
+                if mes_fin_val and mes_fin_val > max_mes:
+                    aviso_recorte = f"Rango ajustado hasta el mes actual ({hoy.month:02d}/{hoy.year})."
+                    mes_fin_val = max_mes
+                if mes > max_mes:
+                    return {"estado": "sin_descargas", "n_registros": 0, "n_xml": 0, "n_pdf": 0}
             if mes_fin_val and mes_fin_val >= mes and dia in (0, None):
                 reportes_xml = []
                 reportes_pdf = []
@@ -6608,6 +7548,8 @@ def descargar_sri(
                 resultado["n_pdf"] = total_pdf
                 resultado["estado"] = "sin_descargas" if total_regs == 0 else "ok"
                 resultado["mensaje"] = f"Procesados {mes_fin_val - mes_inicio + 1} meses"
+                if aviso_recorte:
+                    resultado["aviso_recorte"] = aviso_recorte
                 resultado["detalles_meses"] = detalle_meses
                 resultado["rango_meses"] = True
                 resultado["mes_inicio"] = mes_inicio
@@ -6625,23 +7567,60 @@ def descargar_sri(
                         "tipo_slug",
                         _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
                     )
-                    if reportes_xml:
-                        destino_anual_xml = destino_emitidos / estado_slug / f"{anio:04d}" / f"emitidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
-                        anual_xml = _consolidar_reportes_excel(reportes_xml, destino_anual_xml)
-                        if anual_xml:
-                            resultado["reporte_xml_anual"] = str(anual_xml)
+                    if "XML" in formatos_norm:
+                        base_anual = destino_emitidos / estado_slug / f"{anio:04d}"
+                        if base_anual.exists():
+                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
+                            _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
+                            xml_files = _xml_files_por_tipo(base_anual, tipo_prefijo)
+                            estado_norm = estado_nombre.lower()
+                            estado_default_reporte = estado_nombre if "no autoriz" in estado_norm else None
+                            if xml_files:
+                                destino_anual_xml = base_anual / f"emitidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                                try:
+                                    construir_reporte(base_anual, destino_anual_xml, estado_default_reporte, xml_files=xml_files)
+                                except Exception as err:
+                                    print(f"[WARN] No se pudo construir reporte XML anual (emitidos): {err}")
+                                if destino_anual_xml.exists():
+                                    resultado["reporte_xml_anual"] = str(destino_anual_xml)
+                            elif reportes_xml:
+                                destino_anual_xml = base_anual / f"emitidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                                anual_xml = _consolidar_reportes_excel(reportes_xml, destino_anual_xml)
+                                if anual_xml:
+                                    resultado["reporte_xml_anual"] = str(anual_xml)
                     if reportes_pdf:
                         destino_anual_pdf = destino_emitidos / estado_slug / f"{anio:04d}" / f"emitidos_reporte_pdf_{tipo_slug}_{anio:04d}.xlsx"
                         anual_pdf = _consolidar_reportes_excel(reportes_pdf, destino_anual_pdf)
                         if anual_pdf:
                             resultado["reporte_pdf_anual"] = str(anual_pdf)
                     resultado["anual"] = True
+                else:
+                    if "XML" in formatos_norm:
+                        base_rango = destino_emitidos / estado_slug / f"{anio:04d}"
+                        if base_rango.exists():
+                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
+                            _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
+                            meses_rango = range(mes_inicio, mes_fin_val + 1)
+                            xml_files = _xml_files_por_meses(base_rango, tipo_prefijo, meses_rango)
+                            estado_norm = estado_nombre.lower()
+                            estado_default_reporte = estado_nombre if "no autoriz" in estado_norm else None
+                            if xml_files:
+                                sufijo_rango = f"{anio:04d}{mes_inicio:02d}{mes_fin_val:02d}"
+                                destino_rango_xml = base_rango / f"emitidos_reporte_xml_{tipo_slug}_{sufijo_rango}.xlsx"
+                                try:
+                                    construir_reporte(base_rango, destino_rango_xml, estado_default_reporte, xml_files=xml_files)
+                                except Exception as err:
+                                    print(f"[WARN] No se pudo construir reporte XML del rango (emitidos): {err}")
+                                if destino_rango_xml.exists():
+                                    resultado["reporte_xml_rango"] = str(destino_rango_xml)
                 resultado.pop("reporte_pdf", None)
                 resultado.pop("reporte_xml", None)
                 carpeta_rango = destino_emitidos / estado_slug / f"{anio:04d}"
                 resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_emitidos)
             else:
                 resultado = _emitidos_por_mes(mes, dia)
+            if isinstance(resultado, dict) and aviso_recorte:
+                resultado.setdefault("aviso_recorte", aviso_recorte)
         else:
             if page.url != destino_url:
                 try:

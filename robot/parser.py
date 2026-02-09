@@ -751,8 +751,27 @@ def _parse_recibido_xml(xml_path: Path):
     )
 
 
-def construir_reporte(carpeta_mes: Path, excel_salida: Path):
-    xml_files = sorted(carpeta_mes.rglob("*.xml"))
+def construir_reporte(
+    carpeta_mes: Path,
+    excel_salida: Path,
+    estado_autorizacion_default: str | None = None,
+    xml_files: list[Path] | None = None,
+):
+    if xml_files is None:
+        xml_files = sorted(carpeta_mes.rglob("*.xml"))
+    else:
+        vistos = set()
+        normalizados: list[Path] = []
+        for item in xml_files:
+            try:
+                ruta = item if isinstance(item, Path) else Path(item)
+            except Exception:
+                continue
+            if ruta in vistos:
+                continue
+            vistos.add(ruta)
+            normalizados.append(ruta)
+        xml_files = normalizados
     if not xml_files:
         print("No se encontraron archivos XML en la carpeta.")
         return
@@ -781,6 +800,10 @@ def construir_reporte(carpeta_mes: Path, excel_salida: Path):
         if error_entry:
             errores_rows.append(error_entry)
             continue
+        if estado_autorizacion_default:
+            estado_actual = (cabecera.get("ESTADO_AUTORIZACION") or "").strip()
+            if not estado_actual:
+                cabecera["ESTADO_AUTORIZACION"] = estado_autorizacion_default
 
         for key, value in cabecera_tax_cols.items():
             cabecera[key] = value

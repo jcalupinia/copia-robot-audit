@@ -1,4 +1,4 @@
-﻿# =====================================================
+# =====================================================
 #  SRI ROBOT AUDIT  APLICACIN PRINCIPAL STREAMLIT
 # Versin estable para Render.com / Octubre 2025
 # =====================================================
@@ -25,6 +25,8 @@ from email.message import EmailMessage
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+import requests
+from urllib.parse import urljoin
 
 from robot.downloader import (
     descargar_sri,
@@ -38,6 +40,11 @@ from robot.downloader import (
 from robot.parser import construir_reporte
 from robot.historial import registrar_descarga, obtener_historial   #  FIX import correcto
 from licensing_client import LicensingClient
+# Actualizador de escritorio
+try:
+    import desktop_launcher as _desktop_launcher
+except Exception:
+    _desktop_launcher = None
 # Para restablecer contraseñas directamente en la base local
 try:
     from licensing_api.database import SessionLocal
@@ -55,9 +62,193 @@ if os.name == "nt":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 
+def _load_desktop_config() -> dict:
+    if not getattr(sys, "frozen", False):
+        return {}
+    exe_dir = Path(sys.executable).resolve().parent
+    candidates = [exe_dir / "desktop_config.json", Path.cwd() / "desktop_config.json"]
+    for cand in candidates:
+        if cand.exists():
+            try:
+                return json.loads(cand.read_text(encoding="utf-8-sig"))
+            except Exception:
+                return {}
+    return {}
+
+
+def _get_update_payload() -> dict | None:
+    if _desktop_launcher is None:
+        return None
+    config = _load_desktop_config()
+    update_url = os.getenv("UPDATE_URL") or config.get("UPDATE_URL")
+    if not update_url:
+        license_url = os.getenv("LICENSE_API_URL") or config.get("LICENSE_API_URL") or ""
+        if license_url:
+            update_url = license_url.rstrip("/") + "/updates/latest"
+    if not update_url:
+        return None
+    token = os.getenv("UPDATE_TOKEN") or (config.get("UPDATE_TOKEN") or "")
+    token = token.strip() or None
+    headers = {}
+    if token:
+        headers["X-Update-Token"] = token
+    try:
+        resp = requests.get(update_url, headers=headers, timeout=8)
+        if resp.status_code >= 400:
+            return None
+        payload = resp.json()
+    except Exception:
+        return None
+    remote_version = str(payload.get("version") or "").strip()
+    if not remote_version:
+        return None
+    local_version = os.getenv("APP_VERSION") or _desktop_launcher.APP_VERSION
+    if not _desktop_launcher._is_remote_newer(remote_version, local_version):
+        return None
+    download_url = str(payload.get("url") or "").strip()
+    if not download_url:
+        return None
+    if not re.match(r"^https?://", download_url):
+        download_url = urljoin(update_url, download_url)
+    payload["url"] = download_url
+    if token:
+        payload["token"] = token
+    return payload
+
+
+def _start_update(payload: dict) -> None:
+    if _desktop_launcher is None:
+        return
+    target = _desktop_launcher.INSTALL_DIR / f"{_desktop_launcher.APP_NAME}.new.exe"
+    _desktop_launcher._download_file(payload["url"], target, token=payload.get("token"))
+    expected_sha = str(payload.get("sha256") or "").strip()
+    if expected_sha:
+        actual = _desktop_launcher._sha256_file(target)
+        if actual.lower() != expected_sha.lower():
+            target.unlink(missing_ok=True)
+            return
+    expected_size = payload.get("size")
+    if isinstance(expected_size, int) and expected_size > 0:
+        if target.stat().st_size != expected_size:
+            target.unlink(missing_ok=True)
+            return
+    _desktop_launcher._apply_update(target, hard_exit=True)
+
+
+def _auto_update_ui() -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    if _desktop_launcher is None:
+        return
+    if st.session_state.get("_update_checked"):
+        msg = st.session_state.get("_update_message")
+        if msg:
+            st.info(msg)
+        return
+    st.session_state["_update_checked"] = True
+    payload = _get_update_payload()
+    if not payload:
+        return
+    msg = "Actualizando... la app se reiniciara en breve."
+    st.session_state["_update_message"] = msg
+    st.session_state["_update_modal"] = True
+    st.info(msg)
+    def _worker():
+        try:
+            _start_update(payload)
+        except Exception:
+            pass
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def _render_update_modal() -> None:
+    if not st.session_state.get("_update_modal"):
+        return
+    message = st.session_state.get("_update_message") or "Actualizando..."
+    logo = _get_logo_data_uri()
+    logo_html = f"<img src='{logo}' alt='Logo' style='width:72px;margin-bottom:12px'/>" if logo else ""
+    st.markdown(
+        f"""
+<style>
+.update-overlay {{
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 10, 18, 0.82);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}}
+.update-card {{
+  width: min(520px, 92vw);
+  background: linear-gradient(160deg, #0f172a 0%, #0b1220 100%);
+  border-radius: 22px;
+  padding: 28px 30px;
+  color: #f8fafc;
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  text-align: center;
+}}
+.update-title {{
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}}
+.update-sub {{
+  color: rgba(226, 232, 240, 0.8);
+  font-size: 14px;
+  margin-bottom: 16px;
+}}
+.update-spinner {{
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3px solid rgba(148, 163, 184, 0.3);
+  border-top-color: #38bdf8;
+  margin: 0 auto 14px;
+  animation: spin 0.8s linear infinite;
+}}
+.update-progress {{
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  overflow: hidden;
+}}
+.update-progress span {{
+  display: block;
+  height: 100%;
+  width: 35%;
+  background: linear-gradient(90deg, #38bdf8, #22d3ee, #a78bfa);
+  animation: slide 1.2s ease-in-out infinite;
+}}
+@keyframes spin {{
+  to {{ transform: rotate(360deg); }}
+}}
+@keyframes slide {{
+  0% {{ transform: translateX(-120%); }}
+  50% {{ transform: translateX(40%); }}
+  100% {{ transform: translateX(120%); }}
+}}
+</style>
+<div class="update-overlay">
+  <div class="update-card">
+    {logo_html}
+    <div class="update-title">Actualizando ROBOT AUDIT SRI</div>
+    <div class="update-sub">{message}</div>
+    <div class="update-spinner"></div>
+    <div class="update-progress"><span></span></div>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+
 @st.cache_data(show_spinner=False)
 def _get_logo_data_uri():
-    logo_path = Path(__file__).parent / "LogoAUDIT.png"
+    logo_path = Path(__file__).parent / "AUDIT_IA_sin_fondo_transparente_FINAL.png"
     if not logo_path.exists():
         return None
     data = logo_path.read_bytes()
@@ -162,6 +353,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+_auto_update_ui()
+_render_update_modal()
 st.markdown(
     """
     <style>
@@ -465,6 +658,22 @@ button[aria-label="Detener proceso"]{
     .historial-title {
         color: #ffffff !important;
     }
+    .stApp label,
+    .stApp label[data-testid="stWidgetLabel"],
+    .stApp div[data-testid="stWidgetLabel"] label,
+    .stApp [data-baseweb="radio"] label,
+    .stApp [data-baseweb="checkbox"] label,
+    .stApp [data-baseweb="select"] label,
+    .stApp [data-baseweb="input"] label,
+    .stApp [data-baseweb="textarea"] label {
+        font-size: 1.1rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.01em;
+    }
+    .stApp [data-baseweb="radio"] span,
+    .stApp [data-baseweb="checkbox"] span {
+        font-size: 1.05rem !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -595,6 +804,32 @@ def _clear_cached_session():
     _SESSION_CACHE_MEMORY.pop(str(device_id or "default"), None)
     try:
         cache_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _clear_cached_auth_only():
+    if not ENABLE_SESSION_CACHE:
+        return
+    device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
+    cache_path = _session_cache_path(device_id)
+    data = None
+    if cache_path.exists():
+        try:
+            data = json.loads(cache_path.read_text())
+        except Exception:
+            data = None
+    if data is None:
+        data = _SESSION_CACHE_MEMORY.get(str(device_id or "default"))
+    if not data:
+        return
+    data.pop("auth_token", None)
+    _SESSION_CACHE_MEMORY[str(device_id or "default")] = dict(data)
+    try:
+        if data:
+            cache_path.write_text(json.dumps(data))
+        else:
+            cache_path.unlink(missing_ok=True)
     except Exception:
         pass
 
@@ -894,12 +1129,26 @@ def _render_login():
             st.error("Completa todos los campos.")
         else:
             try:
-                token = LICENSE_CLIENT.login(email.strip(), password)
+                email_clean = email.strip()
+                cached_email = (st.session_state.get("user_email") or "").strip().lower()
+                cached_ok = bool(
+                    st.session_state.get("license_validated")
+                    and st.session_state.get("device_fingerprint")
+                    and cached_email == email_clean.lower()
+                )
+                token = LICENSE_CLIENT.login(email_clean, password)
                 st.session_state["auth_token"] = token
-                st.session_state["user_email"] = email.strip()
-                st.session_state["license_validated"] = False
+                st.session_state["user_email"] = email_clean
+                if cached_ok:
+                    st.session_state["license_validated"] = True
+                else:
+                    st.session_state["license_validated"] = False
+                    st.session_state.pop("license_last_check", None)
                 _persist_session_state()
-                st.success("Inicio de sesión exitoso. Continúa con la activación.")
+                if cached_ok:
+                    st.success("Inicio de sesión exitoso.")
+                else:
+                    st.success("Inicio de sesión exitoso. Continúa con la activación.")
             except Exception as err:
                 st.error(f"Error al autenticar: {err}")
 
@@ -993,10 +1242,14 @@ with st.sidebar:
         st.markdown("**Usuario conectado**")
         st.caption(user_email)
         if st.button("Cerrar sesión"):
+            device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
+            _clear_cached_auth_only()
             st.session_state.clear()
-            _clear_cached_session()
+            if device_id:
+                st.session_state["_device_id"] = device_id
+            st.rerun()
 
-    logo_path = Path(__file__).parent / "LogoAUDIT.png"
+    logo_path = Path(__file__).parent / "AUDIT_IA_sin_fondo_transparente_FINAL.png"
     if logo_path.exists():
         st.image(str(logo_path), width=180)
     st.markdown("###  Auditora Web SRI Robot")
@@ -1019,7 +1272,8 @@ with tab1:
 
     col_base1, col_base2 = st.columns([2, 2])
     with col_base1:
-        ruc = st.text_input("RUC", placeholder="Ejemplo: 0999999001")
+        ruc_input = st.text_input("RUC", placeholder="Ejemplo: 0999999001")
+        ruc = re.sub(r"\s+", "", ruc_input or "").strip()
         ci_adicional_input = ""
         clave = st.text_input("Clave del SRI", type="password", placeholder="********")
 
@@ -1058,6 +1312,20 @@ with tab1:
     mes_recibidos = datetime.now().month
     dia_recibidos = 0
     mes_fin_recibidos = datetime.now().month
+    meses_es = [
+        "Enero",
+        "Febrero",
+        "Marzo",
+        "Abril",
+        "Mayo",
+        "Junio",
+        "Julio",
+        "Agosto",
+        "Septiembre",
+        "Octubre",
+        "Noviembre",
+        "Diciembre",
+    ]
     modo_fechas_recibidos = "Mes y día"
     modo_fechas_emitidos = "Mes y día"
 
@@ -1075,13 +1343,21 @@ with tab1:
                     "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_r2:
-                mes_recibidos = st.number_input(
-                    "Mes inicio (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
+                mes_inicio_label = st.selectbox(
+                    "Mes inicio",
+                    meses_es,
+                    index=mes_recibidos - 1,
+                    key="mes_inicio_recibidos",
                 )
             with col_r3:
-                mes_fin_recibidos = st.number_input(
-                    "Mes fin (1-12)", min_value=1, max_value=12, value=mes_recibidos, step=1
+                mes_fin_label = st.selectbox(
+                    "Mes fin",
+                    meses_es,
+                    index=mes_fin_recibidos - 1,
+                    key="mes_fin_recibidos",
                 )
+            mes_recibidos = meses_es.index(mes_inicio_label) + 1
+            mes_fin_recibidos = meses_es.index(mes_fin_label) + 1
             dia_recibidos = 0
         elif modo_fechas_recibidos == "Año completo":
             col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
@@ -1099,9 +1375,13 @@ with tab1:
                     "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_r2:
-                mes_recibidos = st.number_input(
-                    "Mes (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
+                mes_label = st.selectbox(
+                    "Mes",
+                    meses_es,
+                    index=mes_recibidos - 1,
+                    key="mes_recibidos",
                 )
+            mes_recibidos = meses_es.index(mes_label) + 1
             with col_r3:
                 dia_recibidos = st.number_input(
                     "Día (0 = Todos)", min_value=0, max_value=31, value=0, step=1,
@@ -1122,13 +1402,21 @@ with tab1:
                     "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_f2:
-                mes_emitidos = st.number_input(
-                    "Mes inicio (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
+                mes_inicio_label = st.selectbox(
+                    "Mes inicio",
+                    meses_es,
+                    index=mes_emitidos - 1,
+                    key="mes_inicio_emitidos",
                 )
             with col_f3:
-                mes_fin_emitidos = st.number_input(
-                    "Mes fin (1-12)", min_value=1, max_value=12, value=mes_emitidos, step=1
+                mes_fin_label = st.selectbox(
+                    "Mes fin",
+                    meses_es,
+                    index=mes_fin_emitidos - 1,
+                    key="mes_fin_emitidos",
                 )
+            mes_emitidos = meses_es.index(mes_inicio_label) + 1
+            mes_fin_emitidos = meses_es.index(mes_fin_label) + 1
             dia_emitidos = 0
         elif modo_fechas_emitidos == "Año completo":
             col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
@@ -1146,9 +1434,13 @@ with tab1:
                     "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_f2:
-                mes_emitidos = st.number_input(
-                    "Mes (1-12)", min_value=1, max_value=12, value=datetime.now().month, step=1
+                mes_label = st.selectbox(
+                    "Mes",
+                    meses_es,
+                    index=mes_emitidos - 1,
+                    key="mes_emitidos",
                 )
+            mes_emitidos = meses_es.index(mes_label) + 1
             with col_f3:
                 dia_emitidos = st.number_input(
                     "Día (0 = Todos)",
@@ -1159,7 +1451,7 @@ with tab1:
                     help="Ingresa 0 para descargar todos los días del mes.",
                 )
         estado_emitidos = st.selectbox(
-            "Estado de autorización", ["Autorizados", "No autorizados", "Por procesar"], index=0
+            "Estado de autorización", ["Autorizados", "No autorizados"], index=0
         )
         col_e1, col_e2 = st.columns([1, 1])
         with col_e1:
@@ -1531,6 +1823,10 @@ with tab1:
 
         if resultado:
             estado = resultado.get("estado", "")
+            carpeta_tipo = Path(resultado.get("carpeta_tipo") or params.get("destino"))
+            aviso_recorte = resultado.get("aviso_recorte")
+            if aviso_recorte:
+                st.warning(aviso_recorte)
             if estado in {"sin_descargas", "sin_resultados"}:
                 st.warning(" No se encontraron comprobantes para el período seleccionado.")
             elif params.get("origen") == "Emitidos":
@@ -1559,7 +1855,6 @@ with tab1:
                     filtros.append(f"Punto: {resultado['punto_emision']}")
                 if filtros:
                     st.caption(" | ".join(filtros))
-                carpeta_tipo = Path(resultado.get("carpeta_tipo") or params.get("destino"))
                 st.caption(f"Archivos organizados en: `{carpeta_tipo}`")
                 reporte_path = resultado.get("reporte")
                 if reporte_path and Path(reporte_path).exists():
@@ -1590,6 +1885,15 @@ with tab1:
                         )
                 if resultado.get("rango_meses"):
                     st.info("Se generaron reportes por cada mes en las carpetas correspondientes.")
+                    reporte_xml_rango = resultado.get("reporte_xml_rango")
+                    if reporte_xml_rango and Path(reporte_xml_rango).exists():
+                        with open(reporte_xml_rango, "rb") as f:
+                            st.download_button(
+                                " Descargar reporte XML del rango (Emitidos)",
+                                f,
+                                file_name=Path(reporte_xml_rango).name,
+                                use_container_width=True,
+                            )
                     reporte_pdf_anual = resultado.get("reporte_pdf_anual")
                     if reporte_pdf_anual and Path(reporte_pdf_anual).exists():
                         with open(reporte_pdf_anual, "rb") as f:
@@ -1612,7 +1916,6 @@ with tab1:
                 n_xml = resultado.get("n_xml", 0)
                 n_pdf = resultado.get("n_pdf", 0)
                 tipo_visible = resultado.get("tipo_visible", params.get("tipo"))
-                carpeta_tipo = Path(resultado.get("carpeta_tipo") or params.get("destino"))
                 st.success(f" Descarga completada ({tipo_visible}). XML: {n_xml} | PDF: {n_pdf}")
                 st.caption(f"Archivos organizados en: `{carpeta_tipo}`")
 
@@ -1627,6 +1930,15 @@ with tab1:
                         )
                 if resultado.get("rango_meses"):
                     st.info("Se generaron reportes por cada mes en las carpetas correspondientes.")
+                    reporte_xml_rango = resultado.get("reporte_xml_rango")
+                    if reporte_xml_rango and Path(reporte_xml_rango).exists():
+                        with open(reporte_xml_rango, "rb") as f:
+                            st.download_button(
+                                " Descargar reporte XML del rango (Recibidos)",
+                                f,
+                                file_name=Path(reporte_xml_rango).name,
+                                use_container_width=True,
+                            )
                     reporte_pdf_anual = resultado.get("reporte_pdf_anual")
                     if reporte_pdf_anual and Path(reporte_pdf_anual).exists():
                         with open(reporte_pdf_anual, "rb") as f:
@@ -1677,23 +1989,24 @@ with tab1:
                                 use_container_width=True,
                             )
 
-            zip_target = carpeta_tipo
-            zip_path = zip_target.with_suffix(".zip")
-            if zip_path.exists():
-                try:
-                    zip_path.unlink()
-                except PermissionError:
-                    sufijo = 1
-                    while True:
-                        zip_path = zip_target.with_name(f"{zip_target.name}_{sufijo}").with_suffix(".zip")
-                        if not zip_path.exists():
-                            break
-                        sufijo += 1
-            shutil.make_archive(str(zip_path.with_suffix("")), "zip", zip_target)
-            if zip_path.exists():
-                with open(zip_path, "rb") as f:
-                    st.download_button(
-                        " Descargar ZIP de la carpeta",
+            if estado not in {"sin_descargas", "sin_resultados"} and carpeta_tipo:
+                zip_target = carpeta_tipo
+                zip_path = zip_target.with_suffix(".zip")
+                if zip_path.exists():
+                    try:
+                        zip_path.unlink()
+                    except PermissionError:
+                        sufijo = 1
+                        while True:
+                            zip_path = zip_target.with_name(f"{zip_target.name}_{sufijo}").with_suffix(".zip")
+                            if not zip_path.exists():
+                                break
+                            sufijo += 1
+                shutil.make_archive(str(zip_path.with_suffix("")), "zip", zip_target)
+                if zip_path.exists():
+                    with open(zip_path, "rb") as f:
+                        st.download_button(
+                            " Descargar ZIP de la carpeta",
                             f,
                             file_name=zip_path.name,
                             use_container_width=True,
