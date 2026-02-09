@@ -329,6 +329,22 @@ def updates_download(request: Request):
         return RedirectResponse(r2_url)
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archivo de actualizacion no configurado.")
 
+
+@app.get("/config/smtp")
+def config_smtp(request: Request):
+    _require_update_token(request)
+    payload = {
+        "SMTP_HOST": os.getenv("SMTP_HOST", "").strip(),
+        "SMTP_PORT": os.getenv("SMTP_PORT", "587").strip(),
+        "SMTP_USER": os.getenv("SMTP_USER", "").strip(),
+        "SMTP_PASSWORD": os.getenv("SMTP_PASSWORD", "").strip(),
+        "SMTP_FROM": os.getenv("SMTP_FROM", "").strip(),
+        "SMTP_USE_TLS": os.getenv("SMTP_USE_TLS", "1").strip(),
+    }
+    if not payload["SMTP_HOST"] or not payload["SMTP_USER"] or not payload["SMTP_PASSWORD"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SMTP no configurado.")
+    return payload
+
 @app.get("/", response_class=HTMLResponse)
 def landing_page(request: Request):
     version = os.getenv("UPDATE_VERSION", "").strip()

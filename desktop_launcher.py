@@ -18,6 +18,7 @@ APP_NAME = "ROBOT_AUDIT_SRI"
 VERSION_FILENAME = "version.txt"
 
 DEFAULT_LICENSE_API_URL = os.getenv("DEFAULT_LICENSE_API_URL", "https://sri-robot-audit-ik01.onrender.com")
+DEFAULT_UPDATE_TOKEN = os.getenv("DEFAULT_UPDATE_TOKEN", "").strip()
 
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 if getattr(sys, "frozen", False):
@@ -69,7 +70,19 @@ def _log(message: str) -> None:
         pass
 
 
-def _load_config():
+def _config_path_for_write() -> Path:
+    return _resolve_config_path() or (EXE_DIR / CONFIG_FILENAME)
+
+
+def _save_config(config: dict) -> None:
+    path = _config_path_for_write()
+    try:
+        path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        _fatal(f"No se pudo guardar {path}.", exc)
+
+
+def _load_config() -> dict:
     candidates = [
         EXE_DIR / CONFIG_FILENAME,
         Path.cwd() / CONFIG_FILENAME,
@@ -79,12 +92,71 @@ def _load_config():
             try:
                 return json.loads(path.read_text(encoding="utf-8-sig"))
             except Exception as exc:
-                _fatal(f"Config inválido en {path}.", exc)
+                _fatal(f"Config inv?lido en {path}.", exc)
+
+    config: dict = {}
+    if DEFAULT_LICENSE_API_URL:
+        config["LICENSE_API_URL"] = DEFAULT_LICENSE_API_URL
+    if DEFAULT_UPDATE_TOKEN:
+        config["UPDATE_TOKEN"] = DEFAULT_UPDATE_TOKEN
+    if config:
+        _save_config(config)
+        return config
+
     _fatal(
         "Falta LICENSE_API_URL. Agrega esa URL en desktop_config.json "
         "(junto al .exe) y vuelve a abrir la app."
     )
     return {}
+
+
+def _get_license_url(config: dict) -> str:
+    license_url = os.environ.get("LICENSE_API_URL", "").strip()
+    if not license_url and isinstance(config, dict):
+        license_url = (config.get("LICENSE_API_URL") or "").strip()
+    return license_url
+
+
+def _get_update_token(config: dict) -> str | None:
+    token = os.environ.get("UPDATE_TOKEN", "").strip()
+    if not token and isinstance(config, dict):
+        token = (config.get("UPDATE_TOKEN") or "").strip()
+    return token or None
+
+
+def _hydrate_smtp_config(config: dict) -> dict:
+    if not isinstance(config, dict):
+        return config
+
+    keys = ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_USE_TLS")
+    missing = [key for key in keys if not str(config.get(key, "")).strip()]
+    if not missing:
+        return config
+
+    license_url = _get_license_url(config)
+    token = _get_update_token(config)
+    if not (license_url and token):
+        return config
+
+    endpoint = license_url.rstrip("/") + "/config/smtp"
+    headers = {"X-Update-Token": token}
+    try:
+        response = requests.get(endpoint, headers=headers, timeout=10)
+        if response.status_code >= 400:
+            return config
+        data = response.json()
+    except Exception:
+        return config
+
+    updated = False
+    for key in keys:
+        value = str(data.get(key, "")).strip()
+        if value and not str(config.get(key, "")).strip():
+            config[key] = value
+            updated = True
+    if updated:
+        _save_config(config)
+    return config
 
 def _resolve_config_path() -> Path | None:
     candidates = [EXE_DIR / CONFIG_FILENAME, Path.cwd() / CONFIG_FILENAME]
@@ -112,11 +184,17 @@ def _ensure_installed() -> None:
         config_src = _resolve_config_path()
         if config_src:
             shutil.copy2(config_src, INSTALL_DIR / CONFIG_FILENAME)
-        elif DEFAULT_LICENSE_API_URL:
-            (INSTALL_DIR / CONFIG_FILENAME).write_text(
-                json.dumps({"LICENSE_API_URL": DEFAULT_LICENSE_API_URL}, indent=2),
-                encoding="utf-8",
-            )
+        else:
+            default_config = {}
+            if DEFAULT_LICENSE_API_URL:
+                default_config["LICENSE_API_URL"] = DEFAULT_LICENSE_API_URL
+            if DEFAULT_UPDATE_TOKEN:
+                default_config["UPDATE_TOKEN"] = DEFAULT_UPDATE_TOKEN
+            if default_config:
+                (INSTALL_DIR / CONFIG_FILENAME).write_text(
+                    json.dumps(default_config, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
 
         subprocess.Popen([str(target_exe)])
     except Exception as exc:
@@ -308,6 +386,7 @@ def main():
         os.environ["PYTHONPATH"] = str(APP_DIR)
 
     config = _load_config()
+    config = _hydrate_smtp_config(config)
     os.environ.setdefault("APP_VERSION", APP_VERSION)
     os.environ.setdefault("UPDATE_IN_APP", "1")
 
