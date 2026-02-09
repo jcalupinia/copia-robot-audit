@@ -95,7 +95,12 @@ def _r2_presigned_url() -> str | None:
     try:
         return client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": bucket, "Key": object_key},
+            Params={
+                "Bucket": bucket,
+                "Key": object_key,
+                "ResponseContentDisposition": f'attachment; filename="{object_key}"',
+                "ResponseContentType": "application/octet-stream",
+            },
             ExpiresIn=expires_in,
         )
     except Exception:
