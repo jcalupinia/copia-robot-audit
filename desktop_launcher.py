@@ -313,7 +313,15 @@ def main():
     if "LICENSE_API_URL" not in os.environ:
         license_url = (config.get("LICENSE_API_URL") or "").strip()
         if not license_url:
-            _fatal("LICENSE_API_URL vacío en desktop_config.json.")
+            license_url = DEFAULT_LICENSE_API_URL
+            if license_url:
+                config["LICENSE_API_URL"] = license_url
+                try:
+                    _save_config(config)
+                except Exception:
+                    pass
+        if not license_url:
+            _fatal("LICENSE_API_URL vac?o en desktop_config.json.")
         os.environ["LICENSE_API_URL"] = license_url
 
     session_cache_dir = (config.get("SESSION_CACHE_DIR") or "").strip()
