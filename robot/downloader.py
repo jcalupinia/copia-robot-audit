@@ -106,6 +106,32 @@ try:
     PAUSE_BEFORE_CONSULTAR_SECONDS = int(os.getenv("PAUSE_BEFORE_CONSULTAR_SECONDS", "0"))
 except ValueError:
     PAUSE_BEFORE_CONSULTAR_SECONDS = 0
+try:
+    RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS = int(os.getenv("RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS", "10000"))
+except ValueError:
+    RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS = 10000
+try:
+    RECIBIDOS_CONSULTA_INTENTOS = max(1, int(os.getenv("RECIBIDOS_CONSULTA_INTENTOS", "5")))
+except ValueError:
+    RECIBIDOS_CONSULTA_INTENTOS = 5
+try:
+    RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC = max(
+        0.0,
+        float(os.getenv("RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC", "1.2")),
+    )
+except ValueError:
+    RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC = 1.2
+try:
+    RECIBIDOS_REHIDRATAR_DESDE_INTENTO = max(
+        2,
+        int(os.getenv("RECIBIDOS_REHIDRATAR_DESDE_INTENTO", "3")),
+    )
+except ValueError:
+    RECIBIDOS_REHIDRATAR_DESDE_INTENTO = 3
+RECIBIDOS_REHIDRATAR_ON_CAPTCHA = (
+    os.getenv("RECIBIDOS_REHIDRATAR_ON_CAPTCHA", "1").strip().lower()
+    in {"1", "true", "yes", "on", "si"}
+)
 DEVTOOLS_ENV = os.getenv("PLAYWRIGHT_DEVTOOLS", "0").strip().lower()
 DEVTOOLS = DEVTOOLS_ENV in {"1", "true", "yes", "on"}
 PERSISTENT_PROFILE_ENV = os.getenv("PLAYWRIGHT_PERSISTENT_PROFILE", "1").strip().lower()
@@ -5679,22 +5705,52 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             pass
     page.wait_for_selector("select#frmPrincipal\\:ano", state="visible", timeout=10000)
 
-    selector_ano = page.locator("select#frmPrincipal\\:ano")
-    if not _seleccionar_por_label(selector_ano, str(anio)):
-        raise RuntimeError("No fue posible seleccionar el año solicitado en el SRI.")
-
-    selector_mes = page.locator("select#frmPrincipal\\:mes")
+    selector_ano_css = "select#frmPrincipal\\:ano"
+    selector_mes_css = "select#frmPrincipal\\:mes"
+    selector_dia_css = "select#frmPrincipal\\:dia"
+    selector_tipo_css = "select#frmPrincipal\\:cmbTipoComprobante"
     mes_texto = _mes_a_texto(mes)
-    if not _seleccionar_por_label(selector_mes, mes_texto, f"{mes:02d}", str(mes)):
-        raise RuntimeError("No fue posible seleccionar el mes solicitado en el SRI.")
-
-    selector_dia = page.locator("select#frmPrincipal\\:dia")
     dia_labels = ("Todos", "0") if dia in (None, 0) else (str(dia), f"{dia:02d}")
-    if not _seleccionar_por_label(selector_dia, *dia_labels):
-        objetivo = "Todos" if dia in (None, 0) else str(dia)
-        raise RuntimeError(f"No fue posible seleccionar el dia '{objetivo}' en el SRI.")
+    tipo_visible = TIPOS_MAP.get(tipo, tipo)
 
-    _esperar_ajax(page)
+    def _aplicar_filtros_recibidos(estricto: bool = True) -> bool:
+        try:
+            selector_ano = page.locator(selector_ano_css)
+            if not _seleccionar_por_label(selector_ano, str(anio)):
+                if estricto:
+                    raise RuntimeError("No fue posible seleccionar el año solicitado en el SRI.")
+                return False
+
+            selector_mes = page.locator(selector_mes_css)
+            if not _seleccionar_por_label(selector_mes, mes_texto, f"{mes:02d}", str(mes)):
+                if estricto:
+                    raise RuntimeError("No fue posible seleccionar el mes solicitado en el SRI.")
+                return False
+
+            selector_dia = page.locator(selector_dia_css)
+            if not _seleccionar_por_label(selector_dia, *dia_labels):
+                objetivo = "Todos" if dia in (None, 0) else str(dia)
+                if estricto:
+                    raise RuntimeError(f"No fue posible seleccionar el dia '{objetivo}' en el SRI.")
+                return False
+
+            selector_tipo = page.locator(selector_tipo_css)
+            if not _seleccionar_en_select(page, selector_tipo_css, tipo_visible, tipo):
+                if not _seleccionar(page, "Tipo de comprobante", tipo_visible):
+                    if estricto:
+                        raise RuntimeError(
+                            f"No se pudo seleccionar el tipo de comprobante '{tipo_visible}' en Recibidos."
+                        )
+                    return False
+
+            _esperar_ajax(page)
+            return True
+        except Exception:
+            if estricto:
+                raise
+            return False
+
+    _aplicar_filtros_recibidos(estricto=True)
 
     def _valor_actual_dia():
         try:
@@ -5778,18 +5834,6 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         objetivo = "Todos" if dia in (None, 0) else str(dia)
         raise RuntimeError(f"No se logro confirmar el dia '{objetivo}' en el SRI.")
 
-    selector_tipo = page.locator("select#frmPrincipal\\:cmbTipoComprobante")
-    tipo_visible = TIPOS_MAP.get(tipo, tipo)
-    if not _seleccionar_en_select(
-        page,
-        "select#frmPrincipal\\:cmbTipoComprobante",
-        tipo_visible,
-        tipo,
-    ):
-        if not _seleccionar(page, "Tipo de comprobante", tipo_visible):
-            print(f"[WARN] No se pudo seleccionar el tipo de comprobante '{tipo_visible}' en Recibidos.")
-    _esperar_ajax(page)
-
     _orden_tipo, _label_tipo, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
     tipo_slug = _slug_tipo(tipo_visible or tipo)
     es_retencion = _es_tipo_retencion(tipo_visible or tipo)
@@ -5868,44 +5912,72 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         texto_norm = (texto or "").strip().lower()
         return "captcha incorrect" in texto_norm or "captcha inval" in texto_norm
 
-    def _esperar_token_recaptcha(timeout: int = 2000) -> bool:
+    def _leer_token_recaptcha() -> str:
+        try:
+            return page.evaluate(
+                "() => {"
+                " const el = document.querySelector('textarea[name=\"g-recaptcha-response\"]');"
+                " return el ? (el.value || '').trim() : '';"
+                " }"
+            ) or ""
+        except Exception:
+            return ""
+
+    def _esperar_token_recaptcha(
+        timeout: int = RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
+        token_previo: str = "",
+    ) -> tuple[bool, str]:
+        min_len = 20
         try:
             page.wait_for_function(
-                "() => { const el = document.querySelector('textarea[name=\"g-recaptcha-response\"]');"
-                " if (!el) return true; const v = (el.value || '').trim(); return v.length > 20; }",
+                """({previo, minLen}) => {
+                    const el = document.querySelector('textarea[name="g-recaptcha-response"]');
+                    if (!el) { return true; }
+                    const valor = (el.value || '').trim();
+                    if (valor.length < minLen) { return false; }
+                    if (previo && previo.trim().length > 0) {
+                        return valor !== previo.trim();
+                    }
+                    return true;
+                }""",
+                arg={"previo": token_previo, "minLen": min_len},
                 timeout=timeout,
             )
-            return True
+            token = _leer_token_recaptcha()
+            return True, token
         except Exception:
-            return False
+            token = _leer_token_recaptcha()
+            return False, token
 
     def _limpiar_estado_consulta() -> None:
-        try:
-            page.evaluate(
-                "() => {"
-                "  const overlays = document.querySelectorAll('#disablingDiv, #disablingOverlay');"
-                "  overlays.forEach(el => { el.style.display = 'none'; el.style.visibility = 'hidden'; el.remove(); });"
-                "  const form = document.querySelector('#frmPrincipal');"
-                "  if (form) { form.classList.remove('ui-state-disabled'); form.style.pointerEvents = 'auto'; }"
-                "  document.body.style.pointerEvents = 'auto';"
-                "}"
-            )
-        except Exception:
-            pass
         try:
             close_btn = alerta_parametros.locator(
                 ".ui-messages-close, .ui-messages-close-icon, .ui-icon-close"
             ).first
             if close_btn.count():
                 close_btn.click(timeout=500)
-            elif alerta_parametros.count():
-                alerta_parametros.first.evaluate("el => { el.style.display = 'none'; }")
         except Exception:
             pass
         try:
-            btn = page.locator("button:has-text('Consultar'), input[value='Consultar']").first
-            if btn.count():
-                btn.evaluate("el => { el.disabled = false; el.classList.remove('ui-state-disabled'); }")
+            page.evaluate(
+                "() => {"
+                "  const campos = document.querySelectorAll("
+                "    'textarea[name=\"g-recaptcha-response\"], input[name=\"g-recaptcha-response\"],"
+                " textarea[id*=\"g-recaptcha-response\"], input[id*=\"g-recaptcha-response\"]'"
+                "  );"
+                "  campos.forEach((el) => {"
+                "    el.value = '';"
+                "    try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}"
+                "    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}"
+                "  });"
+                "  try {"
+                "    if (window.grecaptcha && grecaptcha.enterprise && typeof grecaptcha.enterprise.reset === 'function') {"
+                "      grecaptcha.enterprise.reset();"
+                "    }"
+                "  } catch (e) {}"
+                "  try { window.__auditRecibidosSubmitting = false; } catch (e) {}"
+                "}"
+            )
         except Exception:
             pass
         try:
@@ -5916,6 +5988,72 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             page.wait_for_timeout(300)
         except Exception:
             pass
+
+    def _forzar_submit_unico_recibidos() -> None:
+        """
+        Evita doble envio al consultar Recibidos.
+        El portal dispara un submit inmediato y otro tras reCAPTCHA.
+        Interceptamos el click para ejecutar solo el flujo con token.
+        """
+        try:
+            ok = page.evaluate(
+                """() => {
+                    const btn = document.getElementById('frmPrincipal:btnBuscar');
+                    if (!btn) return false;
+                    if (btn.dataset.auditSingleSubmit === '1') return true;
+
+                    const actionName = 'consulta_recibidos';
+                    btn.dataset.auditSingleSubmit = '1';
+                    try {
+                        btn.setAttribute('onclick', 'return false;');
+                    } catch (e) {}
+
+                    const handler = function(ev) {
+                        try {
+                            if (ev) {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                if (typeof ev.stopImmediatePropagation === 'function') {
+                                    ev.stopImmediatePropagation();
+                                }
+                            }
+                        } catch (e) {}
+
+                        try {
+                            if (window.__auditRecibidosSubmitting) {
+                                return false;
+                            }
+                            window.__auditRecibidosSubmitting = true;
+                            window.setTimeout(() => { window.__auditRecibidosSubmitting = false; }, 2500);
+                        } catch (e) {}
+
+                        try { if (typeof deshabilitarBoton === 'function') deshabilitarBoton(btn); } catch (e) {}
+
+                        try {
+                            if (typeof executeRecaptcha === 'function') {
+                                executeRecaptcha(actionName);
+                                return false;
+                            }
+                        } catch (e) {}
+
+                        try {
+                            if (typeof rcBuscar === 'function') {
+                                rcBuscar();
+                            }
+                        } catch (e) {}
+                        return false;
+                    };
+                    btn.addEventListener('click', handler, true);
+                    try {
+                        btn.onclick = handler;
+                    } catch (e) {}
+                    return true;
+                }"""
+            )
+            if ok:
+                print("[INFO] Recibidos configurado en modo submit unico (evita doble XHR por clic).")
+        except Exception as err:
+            print(f"[WARN] No se pudo configurar submit unico en Recibidos: {err}")
 
     def _esperar_resultado_consulta(timeout: int = 300000) -> bool:
         limite = time.time() + (timeout / 1000)
@@ -5931,7 +6069,23 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             time.sleep(0.2)
         return False
 
-    def _intentar_consulta_recibidos(intentos: int = 3) -> bool:
+    def _rehidratar_consulta_recibidos() -> bool:
+        try:
+            page.goto(RECIBIDOS_DIRECT_URL, wait_until="domcontentloaded", timeout=5000)
+            page.wait_for_selector(selector_ano_css, state="visible", timeout=10000)
+        except Exception as err:
+            print(f"[WARN] No se pudo recargar Recibidos para reintentar captcha: {err}")
+            return False
+        ok = _aplicar_filtros_recibidos(estricto=False)
+        if not ok:
+            print("[WARN] No se pudieron reaplicar filtros de Recibidos al reintentar captcha.")
+            return False
+        _forzar_submit_unico_recibidos()
+        return ok
+
+    _forzar_submit_unico_recibidos()
+
+    def _intentar_consulta_recibidos(intentos: int = RECIBIDOS_CONSULTA_INTENTOS) -> bool:
         if PAUSE_BEFORE_CONSULTAR_SECONDS > 0:
             print(
                 f"[INFO] Pausa {PAUSE_BEFORE_CONSULTAR_SECONDS}s antes de 'Consultar' para abrir DevTools."
@@ -5943,14 +6097,62 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             except Exception:
                 pass
         if MANUAL_CONSULTA_RECIBIDOS:
-            _notificar_usuario_accion(
-                "[ACCION] Da clic manual en 'Consultar' (Recibidos) y espera el resultado."
-            )
-            return _esperar_resultado_consulta(timeout=300000)
+            for intento in range(1, intentos + 1):
+                _notificar_usuario_accion(
+                    f"[ACCION] Da clic manual en 'Consultar' (Recibidos). "
+                    f"Intento {intento}/{intentos}."
+                )
+                ok_manual = _esperar_resultado_consulta(timeout=300000)
+                alerta_manual = _texto_alerta()
+                if ok_manual:
+                    return True
+                if alerta_manual and _es_alerta_captcha(alerta_manual):
+                    print(
+                        f"[WARN] Captcha incorrecto tras clic manual "
+                        f"({intento}/{intentos})."
+                    )
+                    if intento >= intentos:
+                        return ok_manual
+                    _limpiar_estado_consulta()
+                    if RECIBIDOS_REHIDRATAR_ON_CAPTCHA and intento + 1 >= RECIBIDOS_REHIDRATAR_DESDE_INTENTO:
+                        _rehidratar_consulta_recibidos()
+                    if RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
+                        espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
+                        print(f"[INFO] Esperando {espera:.1f}s antes de reintento manual.")
+                        time.sleep(espera)
+                    continue
+                if alerta_manual:
+                    # Hay mensaje del portal (ej. sin resultados), salir para que lo procese la capa superior.
+                    return True
+                print(
+                    f"[WARN] Recibidos sin tabla ni alerta tras clic manual "
+                    f"({intento}/{intentos})."
+                )
+                if intento >= intentos:
+                    return False
+                _limpiar_estado_consulta()
+                if RECIBIDOS_REHIDRATAR_ON_CAPTCHA and intento + 1 >= RECIBIDOS_REHIDRATAR_DESDE_INTENTO:
+                    _rehidratar_consulta_recibidos()
+                if RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
+                    espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
+                    print(f"[INFO] Esperando {espera:.1f}s antes de reintento manual.")
+                    time.sleep(espera)
+            return False
+        token_previo = _leer_token_recaptcha()
         for intento in range(1, intentos + 1):
+            inicio_intento = time.perf_counter()
             if intento > 1:
                 _limpiar_estado_consulta()
-            _esperar_token_recaptcha(timeout=2000)
+            if RECIBIDOS_REHIDRATAR_ON_CAPTCHA and intento >= RECIBIDOS_REHIDRATAR_DESDE_INTENTO:
+                _rehidratar_consulta_recibidos()
+            token_ok, token_actual = _esperar_token_recaptcha(
+                timeout=RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
+                token_previo=token_previo if intento > 1 else "",
+            )
+            print(
+                f"[INFO] Recibidos intento {intento}/{intentos}: token_ok={token_ok}, "
+                f"token_len={len(token_actual or '')}"
+            )
             try:
                 boton_consultar.first.scroll_into_view_if_needed()
                 boton_consultar.first.hover()
@@ -5982,15 +6184,40 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 page.wait_for_load_state("networkidle", timeout=1000)
             except Exception:
                 pass
-            time.sleep(0.2)
+            _esperar_resultado_consulta(timeout=45000)
+            alerta_post = _texto_alerta()
+            if alerta_post and _es_alerta_captcha(alerta_post):
+                dur = time.perf_counter() - inicio_intento
+                print(
+                    f"[WARN] Captcha incorrecto en intento {intento}/{intentos} "
+                    f"({dur:.2f}s)."
+                )
+                token_previo = token_actual or token_previo
+                if intento < intentos and RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
+                    espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
+                    print(f"[INFO] Esperando {espera:.1f}s antes de reintentar Recibidos.")
+                    time.sleep(espera)
+                continue
             try:
                 if tabla_datos.is_visible():
+                    dur = time.perf_counter() - inicio_intento
+                    print(
+                        f"[INFO] Recibidos intento {intento}/{intentos} exitoso "
+                        f"({dur:.2f}s)."
+                    )
                     return True
             except Exception:
                 pass
+            if alerta_post:
+                return True
+            token_previo = token_actual or token_previo
+            if intento < intentos and RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
+                espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
+                print(f"[INFO] Sin tabla tras intento {intento}/{intentos}. Espera {espera:.1f}s.")
+                time.sleep(espera)
         return False
 
-    resultado_listo = _intentar_consulta_recibidos(intentos=3)
+    resultado_listo = _intentar_consulta_recibidos(intentos=RECIBIDOS_CONSULTA_INTENTOS)
     if not resultado_listo:
         try:
             tabla_datos.wait_for(state="visible", timeout=2000)
@@ -6001,7 +6228,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
     if alerta_texto:
         if _es_alerta_captcha(alerta_texto):
             _limpiar_estado_consulta()
-            resultado_listo = _intentar_consulta_recibidos(intentos=3)
+            resultado_listo = _intentar_consulta_recibidos(intentos=RECIBIDOS_CONSULTA_INTENTOS)
             try:
                 if not resultado_listo:
                     tabla_datos.wait_for(state="visible", timeout=2000)
@@ -7200,13 +7427,47 @@ def descargar_sri(
         if DEVTOOLS:
             launch_kwargs["devtools"] = True
             launch_kwargs["headless"] = False
-        try:
-            browser = p.chromium.launch(**launch_kwargs)
-        except Exception:
-            launch_kwargs.pop("channel", None)
-            browser = p.chromium.launch(**launch_kwargs)
-        context = browser.new_context(accept_downloads=True)
-        page = context.new_page()
+
+        browser = None
+        using_persistent_profile = False
+        context = None
+        if USE_PERSISTENT_PROFILE:
+            persistent_profile_dir = Path(USER_DATA_DIR).expanduser()
+            if not persistent_profile_dir.is_absolute():
+                persistent_profile_dir = Path.cwd() / persistent_profile_dir
+            try:
+                persistent_profile_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            persistent_kwargs = dict(launch_kwargs)
+            persistent_kwargs["accept_downloads"] = True
+            try:
+                context = p.chromium.launch_persistent_context(
+                    str(persistent_profile_dir),
+                    **persistent_kwargs,
+                )
+                using_persistent_profile = True
+            except Exception as err:
+                print(f"[WARN] No se pudo usar perfil persistente; fallback a contexto normal: {err}")
+                persistent_kwargs.pop("channel", None)
+                try:
+                    context = p.chromium.launch_persistent_context(
+                        str(persistent_profile_dir),
+                        **persistent_kwargs,
+                    )
+                    using_persistent_profile = True
+                except Exception:
+                    context = None
+
+        if context is None:
+            try:
+                browser = p.chromium.launch(**launch_kwargs)
+            except Exception:
+                launch_kwargs.pop("channel", None)
+                browser = p.chromium.launch(**launch_kwargs)
+            context = browser.new_context(accept_downloads=True)
+
+        page = context.pages[0] if context.pages else context.new_page()
 
         destino_url = PORTAL_HOME if origen in {"Recibidos", "Emitidos"} else URLS.get(origen, URLS["Recibidos"])
         _login(context, page, ruc, clave, cookies_path, destino_url, ci_adicional=ci_adicional)
@@ -7650,5 +7911,11 @@ def descargar_sri(
         except Exception as err:
             print(f"[WARN] No se pudo cerrar la sesion del SRI: {err}")
 
-        browser.close()
+        try:
+            if using_persistent_profile:
+                context.close()
+            else:
+                browser.close()
+        except Exception:
+            pass
         return resultado

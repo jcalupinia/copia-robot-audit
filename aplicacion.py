@@ -33,6 +33,7 @@ from robot.downloader import (
     set_user_notifier,
     MANUAL_CONSULTA_RECIBIDOS,
     _consolidar_reportes_excel,
+    _prefijo_tipo,
     _slug_tipo,
     TIPOS_MAP,
     ESTADOS_EMITIDOS_MAP,
@@ -45,7 +46,7 @@ try:
     import desktop_launcher as _desktop_launcher
 except Exception:
     _desktop_launcher = None
-# Para restablecer contraseñas directamente en la base local
+# Para restablecer contraseÃ±as directamente en la base local
 try:
     from licensing_api.database import SessionLocal
     from licensing_api import crud as lic_crud, security as lic_security
@@ -245,6 +246,67 @@ def _render_update_modal() -> None:
     )
 
 
+def _render_manual_consultar_modal() -> None:
+    msg = st.session_state.get("manual_consultar_hint")
+    ts = st.session_state.get("manual_consultar_hint_ts")
+    status = st.session_state.get("download_status")
+    if not msg or not ts:
+        return
+    if status not in {"running", "cancelling"}:
+        return
+    # Modal temporal para avisar la accion manual requerida.
+    if (time.time() - float(ts)) > 25:
+        return
+    st.markdown(
+        f"""
+<style>
+.manual-consultar-overlay {{
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9990;
+  pointer-events: none;
+}}
+.manual-consultar-card {{
+  width: min(560px, 90vw);
+  border-radius: 18px;
+  padding: 20px 22px;
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.96), rgba(10, 15, 28, 0.96));
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+  color: #f8fafc;
+}}
+.manual-consultar-title {{
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}}
+.manual-consultar-text {{
+  font-size: 14px;
+  color: rgba(226, 232, 240, 0.95);
+  line-height: 1.45;
+}}
+.manual-consultar-help {{
+  margin-top: 10px;
+  font-size: 13px;
+  color: rgba(148, 163, 184, 0.95);
+}}
+</style>
+<div class="manual-consultar-overlay">
+  <div class="manual-consultar-card">
+    <div class="manual-consultar-title">Accion requerida</div>
+    <div class="manual-consultar-text">Haz clic en <b>Consultar</b> en la ventana del navegador del SRI.</div>
+    <div class="manual-consultar-help">{msg}</div>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
 
 @st.cache_data(show_spinner=False)
 def _get_logo_data_uri():
@@ -274,16 +336,388 @@ def _slug_estado_emitidos(estado: str) -> str:
 def _buscar_reportes_mensuales(base_dir: Path, prefix: str) -> list[Path]:
     if not base_dir.exists():
         return []
-    # Permite reportes mensuales (YYYYMM) y diarios (YYYYMMDD)
+    # Permite nombres con o sin guion bajo tras el anio:
+    # - prefijoYYYYMM.xlsx
+    # - prefijo_YYMM.xlsx
+    # - prefijo_YYMMDD.xlsx
     regex = re.compile(
-        re.escape(prefix) + r"(\\d{2}(?:\\d{2})?)(?:_\\d+)?\\.xlsx$",
+        r"^" + re.escape(prefix) + r"(?:_)?(\d{2}(?:\d{2})?)(?:_\d+)?\.xlsx$",
         re.IGNORECASE,
     )
     encontrados: list[Path] = []
     for ruta in base_dir.rglob(f"{prefix}*.xlsx"):
-        if regex.search(ruta.name):
+        if regex.match(ruta.name):
             encontrados.append(ruta)
     return sorted(encontrados, key=lambda p: p.name)
+
+
+MESES_ES = [
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
+]
+
+MESES_ES_MAP = {
+    unicodedata.normalize("NFKD", nombre).encode("ascii", "ignore").decode("ascii").lower(): idx + 1
+    for idx, nombre in enumerate(MESES_ES)
+}
+
+
+def _normalizar_texto_simple(valor: str) -> str:
+    return unicodedata.normalize("NFKD", valor or "").encode("ascii", "ignore").decode("ascii").lower().strip()
+
+
+def _mes_desde_texto(valor: str) -> int | None:
+    texto = (valor or "").strip()
+    if not texto:
+        return None
+    if texto.isdigit():
+        mes_num = int(texto)
+        if 1 <= mes_num <= 12:
+            return mes_num
+        return None
+    return MESES_ES_MAP.get(_normalizar_texto_simple(texto))
+
+
+def _parsear_token_fecha_reporte(token: str) -> tuple[int, int, int | None] | None:
+    solo_digitos = re.sub(r"\D", "", token or "")
+    if len(solo_digitos) == 6:
+        anio = int(solo_digitos[:4])
+        mes = int(solo_digitos[4:6])
+        if 1 <= mes <= 12:
+            return anio, mes, None
+        return None
+    if len(solo_digitos) == 8:
+        anio = int(solo_digitos[:4])
+        mes = int(solo_digitos[4:6])
+        dia = int(solo_digitos[6:8])
+        if 1 <= mes <= 12 and 1 <= dia <= 31:
+            return anio, mes, dia
+        dia = int(solo_digitos[:2])
+        mes = int(solo_digitos[2:4])
+        anio = int(solo_digitos[4:8])
+        if 1 <= mes <= 12 and 1 <= dia <= 31:
+            return anio, mes, dia
+    return None
+
+
+def _fecha_coincide_consolidacion(
+    anio_archivo: int,
+    mes_archivo: int,
+    dia_archivo: int | None,
+    modo_fecha: str,
+    anio_objetivo: int,
+    mes_inicio: int,
+    mes_fin: int,
+    dia_objetivo: int,
+) -> bool:
+    if anio_archivo != anio_objetivo:
+        return False
+    if modo_fecha == "Ano completo":
+        return True
+    if modo_fecha == "Rango de meses":
+        return mes_inicio <= mes_archivo <= mes_fin
+    if mes_archivo != mes_inicio:
+        return False
+    if dia_objetivo in (0, None):
+        return True
+    return dia_archivo == dia_objetivo
+
+
+def _sufijo_periodo_consolidacion(
+    modo_fecha: str,
+    anio: int,
+    mes_inicio: int,
+    mes_fin: int,
+    dia: int,
+) -> str:
+    if modo_fecha == "Ano completo":
+        return f"{anio:04d}"
+    if modo_fecha == "Rango de meses":
+        return f"{anio:04d}{mes_inicio:02d}{mes_fin:02d}"
+    if dia in (0, None):
+        return f"{anio:04d}{mes_inicio:02d}"
+    return f"{anio:04d}{mes_inicio:02d}{dia:02d}"
+
+
+def _buscar_reportes_por_periodo(
+    base_dir: Path,
+    origen: str,
+    tipo_slug: str,
+    formato: str,
+    modo_fecha: str,
+    anio_objetivo: int,
+    mes_inicio: int,
+    mes_fin: int,
+    dia_objetivo: int,
+) -> list[Path]:
+    if not base_dir.exists():
+        return []
+    formato_norm = (formato or "").strip().lower()
+    if formato_norm not in {"xml", "pdf"}:
+        return []
+    origen_norm = (origen or "").strip().lower()
+    patron_main = re.compile(
+        r"^(recibidos|emitidos)_reporte_"
+        + re.escape(formato_norm)
+        + r"_"
+        + re.escape(tipo_slug)
+        + r"_(\d{6,8})(?:_\d+)?\.xlsx$",
+        re.IGNORECASE,
+    )
+    patron_alt_xml_recibidos = None
+    if formato_norm == "xml":
+        patron_alt_xml_recibidos = re.compile(
+            r"^reporte_"
+            + re.escape(tipo_slug)
+            + r"_(\d{4})_(\d{2})(?:_\d+)?\.xlsx$",
+            re.IGNORECASE,
+        )
+    encontrados: list[Path] = []
+    for ruta in base_dir.rglob("*.xlsx"):
+        partes_norm = {_normalizar_texto_simple(parte) for parte in ruta.parts}
+        if "consolidados" in partes_norm:
+            continue
+        nombre = ruta.name
+        match_main = patron_main.match(nombre)
+        if match_main:
+            origen_arch = (match_main.group(1) or "").strip().lower()
+            if origen_arch != origen_norm:
+                continue
+            fecha_info = _parsear_token_fecha_reporte(match_main.group(2))
+            if not fecha_info:
+                continue
+            anio_arch, mes_arch, dia_arch = fecha_info
+            if _fecha_coincide_consolidacion(
+                anio_arch,
+                mes_arch,
+                dia_arch,
+                modo_fecha,
+                anio_objetivo,
+                mes_inicio,
+                mes_fin,
+                dia_objetivo,
+            ):
+                encontrados.append(ruta)
+            continue
+
+        if patron_alt_xml_recibidos and origen_norm == "recibidos":
+            match_alt = patron_alt_xml_recibidos.match(nombre)
+            if not match_alt:
+                continue
+            anio_arch = int(match_alt.group(1))
+            mes_arch = int(match_alt.group(2))
+            if _fecha_coincide_consolidacion(
+                anio_arch,
+                mes_arch,
+                None,
+                modo_fecha,
+                anio_objetivo,
+                mes_inicio,
+                mes_fin,
+                dia_objetivo,
+            ):
+                encontrados.append(ruta)
+
+    encontrados = sorted(dict.fromkeys(encontrados), key=lambda p: str(p).lower())
+    return encontrados
+
+
+def _extraer_fecha_desde_ruta_documento(ruta: Path, tipo_prefijo: str) -> tuple[int, int, int | None] | None:
+    try:
+        tipo_dir = ruta.parent.parent
+    except Exception:
+        return None
+    if tipo_dir.name != tipo_prefijo:
+        return None
+    try:
+        dia_txt = tipo_dir.parent.name
+        mes_txt = tipo_dir.parent.parent.name
+        anio_txt = tipo_dir.parent.parent.parent.name
+    except Exception:
+        return None
+    if not anio_txt.isdigit():
+        return None
+    anio = int(anio_txt)
+    mes = _mes_desde_texto(mes_txt)
+    if not mes:
+        return None
+    dia: int | None = None
+    if dia_txt.isdigit():
+        dia_int = int(dia_txt)
+        if 1 <= dia_int <= 31:
+            dia = dia_int
+    return anio, mes, dia
+
+
+def _colectar_documentos_por_periodo(
+    base_dir: Path,
+    tipo_prefijo: str,
+    extension: str,
+    modo_fecha: str,
+    anio_objetivo: int,
+    mes_inicio: int,
+    mes_fin: int,
+    dia_objetivo: int,
+) -> list[Path]:
+    if not base_dir.exists():
+        return []
+    ext = (extension or "").strip().lower().lstrip(".")
+    if ext not in {"xml", "pdf"}:
+        return []
+    encontrados: list[Path] = []
+    for ruta in base_dir.rglob(f"*.{ext}"):
+        try:
+            partes_norm = {_normalizar_texto_simple(parte) for parte in ruta.parts}
+            if "consolidados" in partes_norm:
+                continue
+            if ruta.parent.name.lower() != ext:
+                continue
+            fecha_info = _extraer_fecha_desde_ruta_documento(ruta, tipo_prefijo)
+            if not fecha_info:
+                continue
+            anio_arch, mes_arch, dia_arch = fecha_info
+            if _fecha_coincide_consolidacion(
+                anio_arch,
+                mes_arch,
+                dia_arch,
+                modo_fecha,
+                anio_objetivo,
+                mes_inicio,
+                mes_fin,
+                dia_objetivo,
+            ):
+                encontrados.append(ruta)
+        except Exception:
+            continue
+    return sorted(dict.fromkeys(encontrados), key=lambda p: str(p).lower())
+
+
+def _copiar_documentos_unicos(archivos: list[Path], destino: Path) -> int:
+    if not archivos:
+        return 0
+    destino.mkdir(parents=True, exist_ok=True)
+    copiados = 0
+    for origen in archivos:
+        if not origen.exists():
+            continue
+        destino_final = destino / origen.name
+        if destino_final.exists():
+            sufijo = 1
+            while True:
+                candidato = destino / f"{origen.stem}_{sufijo}{origen.suffix}"
+                if not candidato.exists():
+                    destino_final = candidato
+                    break
+                sufijo += 1
+        try:
+            shutil.copy2(origen, destino_final)
+            copiados += 1
+        except Exception as err:
+            print(f"[WARN] No se pudo copiar documento consolidado: {origen} ({err})")
+    return copiados
+
+
+def _consolidar_reportes_xml_desde_excels(reportes: list[Path], destino: Path) -> Path | None:
+    rutas = [p for p in reportes if isinstance(p, Path) and p.exists()]
+    if not rutas:
+        return None
+    dataframes: list[pd.DataFrame] = []
+    columnas: list[str] | None = None
+    for ruta in rutas:
+        try:
+            xls = pd.ExcelFile(ruta)
+            hoja = "Cabecera" if "Cabecera" in xls.sheet_names else (xls.sheet_names[0] if xls.sheet_names else None)
+            if not hoja:
+                continue
+            df = pd.read_excel(ruta, sheet_name=hoja)
+        except Exception as err:
+            print(f"[WARN] No se pudo leer reporte XML para consolidar: {ruta} ({err})")
+            continue
+        if df is None or df.empty:
+            continue
+        if columnas is None:
+            columnas = list(df.columns)
+        else:
+            for col in df.columns:
+                if col not in columnas:
+                    columnas.append(col)
+        dataframes.append(df)
+    if not dataframes or not columnas:
+        return None
+    for idx, df in enumerate(dataframes):
+        for col in columnas:
+            if col not in df.columns:
+                df[col] = ""
+        dataframes[idx] = df[columnas]
+    try:
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        combinado = pd.concat(dataframes, ignore_index=True)
+        combinado.to_excel(destino, index=False)
+        return destino
+    except Exception as err:
+        print(f"[WARN] No se pudo escribir reporte XML consolidado: {destino} ({err})")
+        return None
+
+
+def _normalizar_ruc(value: str | None) -> str:
+    return "".join(ch for ch in (value or "") if ch.isdigit())
+
+
+def _resolver_busqueda_consolidacion(
+    carpeta_base: Path,
+    origen: str,
+    ruc_hint: str | None = None,
+    estado_slug: str | None = None,
+) -> Path:
+    ruc_limpio = _normalizar_ruc(ruc_hint)
+    candidatos: list[Path] = []
+    vistos: set[str] = set()
+
+    def _agregar(path: Path):
+        clave = str(path.resolve()) if path.exists() else str(path)
+        if clave in vistos:
+            return
+        vistos.add(clave)
+        candidatos.append(path)
+
+    if ruc_limpio and origen == "Emitidos" and estado_slug:
+        _agregar(carpeta_base / ruc_limpio / origen / estado_slug)
+    if origen == "Emitidos" and estado_slug:
+        _agregar(carpeta_base / origen / estado_slug)
+        _agregar(carpeta_base / estado_slug)
+    if ruc_limpio:
+        _agregar(carpeta_base / ruc_limpio / origen)
+    _agregar(carpeta_base / origen)
+    if ruc_limpio:
+        _agregar(carpeta_base / ruc_limpio)
+    _agregar(carpeta_base)
+
+    for cand in candidatos:
+        if not cand.exists():
+            continue
+        try:
+            if next(cand.rglob("*.xlsx"), None):
+                return cand
+        except Exception:
+            pass
+
+    for cand in candidatos:
+        if cand.exists():
+            return cand
+
+    return carpeta_base
+
+
 def _init_download_state():
     if "download_status" not in st.session_state:
         st.session_state.download_status = "idle"
@@ -307,6 +741,10 @@ def _init_download_state():
         st.session_state.running_notice_ts = None
     if "stop_notice_ts" not in st.session_state:
         st.session_state.stop_notice_ts = None
+    if "manual_consultar_hint" not in st.session_state:
+        st.session_state.manual_consultar_hint = None
+    if "manual_consultar_hint_ts" not in st.session_state:
+        st.session_state.manual_consultar_hint_ts = None
 
 def _drain_download_queue():
     q = st.session_state.download_queue
@@ -316,14 +754,27 @@ def _drain_download_queue():
         except queue.Empty:
             break
         if kind == "msg":
-            st.session_state.download_messages.append(str(payload))
-            st.session_state.last_download_message = (str(payload), time.time())
+            mensaje = str(payload)
+            st.session_state.download_messages.append(mensaje)
+            st.session_state.last_download_message = (mensaje, time.time())
+            mensaje_norm = mensaje.lower()
+            if (
+                "[accion]" in mensaje_norm
+                and "consultar" in mensaje_norm
+                and "recibidos" in mensaje_norm
+            ):
+                st.session_state.manual_consultar_hint = mensaje
+                st.session_state.manual_consultar_hint_ts = time.time()
         elif kind == "done":
             st.session_state.download_result = payload
             st.session_state.download_status = "done"
+            st.session_state.manual_consultar_hint = None
+            st.session_state.manual_consultar_hint_ts = None
         elif kind == "error":
             st.session_state.download_error = str(payload)
             st.session_state.download_status = "error"
+            st.session_state.manual_consultar_hint = None
+            st.session_state.manual_consultar_hint_ts = None
 
 def _download_worker(params: dict, q: "queue.Queue"):
     from robot.downloader import descargar_sri, set_user_notifier, clear_cancel
@@ -359,13 +810,20 @@ st.markdown(
     """
     <style>
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap');
+/* Oculta barra superior y cualquier variante del boton Deploy */
+header[data-testid="stHeader"],
+div[data-testid="stToolbar"],
 div[data-testid="stToolbarActions"],
-button[title="Deploy"] {
+div[data-testid="stHeaderActionElements"],
+button[title="Deploy"],
+button[title*="Deploy"],
+button[aria-label="Deploy"],
+button[aria-label*="Deploy"],
+a[title="Deploy"],
+a[title*="Deploy"],
+[data-testid="stAppDeployButton"],
+[data-testid="baseButton-headerNoPadding"] {
     display:none !important;
-}
-header[data-testid="stHeader"] {
-    background: transparent !important;
-    box-shadow: none !important;
 }
 div[data-testid="stDecoration"] {
     display: none !important;
@@ -388,72 +846,12 @@ button[aria-label="Detener proceso"]{
         --auth-card-muted: rgba(255,255,255,0.65);
     }
     .stApp {
-        background: radial-gradient(120% 120% at 10% 10%, rgba(0,128,255,0.35), transparent 50%),
-                    radial-gradient(120% 120% at 90% 20%, rgba(0,255,170,0.25), transparent 55%),
-                    radial-gradient(120% 120% at 30% 80%, rgba(0,80,160,0.35), transparent 55%),
-                    linear-gradient(135deg, #0b0f1a 0%, #0b1f2a 45%, #020508 100%);
-        background-size: 200% 200%;
-        animation: liquidShift 18s ease-in-out infinite;
-    }
-    body[data-theme="dark"] .stApp, 
-    body[data-theme="dark"] .stApp p, 
-    body[data-theme="dark"] .stApp span, 
-    body[data-theme="dark"] .stApp label,
-    body[data-theme="dark"] .stApp h1, 
-    body[data-theme="dark"] .stApp h2, 
-    body[data-theme="dark"] .stApp h3, 
-    body[data-theme="dark"] .stApp h4, 
-    body[data-theme="dark"] .stApp h5, 
-    body[data-theme="dark"] .stApp h6 {
-        color: #e9eef5 !important;
-    }
-    body[data-theme="dark"] .stApp [data-testid="stMarkdownContainer"] {
-        color: #e9eef5 !important;
-    }
-    body[data-theme="dark"] .stApp [data-baseweb="tab"] {
-        color: #d7e3f4 !important;
-    }
-    body[data-theme="dark"] .stApp [data-baseweb="tab"][aria-selected="true"] {
-        color: #ffffff !important;
-    }
-    body[data-theme="light"] .stApp, 
-    body[data-theme="light"] .stApp p, 
-    body[data-theme="light"] .stApp span, 
-    body[data-theme="light"] .stApp label,
-    body[data-theme="light"] .stApp h1, 
-    body[data-theme="light"] .stApp h2, 
-    body[data-theme="light"] .stApp h3, 
-    body[data-theme="light"] .stApp h4, 
-    body[data-theme="light"] .stApp h5, 
-    body[data-theme="light"] .stApp h6,
-    body[data-theme="light"] .stApp [data-testid="stMarkdownContainer"] {
-        color: #0f172a !important;
-    }
-    body[data-theme="light"] .stApp [data-baseweb="tab"] {
-        color: #1f2937 !important;
-    }
-    body[data-theme="light"] .stApp [data-baseweb="tab"][aria-selected="true"] {
-        color: #0b1f2a !important;
-    }
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"] {
-        color: #e9eef5 !important;
-    }
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main * {
-        color: #f8fafc !important;
-    }
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main input,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
-        color: #0f172a !important;
+        background: radial-gradient(120% 120% at 12% 12%, rgba(88, 193, 230, 0.50), transparent 52%),
+                    radial-gradient(120% 120% at 88% 18%, rgba(24, 120, 90, 0.45), transparent 54%),
+                    radial-gradient(130% 130% at 28% 84%, rgba(196, 244, 229, 0.42), transparent 58%),
+                    linear-gradient(135deg, #8ddaf0 0%, #57b997 48%, #96e4d5 100%);
+        background-size: 220% 220%;
+        animation: liquidShift 16s ease-in-out infinite;
     }
     body[data-theme="light"] .stApp div[data-testid="stForm"],
     body[data-theme="light"] .stApp div[data-testid="stForm"] label,
@@ -503,32 +901,6 @@ button[aria-label="Detener proceso"]{
     section[data-testid="stSidebar"] img {
         margin-left: auto !important;
         margin-right: auto !important;
-    }
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"] {
-        color: #f8fafc !important;
     }
     @keyframes liquidShift {
         0% { background-position: 0% 50%; }
@@ -602,77 +974,153 @@ button[aria-label="Detener proceso"]{
         border:1px solid rgba(16,25,54,0.4);
         box-shadow:none;
     }
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h1,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h2,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h3,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h4,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h5,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main h6,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main p,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main span,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main label,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"] {
-        color: #f8fafc !important;
+    .app-title {
+        font-size: clamp(2.1rem, 2.7vw, 2.7rem) !important;
+        font-weight: 800 !important;
+        line-height: 1.15 !important;
     }
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main input,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main textarea,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
-        color: #0f172a !important;
-    }
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main label,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main .stMarkdown,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main .stCaption,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main small,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main p,
-    body:not([data-theme="dark"]) .stApp div[data-testid="stAppViewContainer"] .main span {
-        color: #ffffff !important;
-    }
-    body:not([data-theme="dark"]) .stApp [data-baseweb="tab"] {
-        color: #ffffff !important;
-    }
-    body:not([data-theme="dark"]) .stApp [data-baseweb="tab"][aria-selected="true"] {
-        color: #ffffff !important;
-    }
-    body:not([data-theme="dark"]) section[data-testid="stSidebar"] {
-        background: #0f172a !important;
-    }
-    body:not([data-theme="dark"]) section[data-testid="stSidebar"] * {
-        color: #f8fafc !important;
-    }
-    body:not([data-theme="dark"]) section[data-testid="stSidebar"] .stMarkdown,
-    body:not([data-theme="dark"]) section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
-    body:not([data-theme="dark"]) section[data-testid="stSidebar"] p {
-        text-align: center;
-    }
-    body:not([data-theme="dark"]) section[data-testid="stSidebar"] [data-testid="stImage"] {
-        display: flex;
-        justify-content: center;
-    }
-    body:not([data-theme="dark"]) section[data-testid="stSidebar"] img {
-        margin-left: auto !important;
-        margin-right: auto !important;
-    }
-    .app-title,
     .section-title,
     .historial-title {
-        color: #ffffff !important;
+        font-size: clamp(1.45rem, 2vw, 1.9rem) !important;
+        font-weight: 750 !important;
+        line-height: 1.2 !important;
     }
-    .stApp label,
+    .stApp [data-testid="stWidgetLabel"],
+    .stApp [data-testid="stWidgetLabel"] p,
     .stApp label[data-testid="stWidgetLabel"],
+    .stApp label[data-testid="stWidgetLabel"] p,
     .stApp div[data-testid="stWidgetLabel"] label,
+    .stApp div[data-testid="stWidgetLabel"] label p,
     .stApp [data-baseweb="radio"] label,
     .stApp [data-baseweb="checkbox"] label,
     .stApp [data-baseweb="select"] label,
     .stApp [data-baseweb="input"] label,
     .stApp [data-baseweb="textarea"] label {
-        font-size: 1.1rem !important;
-        font-weight: 600 !important;
+        font-size: 1.22rem !important;
+        font-weight: 700 !important;
         letter-spacing: 0.01em;
     }
+    .stApp input,
+    .stApp textarea,
+    .stApp [data-baseweb="select"] div,
     .stApp [data-baseweb="radio"] span,
     .stApp [data-baseweb="checkbox"] span {
-        font-size: 1.05rem !important;
+        font-size: 1.08rem !important;
+    }
+    /* Light theme */
+    body[data-theme="light"] .app-title,
+    html[data-theme="light"] .app-title {
+        color: #0f4760 !important;
+    }
+    body[data-theme="light"] .section-title,
+    body[data-theme="light"] .historial-title,
+    html[data-theme="light"] .section-title,
+    html[data-theme="light"] .historial-title {
+        color: #16607a !important;
+    }
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"],
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"] p,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"],
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"] p {
+        color: #164a61 !important;
+    }
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main input,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
+    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main input,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
+    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
+        color: #0f3342 !important;
+    }
+    body[data-theme="light"] .stApp [data-baseweb="tab"],
+    html[data-theme="light"] .stApp [data-baseweb="tab"] {
+        color: #185064 !important;
+    }
+    body[data-theme="light"] .stApp [data-baseweb="tab"][aria-selected="true"],
+    html[data-theme="light"] .stApp [data-baseweb="tab"][aria-selected="true"] {
+        color: #0f4760 !important;
+    }
+
+    /* Dark theme */
+    body[data-theme="dark"] .app-title,
+    html[data-theme="dark"] .app-title {
+        color: #eaf7ff !important;
+    }
+    body[data-theme="dark"] .section-title,
+    body[data-theme="dark"] .historial-title,
+    html[data-theme="dark"] .section-title,
+    html[data-theme="dark"] .historial-title {
+        color: #d8f1ff !important;
+    }
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h1,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h2,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h3,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h4,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h5,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h6,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main p,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main span,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main label,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"],
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"] p,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h1,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h2,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h3,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h4,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h5,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h6,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main p,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main span,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main label,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"],
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"] p {
+        color: #e8f6ff !important;
+    }
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main input,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
+    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main input,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
+    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
+        color: #e8f6ff !important;
+    }
+    body[data-theme="dark"] .stApp [data-baseweb="tab"],
+    html[data-theme="dark"] .stApp [data-baseweb="tab"] {
+        color: #cde8fa !important;
+    }
+    body[data-theme="dark"] .stApp [data-baseweb="tab"][aria-selected="true"],
+    html[data-theme="dark"] .stApp [data-baseweb="tab"][aria-selected="true"] {
+        color: #ffffff !important;
     }
     </style>
     """,
@@ -844,6 +1292,10 @@ def _load_user_preferences():
         except Exception:
             data = {}
     st.session_state["download_base_dir"] = data.get("download_base_dir", str(DESC_DIR))
+    st.session_state["consolidate_base_dir"] = data.get(
+        "consolidate_base_dir",
+        st.session_state["download_base_dir"],
+    )
     st.session_state["_prefs_loaded"] = True
 
 
@@ -855,6 +1307,10 @@ def _persist_user_preferences():
         except Exception:
             data = {}
     data["download_base_dir"] = st.session_state.get("download_base_dir", str(DESC_DIR))
+    data["consolidate_base_dir"] = st.session_state.get(
+        "consolidate_base_dir",
+        data.get("download_base_dir", str(DESC_DIR)),
+    )
     try:
         PREFERENCES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     except Exception as err:
@@ -933,10 +1389,10 @@ def _validate_reset_token(token: str) -> str | None:
 
 def _update_local_password(email: str, new_password: str) -> None:
     """
-    Actualiza la contraseña en la base local licensing_api.db.
+    Actualiza la contraseÃ±a en la base local licensing_api.db.
     """
     if not SessionLocal or not lic_crud or not lic_security:
-        raise RuntimeError("No se puede acceder a la base de licencias para actualizar la contraseña.")
+        raise RuntimeError("No se puede acceder a la base de licencias para actualizar la contraseÃ±a.")
     db = SessionLocal()
     try:
         user = lic_crud.get_user_by_email(db, email=email)
@@ -962,14 +1418,14 @@ def _send_reset_email_message(email: str, token: str) -> None:
     sender = os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "no-reply@example.com"
 
     msg = EmailMessage()
-    msg["Subject"] = "Recupera tu contraseña - SRI Robot"
+    msg["Subject"] = "Recupera tu contraseÃ±a - SRI Robot"
     msg["From"] = sender
     msg["To"] = email
     msg.set_content(
         f"""Hola,
 
-Hemos recibido una solicitud para restablecer tu contraseña en SRI Robot.
-Haz clic en el siguiente enlace para crear una nueva contraseña:
+Hemos recibido una solicitud para restablecer tu contraseÃ±a en SRI Robot.
+Haz clic en el siguiente enlace para crear una nueva contraseÃ±a:
 {link}
 
 Si no solicitaste este cambio, ignora este mensaje.
@@ -1009,7 +1465,7 @@ def _handle_reset_query_token():
         st.session_state["recovery_email"] = email
         st.session_state["active_reset_token"] = token
     else:
-        st.warning("El enlace de recuperación no es válido o ya expiró.")
+        st.warning("El enlace de recuperaciÃ³n no es vÃ¡lido o ya expirÃ³.")
     st.query_params.clear()
 
 
@@ -1020,17 +1476,17 @@ def _render_reset_request():
         logo_html = _logo_html(140)
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Recuperar contraseña</div>", unsafe_allow_html=True)
-        st.info("Ingresa tu correo registrado y te enviaremos un enlace para restablecer tu contraseña.")
+        st.markdown("<div class='auth-title'>Recuperar contraseÃ±a</div>", unsafe_allow_html=True)
+        st.info("Ingresa tu correo registrado y te enviaremos un enlace para restablecer tu contraseÃ±a.")
         with st.form("password_request_form"):
-            email = st.text_input("Correo electrónico", value=st.session_state.get("recovery_email", ""))
+            email = st.text_input("Correo electrÃ³nico", value=st.session_state.get("recovery_email", ""))
             col_send, col_spacer, col_cancel = st.columns([1, 1.4, 1])
             with col_send:
                 send = st.form_submit_button("Enviar enlace", type="primary")
             with col_spacer:
                 st.write("")
             with col_cancel:
-                cancel = st.form_submit_button("Volver al inicio de sesión", type="secondary")
+                cancel = st.form_submit_button("Volver al inicio de sesiÃ³n", type="secondary")
             if cancel:
                 st.session_state["reset_request_mode"] = False
                 st.session_state.pop("recovery_email", None)
@@ -1043,7 +1499,7 @@ def _render_reset_request():
                     try:
                         token = _create_reset_token(email.strip())
                         _send_reset_email_message(email.strip(), token)
-                        st.success("Hemos enviado un enlace de recuperación a tu correo.")
+                        st.success("Hemos enviado un enlace de recuperaciÃ³n a tu correo.")
                         st.session_state["reset_request_mode"] = False
                         st.session_state["password_recovery_mode"] = False
                         st.query_params.clear()
@@ -1060,19 +1516,19 @@ def _render_password_recovery():
         logo_html = _logo_html(140)
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Reestablecer contraseña</div>", unsafe_allow_html=True)
-        st.info("Introduce tu nueva contraseña y confírmala para finalizar el proceso.")
+        st.markdown("<div class='auth-title'>Reestablecer contraseÃ±a</div>", unsafe_allow_html=True)
+        st.info("Introduce tu nueva contraseÃ±a y confÃ­rmala para finalizar el proceso.")
         preset_email = st.session_state.get("recovery_email", "")
         active_token = st.session_state.get("active_reset_token")
         with st.form("password_recovery_form"):
-            email = st.text_input("Correo electrónico", value=preset_email, disabled=bool(preset_email))
-            new_password = st.text_input("Nueva contraseña", type="password")
-            confirm_password = st.text_input("Confirmar contraseña", type="password")
+            email = st.text_input("Correo electrÃ³nico", value=preset_email, disabled=bool(preset_email))
+            new_password = st.text_input("Nueva contraseÃ±a", type="password")
+            confirm_password = st.text_input("Confirmar contraseÃ±a", type="password")
             col_submit, col_back = st.columns([1, 1])
             with col_submit:
-                submitted = st.form_submit_button("Guardar contraseña", type="primary")
+                submitted = st.form_submit_button("Guardar contraseÃ±a", type="primary")
             with col_back:
-                back_to_login = st.form_submit_button("Volver al inicio de sesión", type="secondary")
+                back_to_login = st.form_submit_button("Volver al inicio de sesiÃ³n", type="secondary")
             if back_to_login:
                 st.session_state["password_recovery_mode"] = False
                 st.session_state.pop("recovery_email", None)
@@ -1113,11 +1569,11 @@ def _render_login():
         logo_html = _logo_html(160)
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Iniciar sesión</div>", unsafe_allow_html=True)
+        st.markdown("<div class='auth-title'>Iniciar sesiÃ³n</div>", unsafe_allow_html=True)
         with st.form("login_form"):
-            email = st.text_input("Correo electrónico")
-            password = st.text_input("Contraseña", type="password")
-            submitted = st.form_submit_button("Iniciar sesión", type="primary")
+            email = st.text_input("Correo electrÃ³nico")
+            password = st.text_input("ContraseÃ±a", type="password")
+            submitted = st.form_submit_button("Iniciar sesiÃ³n", type="primary")
         st.markdown(
             "<div style='display:flex; justify-content:flex-end; margin-top:8px;'>"
             "<a href='?reset_request=1' style='color:#77aaff;text-decoration:underline;font-size:0.9rem;'>¿Olvidaste tu contraseña?</a>"
@@ -1146,9 +1602,9 @@ def _render_login():
                     st.session_state.pop("license_last_check", None)
                 _persist_session_state()
                 if cached_ok:
-                    st.success("Inicio de sesión exitoso.")
+                    st.success("Inicio de sesiÃ³n exitoso.")
                 else:
-                    st.success("Inicio de sesión exitoso. Continúa con la activación.")
+                    st.success("Inicio de sesiÃ³n exitoso. ContinÃºa con la activaciÃ³n.")
             except Exception as err:
                 st.error(f"Error al autenticar: {err}")
 
@@ -1161,10 +1617,10 @@ def _render_activation():
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
         st.markdown(
-            "<h1 style='text-align:center; margin: 0.9rem 0;'>Activación de licencia</h1>",
+            "<h1 style='text-align:center; margin: 0.9rem 0;'>ActivaciÃ³n de licencia</h1>",
             unsafe_allow_html=True,
         )
-        st.warning("Introduce tu código de licencia para vincular este equipo.")
+        st.warning("Introduce tu cÃ³digo de licencia para vincular este equipo.")
         client_device_id = _require_client_device_id()
         if not client_device_id:
             st.stop()
@@ -1173,17 +1629,17 @@ def _render_activation():
         ).hexdigest()
         st.session_state["device_fingerprint"] = default_fp
         with st.form("activation_form"):
-            code = st.text_input("Código de licencia")
+            code = st.text_input("CÃ³digo de licencia")
             fingerprint = st.text_input(
                 "Identificador del equipo",
                 value=default_fp,
-                help="Este identificador se genera automáticamente para este equipo.",
+                help="Este identificador se genera automÃ¡ticamente para este equipo.",
                 disabled=True,
             )
             submitted = st.form_submit_button("Activar licencia", type="primary")
             if submitted:
                 if not code:
-                    st.error("Debes ingresar tu código de licencia.")
+                    st.error("Debes ingresar tu cÃ³digo de licencia.")
                 else:
                     try:
                         LICENSE_CLIENT.activate_license(
@@ -1215,18 +1671,29 @@ def _ensure_access():
     ).hexdigest()
     st.session_state["device_fingerprint"] = fingerprint
 
-    if not st.session_state.get("license_validated"):
-        try:
-            LICENSE_CLIENT.validate_license(st.session_state["auth_token"], fingerprint)
-            st.session_state["license_validated"] = True
-            st.session_state["license_last_check"] = time.time()
-            _persist_session_state()
-        except Exception:
-            _render_activation()
-            st.stop()
+    # Validar siempre contra el backend para que la cuenta dependa de Render.
+    try:
+        LICENSE_CLIENT.get_profile(st.session_state["auth_token"])
+    except Exception:
+        _clear_cached_auth_only()
+        for key in ("auth_token", "user_email", "license_validated", "license_last_check"):
+            st.session_state.pop(key, None)
+        st.warning("Tu sesión ya no es válida. Inicia sesión nuevamente.")
+        _render_login()
+        st.stop()
 
-    # Desactivamos la validación periódica para que la licencia siga activa
-    # hasta que se elimine manualmente el registro del usuario.
+    # Revalidar licencia en cada acceso (sin bypass local por cache).
+    try:
+        LICENSE_CLIENT.validate_license(st.session_state["auth_token"], fingerprint)
+        st.session_state["license_validated"] = True
+        st.session_state["license_last_check"] = time.time()
+        _persist_session_state()
+    except Exception:
+        st.session_state["license_validated"] = False
+        st.session_state.pop("license_last_check", None)
+        _persist_session_state()
+        _render_activation()
+        st.stop()
 
 
 _ensure_access()
@@ -1241,7 +1708,7 @@ with st.sidebar:
     with st.expander("Perfil", expanded=False):
         st.markdown("**Usuario conectado**")
         st.caption(user_email)
-        if st.button("Cerrar sesión"):
+        if st.button("Cerrar sesiÃ³n"):
             device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
             _clear_cached_auth_only()
             st.session_state.clear()
@@ -1255,14 +1722,14 @@ with st.sidebar:
     st.markdown("###  Auditora Web SRI Robot")
     st.write("Automatiza descargas, valida comprobantes y genera reportes tributarios.")
     st.markdown("---")
-    st.markdown("**Versión:** 2.0  \n**Actualizado:** Noviembre 2025")
+    st.markdown("**VersiÃ³n:** 2.0  \n**Actualizado:** Febrero 2026")
 
 # ==============================
 # INTERFAZ PRINCIPAL
 # ==============================
-st.markdown('<h1 class="app-title">SRI Robot Audit Descarga y Reporte Automático</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="app-title">SRI Robot Audit Descarga y Reporte AutomÃ¡tico</h1>', unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs([" Descarga de Comprobantes", " Reportes e Historial"])
+tab1, tab2, tab3 = st.tabs([" Descarga de Comprobantes", " Reportes e Historial", " Consolidacion de documentos"])
 
 # =====================================================
 # TAB 1  DESCARGA Y PROCESAMIENTO AUTOMTICO
@@ -1283,18 +1750,18 @@ with tab1:
             tipo_opciones = [
                 "Facturas",
                 "Retenciones",
-                "Notas de crédito",
-                "Notas de débito",
-                "Liquidación de compra",
+                "Notas de crÃ©dito",
+                "Notas de dÃ©bito",
+                "LiquidaciÃ³n de compra",
             ]
         else:
             tipo_opciones = [
                 "Facturas",
-                "Liquidación de compra",
+                "LiquidaciÃ³n de compra",
                 "Retenciones",
-                "Notas de crédito",
-                "Notas de débito",
-                "Guía de remisión",
+                "Notas de crÃ©dito",
+                "Notas de dÃ©bito",
+                "GuÃ­a de remisiÃ³n",
             ]
         tipo = st.selectbox("Tipo de comprobante", tipo_opciones)
 
@@ -1326,13 +1793,13 @@ with tab1:
         "Noviembre",
         "Diciembre",
     ]
-    modo_fechas_recibidos = "Mes y día"
+    modo_fechas_recibidos = "Mes y dí­a"
     modo_fechas_emitidos = "Mes y día"
 
     if origen == "Recibidos":
         modo_fechas_recibidos = st.radio(
             "Modo de fecha",
-            ["Mes y día", "Rango de meses", "Año completo"],
+            ["Mes y dí­a", "Rango de meses", "Año completo"],
             horizontal=True,
             key="modo_fechas_recibidos",
         )
@@ -1340,7 +1807,7 @@ with tab1:
             col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
             with col_r1:
                 anio_recibidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_r2:
                 mes_inicio_label = st.selectbox(
@@ -1359,11 +1826,11 @@ with tab1:
             mes_recibidos = meses_es.index(mes_inicio_label) + 1
             mes_fin_recibidos = meses_es.index(mes_fin_label) + 1
             dia_recibidos = 0
-        elif modo_fechas_recibidos == "Año completo":
+        elif modo_fechas_recibidos == "AÃ±o completo":
             col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
             with col_r1:
                 anio_recibidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             mes_recibidos = 1
             mes_fin_recibidos = 12
@@ -1372,7 +1839,7 @@ with tab1:
             col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
             with col_r1:
                 anio_recibidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_r2:
                 mes_label = st.selectbox(
@@ -1385,7 +1852,7 @@ with tab1:
             with col_r3:
                 dia_recibidos = st.number_input(
                     "Día (0 = Todos)", min_value=0, max_value=31, value=0, step=1,
-                    help="Elige 0 para descargar todo el mes o un da específico (1-31).",
+                    help="Elige 0 para descargar todo el mes o un día específico (1-31).",
                 )
         formatos = st.multiselect("Formatos a descargar", ["XML", "PDF"], default=["XML", "PDF"])
     else:
@@ -1418,11 +1885,11 @@ with tab1:
             mes_emitidos = meses_es.index(mes_inicio_label) + 1
             mes_fin_emitidos = meses_es.index(mes_fin_label) + 1
             dia_emitidos = 0
-        elif modo_fechas_emitidos == "Año completo":
+        elif modo_fechas_emitidos == "AÃ±o completo":
             col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
             with col_f1:
                 anio_emitidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             mes_emitidos = 1
             mes_fin_emitidos = 12
@@ -1431,7 +1898,7 @@ with tab1:
             col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
             with col_f1:
                 anio_emitidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_f2:
                 mes_label = st.selectbox(
@@ -1458,7 +1925,7 @@ with tab1:
             establecimiento_input = st.text_input(
                 "Establecimiento",
                 value="Todos",
-                help="Escribe 'Todos' o un número de 3 dgitos (ej. 001).",
+                help="Escribe 'Todos' o un número de 3 dígitos (ej. 001).",
             )
         with col_e2:
             punto_emision_input = st.text_input(
@@ -1489,7 +1956,7 @@ with tab1:
         if descargar_xml_emitidos:
             formatos.append("XML")
     st.markdown("---")
-    st.markdown('<h3 class="section-title">Carpeta base donde se guardarán las descargas</h3>', unsafe_allow_html=True)
+    st.markdown('<h3 class="section-title">Carpeta base donde se guardarÃ¡n las descargas</h3>', unsafe_allow_html=True)
     current_dir = st.session_state.get("download_base_dir", str(DESC_DIR))
     st.text_input(
         "Ruta seleccionada",
@@ -1529,137 +1996,12 @@ with tab1:
         last_err = st.session_state.get("last_manual_dir_error")
         if last_err:
             if "tk" in str(last_err).lower() or "libtk" in str(last_err).lower():
-                st.info("El selector nativo no está disponible en este entorno. Usa la ruta manual.")
+                st.info("El selector nativo no estÃ¡ disponible en este entorno. Usa la ruta manual.")
             else:
                 st.warning(last_err)
     st.caption(
-        f"Carpeta activa: `{st.session_state.get('download_base_dir', str(DESC_DIR))}`. Dentro se almacenarán tus descargas."
+        f"Carpeta activa: `{st.session_state.get('download_base_dir', str(DESC_DIR))}`. Dentro se almacenarÃ¡n tus descargas."
     )
-
-    with st.expander("Consolidar desde carpeta", expanded=False):
-        st.write(
-            "Genera un reporte anual usando los reportes mensuales ya descargados en tu carpeta."
-        )
-        col_c1, col_c2, col_c3 = st.columns([1.2, 1, 1])
-        with col_c1:
-            origen_consolidar = st.selectbox(
-                "Origen a consolidar",
-                ["Recibidos", "Emitidos"],
-                index=0 if origen == "Recibidos" else 1,
-                key="consolidar_origen",
-            )
-        with col_c2:
-            if origen_consolidar == "Emitidos":
-                tipos_disponibles = [
-                    "Facturas",
-                    "Liquidación de compra",
-                    "Guía de remisión",
-                    "Retención",
-                    "Notas de débito",
-                    "Notas de crédito",
-                ]
-            else:
-                tipos_disponibles = [
-                    "Retención",
-                    "Facturas",
-                    "Notas de débito",
-                    "Notas de crédito",
-                    "Liquidación de compra",
-                ]
-            tipo_consolidar = st.selectbox(
-                "Tipo de comprobante",
-                tipos_disponibles,
-                index=tipos_disponibles.index(tipo) if tipo in tipos_disponibles else 0,
-                key="consolidar_tipo",
-            )
-        with col_c3:
-            anio_consolidar = st.number_input(
-                "Año a consolidar",
-                min_value=2015,
-                max_value=datetime.now().year,
-                value=int(datetime.now().year),
-                step=1,
-                key="consolidar_anio",
-            )
-
-        estado_consolidar = None
-        if origen_consolidar == "Emitidos":
-            estado_default = (
-                st.session_state.get("estado_autorizacion")
-                or (estado_autorizacion if "estado_autorizacion" in locals() else None)
-                or "Autorizados"
-            )
-            estado_consolidar = st.selectbox(
-                "Estado autorización",
-                ["Autorizados", "No Autorizados"],
-                index=0 if estado_default == "Autorizados" else 1,
-                key="consolidar_estado",
-            )
-
-        col_f1, col_f2 = st.columns([1, 1])
-        with col_f1:
-            incluir_xml = st.checkbox("Consolidar XML", value=True, key="consolidar_xml")
-        with col_f2:
-            incluir_pdf = st.checkbox("Consolidar PDF", value=True, key="consolidar_pdf")
-
-        if st.button("Consolidar desde carpeta", use_container_width=True):
-            if not ruc:
-                st.warning("Ingresa el RUC para ubicar la carpeta del usuario.")
-                st.stop()
-            base_dir = Path(st.session_state.get("download_base_dir", str(DESC_DIR)))
-            tipo_visible = TIPOS_MAP.get(tipo_consolidar, tipo_consolidar)
-            tipo_slug = _slug_tipo(tipo_visible or tipo_consolidar)
-            anio_int = int(anio_consolidar)
-
-            if origen_consolidar == "Recibidos":
-                base_search = base_dir / ruc / "Recibidos"
-                destino_anual_dir = base_search / f"{anio_int:04d}"
-                prefix_base = f"recibidos_reporte"
-            else:
-                estado_slug = _slug_estado_emitidos(estado_consolidar or "Sin Estado")
-                base_search = base_dir / ruc / "Emitidos" / estado_slug
-                destino_anual_dir = base_search / f"{anio_int:04d}"
-                prefix_base = f"emitidos_reporte"
-
-            if not base_search.exists():
-                st.warning(f"No se encontró la carpeta base: {base_search}")
-                st.stop()
-
-            if incluir_xml:
-                reportes_xml = []
-                prefix_xml = f"{prefix_base}_xml_{tipo_slug}_{anio_int:04d}"
-                reportes_xml.extend(_buscar_reportes_mensuales(base_search, prefix_xml))
-                if origen_consolidar == "Recibidos":
-                    prefix_xml_alt = f"reporte_{tipo_slug}_{anio_int:04d}"
-                    reportes_xml.extend(_buscar_reportes_mensuales(base_search, prefix_xml_alt))
-                    reportes_xml = list(dict.fromkeys(reportes_xml))
-                if reportes_xml:
-                    destino_xml = destino_anual_dir / f"{prefix_base}_xml_{tipo_slug}_{anio_int:04d}.xlsx"
-                    anual_xml = _consolidar_reportes_excel(
-                        [str(p) for p in reportes_xml], destino_xml
-                    )
-                    if anual_xml:
-                        st.success(f"Reporte anual XML creado: {anual_xml}")
-                    else:
-                        st.error("No se pudo generar el reporte anual XML.")
-                else:
-                    st.info("No se encontraron reportes XML mensuales para consolidar.")
-
-            if incluir_pdf:
-                prefix_pdf = f"{prefix_base}_pdf_{tipo_slug}_{anio_int:04d}"
-                reportes_pdf = _buscar_reportes_mensuales(base_search, prefix_pdf)
-                if reportes_pdf:
-                    destino_pdf = destino_anual_dir / f"{prefix_base}_pdf_{tipo_slug}_{anio_int:04d}.xlsx"
-                    anual_pdf = _consolidar_reportes_excel(
-                        [str(p) for p in reportes_pdf], destino_pdf
-                    )
-                    if anual_pdf:
-                        st.success(f"Reporte anual PDF creado: {anual_pdf}")
-                    else:
-                        st.error("No se pudo generar el reporte anual PDF.")
-                else:
-                    st.info("No se encontraron reportes PDF mensuales para consolidar.")
-
     start_clicked = st.button(" Iniciar proceso", use_container_width=True, type="primary", key="start_process")
     stop_clicked = st.button(" Detener proceso", use_container_width=True, key="stop_process")
 
@@ -1689,7 +2031,7 @@ with tab1:
                         st.error("El mes fin debe ser mayor o igual al mes inicio.")
                         st.stop()
                     dia_val = 0
-                elif modo_fechas_recibidos == "Año completo":
+                elif modo_fechas_recibidos == "AÃ±o completo":
                     mes_val = 1
                     mes_fin_val = 12
                     dia_val = 0
@@ -1707,7 +2049,7 @@ with tab1:
                         st.error("El mes fin debe ser mayor o igual al mes inicio.")
                         st.stop()
                     dia_val = 0
-                elif modo_fechas_emitidos == "Año completo":
+                elif modo_fechas_emitidos == "AÃ±o completo":
                     mes_val = 1
                     mes_fin_val = 12
                     dia_val = 0
@@ -1723,7 +2065,7 @@ with tab1:
                     establecimiento_val = "Todos"
                 else:
                     if not (est_clean.isdigit() and len(est_clean) == 3):
-                        st.error("El establecimiento debe ser 'Todos' o un número de tres dgitos (ej. 001).")
+                        st.error("El establecimiento debe ser 'Todos' o un número de tres dígitos (ej. 001).")
                         st.stop()
                     establecimiento_val = est_clean
                 punto_clean = (punto_emision_input or "").strip()
@@ -1781,7 +2123,7 @@ with tab1:
         ahora = time.time()
         if st.session_state.stop_notice_ts and (ahora - st.session_state.stop_notice_ts) <= 10:
             st.warning("Cancelando proceso. Espera a que se cierre el navegador...")
-        # Si el hilo ya terminó y no llegó mensaje, marcar como cancelado
+        # Si el hilo ya terminÃ³ y no llegÃ³ mensaje, marcar como cancelado
         hilo = st.session_state.download_thread
         if hilo and not hilo.is_alive() and not st.session_state.download_error and not st.session_state.download_result:
             st.session_state.download_error = "Proceso cancelado por el usuario."
@@ -1791,11 +2133,12 @@ with tab1:
         if st.session_state.stop_notice_ts and (ahora - st.session_state.stop_notice_ts) <= 10:
             st.warning("Solicitud de detener registrada. Esperando a que el proceso termine...")
         if st.session_state.running_notice_ts and (ahora - st.session_state.running_notice_ts) <= 10:
-            st.info("Proceso en ejecución. Puedes detenerlo con el botón rojo.")
+            st.info("Proceso en ejecuciÃ³n. Puedes detenerlo con el botÃ³n rojo.")
         if st.session_state.last_download_message:
             msg, ts = st.session_state.last_download_message
             if (ahora - ts) <= 10:
                 st.warning(msg)
+    _render_manual_consultar_modal()
 
     if st.session_state.download_status in {"done", "error"} and st.session_state.download_params:
         st.session_state.running_notice_ts = None
@@ -1804,7 +2147,7 @@ with tab1:
             if "Proceso cancelado por el usuario" in st.session_state.download_error:
                 st.warning("Proceso cancelado por el usuario.")
             else:
-                st.error(f"Ocurrió un error inesperado: {st.session_state.download_error}")
+                st.error(f"OcurriÃ³ un error inesperado: {st.session_state.download_error}")
         resultado = st.session_state.download_result or {}
         params = st.session_state.download_params
         if resultado and not st.session_state.download_registered:
@@ -1828,7 +2171,7 @@ with tab1:
             if aviso_recorte:
                 st.warning(aviso_recorte)
             if estado in {"sin_descargas", "sin_resultados"}:
-                st.warning(" No se encontraron comprobantes para el período seleccionado.")
+                st.warning(" No se encontraron comprobantes para el perÃ­odo seleccionado.")
             elif params.get("origen") == "Emitidos":
                 n_regs = resultado.get("n_registros", 0)
                 st.success(f' Reporte de emitidos generado con {n_regs} registros.')
@@ -2114,7 +2457,7 @@ with tab2:
         f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
         with f1:
             filtro_busqueda = st.text_input(
-                "Búsqueda",
+                "BÃºsqueda",
                 placeholder="RUC, descripcion, estado, etc.",
                 key="historial_busqueda",
             ).strip()
@@ -2155,7 +2498,7 @@ with tab2:
         with f6:
             opciones_anio = _opciones_columna(base_opciones, "anio", ordenar_numerico=True)
             filtro_anio = _selectbox_con_opciones(
-                "Año",
+                "AÃ±o",
                 opciones_anio,
                 "historial_filtro_anio",
             )
@@ -2346,3 +2689,353 @@ with tab2:
                     st.warning(f"No se pudo abrir el archivo seleccionado: {err}")
     else:
         st.info("A\u00fan no hay registros de descargas o reportes.")
+
+with tab3:
+    st.markdown(
+        '<h3 class="section-title" style="color:#ffffff !important;">Consolidar desde carpeta</h3>',
+        unsafe_allow_html=True,
+    )
+    st.write("Genera reportes consolidados desde documentos ya descargados.")
+
+    consolidar_dir_actual = st.session_state.get(
+        "consolidate_base_dir",
+        st.session_state.get("download_base_dir", str(DESC_DIR)),
+    )
+    st.text_input(
+        "Carpeta origen para consolidar",
+        value=consolidar_dir_actual,
+        help="Puedes elegir la carpeta base de descargas, una carpeta RUC o una subcarpeta de Recibidos/Emitidos.",
+        disabled=True,
+    )
+    col_sel_c1, col_sel_c2 = st.columns([1, 1])
+    with col_sel_c1:
+        if st.button("Seleccionar carpeta para consolidar", key="btn_select_consolidate_dir"):
+            seleccionada, error = _select_directory_dialog(consolidar_dir_actual)
+            if seleccionada:
+                try:
+                    ruta_cons = Path(seleccionada).expanduser()
+                    ruta_cons.mkdir(parents=True, exist_ok=True)
+                    st.session_state["consolidate_base_dir"] = str(ruta_cons)
+                    _persist_user_preferences()
+                    st.success(f" Carpeta de consolidacion: {ruta_cons}")
+                except Exception as err:
+                    st.error(f"No se pudo usar la carpeta indicada: {err}")
+            elif error:
+                st.session_state["show_manual_consolidate_dir"] = True
+                st.session_state["last_manual_consolidate_dir_error"] = error
+    with col_sel_c2:
+        if st.button("Usar carpeta de descargas activa", key="btn_use_download_dir_for_consolidate"):
+            st.session_state["consolidate_base_dir"] = st.session_state.get("download_base_dir", str(DESC_DIR))
+            _persist_user_preferences()
+            st.success("Se usara la carpeta de descargas activa para consolidar.")
+
+    if st.session_state.get("show_manual_consolidate_dir"):
+        manual_default_cons = st.session_state.get(
+            "consolidate_base_dir",
+            st.session_state.get("download_base_dir", str(DESC_DIR)),
+        )
+        manual_cons = st.text_input(
+            "Ruta de carpeta para consolidar (manual)",
+            value=manual_default_cons,
+            key="manual_consolidate_dir_input",
+        )
+        if st.button("Guardar carpeta de consolidacion", key="btn_save_manual_consolidate_dir"):
+            try:
+                nueva_ruta = Path(manual_cons).expanduser()
+                nueva_ruta.mkdir(parents=True, exist_ok=True)
+                st.session_state["consolidate_base_dir"] = str(nueva_ruta)
+                _persist_user_preferences()
+                st.success(f" Carpeta de consolidacion: {nueva_ruta}")
+                st.session_state["show_manual_consolidate_dir"] = False
+                st.session_state["last_manual_consolidate_dir_error"] = None
+            except Exception as err:
+                st.error(f"No se pudo usar la carpeta indicada: {err}")
+        last_err_cons = st.session_state.get("last_manual_consolidate_dir_error")
+        if last_err_cons:
+            if "tk" in str(last_err_cons).lower() or "libtk" in str(last_err_cons).lower():
+                st.info("El selector nativo no esta disponible en este entorno. Usa la ruta manual.")
+            else:
+                st.warning(last_err_cons)
+
+    st.caption(
+        f"Carpeta de busqueda activa para consolidacion: `{st.session_state.get('consolidate_base_dir', consolidar_dir_actual)}`"
+    )
+
+    col_ruc_cons, col_origen_cons = st.columns([1.2, 1.2])
+    with col_ruc_cons:
+        ruc_consolidar = st.text_input(
+            "RUC a buscar (opcional)",
+            value=ruc,
+            help="Si lo dejas vacio, se intentara consolidar desde la carpeta seleccionada.",
+            key="consolidar_ruc_hint",
+        )
+    with col_origen_cons:
+        origen_consolidar = st.selectbox(
+            "Origen a consolidar",
+            ["Recibidos", "Emitidos"],
+            index=0 if origen == "Recibidos" else 1,
+            key="consolidar_origen",
+        )
+
+    col_c1, col_c2, col_c3 = st.columns([1.2, 1, 1])
+    with col_c1:
+        if origen_consolidar == "Emitidos":
+            tipos_disponibles = [
+                "Facturas",
+                "Liquidacion de compra",
+                "Guia de remision",
+                "Retencion",
+                "Notas de debito",
+                "Notas de credito",
+            ]
+        else:
+            tipos_disponibles = [
+                "Retencion",
+                "Facturas",
+                "Notas de debito",
+                "Notas de credito",
+                "Liquidacion de compra",
+            ]
+        tipo_consolidar = st.selectbox(
+            "Tipo de comprobante",
+            tipos_disponibles,
+            index=tipos_disponibles.index(tipo) if tipo in tipos_disponibles else 0,
+            key="consolidar_tipo",
+        )
+    with col_c2:
+        anio_consolidar = st.number_input(
+            "AÃ±o a consolidar",
+            min_value=2015,
+            max_value=datetime.now().year,
+            value=int(datetime.now().year),
+            step=1,
+            key="consolidar_anio",
+        )
+    with col_c3:
+        estado_consolidar = None
+        if origen_consolidar == "Emitidos":
+            estado_default = (
+                st.session_state.get("estado_autorizacion")
+                or (estado_emitidos if "estado_emitidos" in locals() else None)
+                or "Autorizados"
+            )
+            estado_consolidar = st.selectbox(
+                "Estado autorizacion",
+                ["Autorizados", "No Autorizados"],
+                index=0 if estado_default == "Autorizados" else 1,
+                key="consolidar_estado",
+            )
+        else:
+            st.write("")
+
+    modo_fecha_consolidar = st.radio(
+        "Modo de fecha",
+        ["Mes y dia", "Rango de meses", "Ano completo"],
+        horizontal=True,
+        key="consolidar_modo_fechas",
+    )
+
+    mes_inicio_consolidar = 1
+    mes_fin_consolidar = 12
+    dia_consolidar = 0
+    mes_actual = int(datetime.now().month)
+    if modo_fecha_consolidar == "Rango de meses":
+        col_fr1, col_fr2 = st.columns([1, 1])
+        with col_fr1:
+            mes_inicio_label = st.selectbox(
+                "Mes inicio",
+                MESES_ES,
+                index=mes_actual - 1,
+                key="consolidar_mes_inicio",
+            )
+        with col_fr2:
+            mes_fin_label = st.selectbox(
+                "Mes fin",
+                MESES_ES,
+                index=mes_actual - 1,
+                key="consolidar_mes_fin",
+            )
+        mes_inicio_consolidar = MESES_ES.index(mes_inicio_label) + 1
+        mes_fin_consolidar = MESES_ES.index(mes_fin_label) + 1
+    elif modo_fecha_consolidar == "Mes y dia":
+        col_fd1, col_fd2 = st.columns([1, 1])
+        with col_fd1:
+            mes_label = st.selectbox(
+                "Mes",
+                MESES_ES,
+                index=mes_actual - 1,
+                key="consolidar_mes",
+            )
+            mes_inicio_consolidar = MESES_ES.index(mes_label) + 1
+            mes_fin_consolidar = mes_inicio_consolidar
+        with col_fd2:
+            dia_consolidar = st.number_input(
+                "Dia (0 = Todos)",
+                min_value=0,
+                max_value=31,
+                value=0,
+                step=1,
+                key="consolidar_dia",
+            )
+    else:
+        mes_inicio_consolidar = 1
+        mes_fin_consolidar = 12
+        dia_consolidar = 0
+
+    col_f1, col_f2 = st.columns([1, 1])
+    with col_f1:
+        incluir_xml = st.checkbox("Consolidar XML", value=True, key="consolidar_xml")
+    with col_f2:
+        incluir_pdf = st.checkbox("Consolidar PDF", value=True, key="consolidar_pdf")
+
+    if st.button("Consolidar desde carpeta", use_container_width=True, key="btn_run_consolidation"):
+        carpeta_base_cons = Path(
+            st.session_state.get(
+                "consolidate_base_dir",
+                st.session_state.get("download_base_dir", str(DESC_DIR)),
+            )
+        ).expanduser()
+        if not carpeta_base_cons.exists():
+            st.error(f"La carpeta seleccionada no existe: {carpeta_base_cons}")
+            st.stop()
+        if not incluir_xml and not incluir_pdf:
+            st.warning("Selecciona al menos una opcion: XML o PDF.")
+            st.stop()
+        if modo_fecha_consolidar == "Rango de meses" and int(mes_fin_consolidar) < int(mes_inicio_consolidar):
+            st.error("El mes fin debe ser mayor o igual al mes inicio.")
+            st.stop()
+
+        tipo_visible = TIPOS_MAP.get(tipo_consolidar, tipo_consolidar)
+        tipo_slug = _slug_tipo(tipo_visible or tipo_consolidar)
+        _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo_consolidar)
+        anio_int = int(anio_consolidar)
+        estado_slug = _slug_estado_emitidos(estado_consolidar or "Sin Estado") if origen_consolidar == "Emitidos" else None
+        periodo_suffix = _sufijo_periodo_consolidacion(
+            modo_fecha_consolidar,
+            anio_int,
+            int(mes_inicio_consolidar),
+            int(mes_fin_consolidar),
+            int(dia_consolidar),
+        )
+
+        base_search = _resolver_busqueda_consolidacion(
+            carpeta_base_cons,
+            origen_consolidar,
+            ruc_hint=ruc_consolidar,
+            estado_slug=estado_slug,
+        )
+        if not base_search.exists():
+            st.error(f"No se encontro una carpeta valida para buscar reportes: {base_search}")
+            st.stop()
+
+        prefix_base = "recibidos_reporte" if origen_consolidar == "Recibidos" else "emitidos_reporte"
+        destino_anual_dir = carpeta_base_cons / "Consolidados" / origen_consolidar
+        if origen_consolidar == "Emitidos" and estado_slug:
+            destino_anual_dir = destino_anual_dir / estado_slug
+        if modo_fecha_consolidar == "Ano completo":
+            destino_anual_dir = destino_anual_dir / f"{anio_int:04d}"
+        else:
+            destino_anual_dir = destino_anual_dir / periodo_suffix
+        destino_anual_dir.mkdir(parents=True, exist_ok=True)
+
+        st.caption(f"Buscando reportes en: `{base_search}`")
+        st.caption(f"Guardando consolidados en: `{destino_anual_dir}`")
+
+        if incluir_xml:
+            reportes_xml = _buscar_reportes_por_periodo(
+                base_search,
+                origen_consolidar,
+                tipo_slug,
+                "xml",
+                modo_fecha_consolidar,
+                anio_int,
+                int(mes_inicio_consolidar),
+                int(mes_fin_consolidar),
+                int(dia_consolidar),
+            )
+            xml_files = _colectar_documentos_por_periodo(
+                base_search,
+                tipo_prefijo,
+                "xml",
+                modo_fecha_consolidar,
+                anio_int,
+                int(mes_inicio_consolidar),
+                int(mes_fin_consolidar),
+                int(dia_consolidar),
+            )
+            st.caption(f"Reportes XML base encontrados: {len(reportes_xml)}")
+            st.caption(f"Documentos XML encontrados: {len(xml_files)}")
+            destino_xml = destino_anual_dir / f"{prefix_base}_xml_{tipo_slug}_{periodo_suffix}.xlsx"
+            anual_xml = None
+            if xml_files:
+                estado_default_reporte = None
+                if origen_consolidar == "Emitidos":
+                    estado_txt = (estado_consolidar or "").strip().lower()
+                    if "no autoriz" in estado_txt:
+                        estado_default_reporte = estado_consolidar
+                try:
+                    construir_reporte(base_search, destino_xml, estado_default_reporte, xml_files=xml_files)
+                except Exception as err:
+                    st.error(f"No se pudo generar el reporte XML desde los documentos: {err}")
+                if destino_xml.exists():
+                    anual_xml = destino_xml
+            elif reportes_xml:
+                anual_xml = _consolidar_reportes_xml_desde_excels(reportes_xml, destino_xml)
+            if anual_xml:
+                st.success(f"Reporte XML consolidado: {anual_xml}")
+            else:
+                st.info("No se encontraron insumos XML para consolidar.")
+
+            destino_copia_xml = destino_anual_dir / "XML"
+            copiados_xml = _copiar_documentos_unicos(xml_files, destino_copia_xml)
+            if copiados_xml > 0:
+                st.success(f"XML copiados: {copiados_xml} en `{destino_copia_xml}`")
+            else:
+                st.info("No se copiaron XML porque no hubo documentos para el periodo seleccionado.")
+
+        if incluir_pdf:
+            reportes_pdf = _buscar_reportes_por_periodo(
+                base_search,
+                origen_consolidar,
+                tipo_slug,
+                "pdf",
+                modo_fecha_consolidar,
+                anio_int,
+                int(mes_inicio_consolidar),
+                int(mes_fin_consolidar),
+                int(dia_consolidar),
+            )
+            pdf_files = _colectar_documentos_por_periodo(
+                base_search,
+                tipo_prefijo,
+                "pdf",
+                modo_fecha_consolidar,
+                anio_int,
+                int(mes_inicio_consolidar),
+                int(mes_fin_consolidar),
+                int(dia_consolidar),
+            )
+            st.caption(f"Reportes PDF encontrados: {len(reportes_pdf)}")
+            st.caption(f"Documentos PDF encontrados: {len(pdf_files)}")
+            if reportes_pdf:
+                destino_pdf = destino_anual_dir / f"{prefix_base}_pdf_{tipo_slug}_{periodo_suffix}.xlsx"
+                anual_pdf = _consolidar_reportes_excel(
+                    [str(p) for p in reportes_pdf], destino_pdf
+                )
+                if anual_pdf:
+                    st.success(f"Reporte PDF consolidado: {anual_pdf}")
+                else:
+                    st.error("No se pudo generar el reporte PDF consolidado.")
+            else:
+                st.info("No se encontraron reportes PDF para consolidar.")
+
+            destino_copia_pdf = destino_anual_dir / "PDF"
+            copiados_pdf = _copiar_documentos_unicos(pdf_files, destino_copia_pdf)
+            if copiados_pdf > 0:
+                st.success(f"PDF copiados: {copiados_pdf} en `{destino_copia_pdf}`")
+            else:
+                st.info("No se copiaron PDF porque no hubo documentos para el periodo seleccionado.")
+
+
+
+

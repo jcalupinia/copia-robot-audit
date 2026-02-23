@@ -29,6 +29,22 @@ LOG_PATH = EXE_DIR / "desktop_launcher.log"
 INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / APP_NAME
 
 
+def _set_console_title(title: str) -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleTitleW(title)
+    except Exception:
+        pass
+
+
+def _show_startup_message() -> None:
+    _set_console_title(f"{APP_NAME} - Iniciando")
+    print("Iniciando software, espere un momento...", flush=True)
+    print("Preparando entorno y cargando la aplicacion.", flush=True)
+
+
 def _load_version() -> str:
     candidates = [
         APP_DIR / VERSION_FILENAME,
@@ -300,6 +316,7 @@ def _pick_port(preferred: int = 8501) -> int:
 
 
 def main():
+    _show_startup_message()
     _ensure_installed()
 
     # Ensure bundled app files are importable
@@ -336,6 +353,7 @@ def main():
     host = "127.0.0.1"
     port = _pick_port()
     url = f"http://{host}:{port}"
+    print("Inicializando interfaz local...", flush=True)
     threading.Thread(
         target=_open_browser_when_ready,
         args=(url, host, port),
@@ -351,15 +369,19 @@ def main():
     os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
     os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
     os.environ["STREAMLIT_SERVER_PORT"] = str(port)
+    os.environ["STREAMLIT_SERVER_ADDRESS"] = host
 
     app_path = APP_DIR / "aplicacion.py"
     if not app_path.exists():
         _fatal(f"No se encontró aplicacion.py en {APP_DIR}")
 
+    print("Abriendo navegador...", flush=True)
     sys.argv = [
         "streamlit",
         "run",
         str(app_path),
+        "--server.address",
+        host,
         "--server.port",
         str(port),
     ]
