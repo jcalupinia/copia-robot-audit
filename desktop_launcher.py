@@ -333,6 +333,12 @@ def main():
     os.environ.setdefault("PLAYWRIGHT_HEADLESS", "0")
     os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
     os.environ.setdefault("ENABLE_SESSION_CACHE", "1")
+    os.environ.setdefault("RECIBIDOS_MANUAL_CONSULTA", "0")
+    os.environ.setdefault("RECIBIDOS_CONSULTA_INTENTOS", "8")
+    os.environ.setdefault("RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC", "1.6")
+    os.environ.setdefault("RECIBIDOS_AUTO_PRE_EXECUTE_MS", "500")
+    os.environ.setdefault("RECIBIDOS_AUTO_POST_EXECUTE_MS", "350")
+    os.environ.setdefault("RECIBIDOS_AUTO_RESULT_TIMEOUT_MS", "70000")
 
     if "LICENSE_API_URL" not in os.environ:
         license_url = (config.get("LICENSE_API_URL") or "").strip()

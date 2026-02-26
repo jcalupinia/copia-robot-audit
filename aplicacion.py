@@ -34,6 +34,7 @@ from robot.downloader import (
     MANUAL_CONSULTA_RECIBIDOS,
     _consolidar_reportes_excel,
     _prefijo_tipo,
+    _xml_files_por_tipo,
     _slug_tipo,
     TIPOS_MAP,
     ESTADOS_EMITIDOS_MAP,
@@ -46,7 +47,7 @@ try:
     import desktop_launcher as _desktop_launcher
 except Exception:
     _desktop_launcher = None
-# Para restablecer contraseÃ±as directamente en la base local
+# Para restablecer contraseñas directamente en la base local
 try:
     from licensing_api.database import SessionLocal
     from licensing_api import crud as lic_crud, security as lic_security
@@ -846,10 +847,10 @@ button[aria-label="Detener proceso"]{
         --auth-card-muted: rgba(255,255,255,0.65);
     }
     .stApp {
-        background: radial-gradient(120% 120% at 12% 12%, rgba(88, 193, 230, 0.50), transparent 52%),
-                    radial-gradient(120% 120% at 88% 18%, rgba(24, 120, 90, 0.45), transparent 54%),
-                    radial-gradient(130% 130% at 28% 84%, rgba(196, 244, 229, 0.42), transparent 58%),
-                    linear-gradient(135deg, #8ddaf0 0%, #57b997 48%, #96e4d5 100%);
+        background: radial-gradient(125% 125% at 12% 12%, rgba(130, 208, 247, 0.56), transparent 54%),
+                    radial-gradient(122% 122% at 88% 18%, rgba(82, 158, 221, 0.44), transparent 55%),
+                    radial-gradient(135% 135% at 28% 84%, rgba(221, 236, 247, 0.44), transparent 60%),
+                    linear-gradient(135deg, #9bd4f6 0%, #78bce9 48%, #d2e6f3 100%);
         background-size: 220% 220%;
         animation: liquidShift 16s ease-in-out infinite;
     }
@@ -1389,10 +1390,10 @@ def _validate_reset_token(token: str) -> str | None:
 
 def _update_local_password(email: str, new_password: str) -> None:
     """
-    Actualiza la contraseÃ±a en la base local licensing_api.db.
+    Actualiza la contraseña en la base local licensing_api.db.
     """
     if not SessionLocal or not lic_crud or not lic_security:
-        raise RuntimeError("No se puede acceder a la base de licencias para actualizar la contraseÃ±a.")
+        raise RuntimeError("No se puede acceder a la base de licencias para actualizar la contraseña.")
     db = SessionLocal()
     try:
         user = lic_crud.get_user_by_email(db, email=email)
@@ -1418,14 +1419,14 @@ def _send_reset_email_message(email: str, token: str) -> None:
     sender = os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "no-reply@example.com"
 
     msg = EmailMessage()
-    msg["Subject"] = "Recupera tu contraseÃ±a - SRI Robot"
+    msg["Subject"] = "Recupera tu contraseña - SRI Robot"
     msg["From"] = sender
     msg["To"] = email
     msg.set_content(
         f"""Hola,
 
-Hemos recibido una solicitud para restablecer tu contraseÃ±a en SRI Robot.
-Haz clic en el siguiente enlace para crear una nueva contraseÃ±a:
+Hemos recibido una solicitud para restablecer tu contraseña en SRI Robot.
+Haz clic en el siguiente enlace para crear una nueva contraseña:
 {link}
 
 Si no solicitaste este cambio, ignora este mensaje.
@@ -1465,7 +1466,7 @@ def _handle_reset_query_token():
         st.session_state["recovery_email"] = email
         st.session_state["active_reset_token"] = token
     else:
-        st.warning("El enlace de recuperaciÃ³n no es vÃ¡lido o ya expirÃ³.")
+        st.warning("El enlace de recuperación no es válido o ya expiró.")
     st.query_params.clear()
 
 
@@ -1473,25 +1474,21 @@ def _render_reset_request():
     st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 0.9, 1])
     with col:
-        logo_html = _logo_html(140)
-        if logo_html:
-            st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Recuperar contraseÃ±a</div>", unsafe_allow_html=True)
-        st.info("Ingresa tu correo registrado y te enviaremos un enlace para restablecer tu contraseÃ±a.")
-        with st.form("password_request_form"):
-            email = st.text_input("Correo electrÃ³nico", value=st.session_state.get("recovery_email", ""))
-            col_send, col_spacer, col_cancel = st.columns([1, 1.4, 1])
-            with col_send:
-                send = st.form_submit_button("Enviar enlace", type="primary")
-            with col_spacer:
-                st.write("")
-            with col_cancel:
-                cancel = st.form_submit_button("Volver al inicio de sesiÃ³n", type="secondary")
-            if cancel:
+        top_left, top_right = st.columns([4.2, 1.3])
+        with top_right:
+            if st.button("Iniciar sesión", key="btn_top_login_reset_request"):
                 st.session_state["reset_request_mode"] = False
                 st.session_state.pop("recovery_email", None)
                 st.query_params.clear()
                 st.rerun()
+        logo_html = _logo_html(140)
+        if logo_html:
+            st.markdown(logo_html, unsafe_allow_html=True)
+        st.markdown("<div class='auth-title'>Recuperar contraseña</div>", unsafe_allow_html=True)
+        st.info("Ingresa tu correo registrado y te enviaremos un enlace para restablecer tu contraseña.")
+        with st.form("password_request_form"):
+            email = st.text_input("Correo electrónico", value=st.session_state.get("recovery_email", ""))
+            send = st.form_submit_button("Enviar enlace", type="primary")
             if send:
                 if not email:
                     st.error("Ingresa el correo registrado.")
@@ -1499,7 +1496,7 @@ def _render_reset_request():
                     try:
                         token = _create_reset_token(email.strip())
                         _send_reset_email_message(email.strip(), token)
-                        st.success("Hemos enviado un enlace de recuperaciÃ³n a tu correo.")
+                        st.success("Hemos enviado un enlace de recuperación a tu correo.")
                         st.session_state["reset_request_mode"] = False
                         st.session_state["password_recovery_mode"] = False
                         st.query_params.clear()
@@ -1513,27 +1510,26 @@ def _render_password_recovery():
     st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 0.9, 1])
     with col:
-        logo_html = _logo_html(140)
-        if logo_html:
-            st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Reestablecer contraseÃ±a</div>", unsafe_allow_html=True)
-        st.info("Introduce tu nueva contraseÃ±a y confÃ­rmala para finalizar el proceso.")
-        preset_email = st.session_state.get("recovery_email", "")
-        active_token = st.session_state.get("active_reset_token")
-        with st.form("password_recovery_form"):
-            email = st.text_input("Correo electrÃ³nico", value=preset_email, disabled=bool(preset_email))
-            new_password = st.text_input("Nueva contraseÃ±a", type="password")
-            confirm_password = st.text_input("Confirmar contraseÃ±a", type="password")
-            col_submit, col_back = st.columns([1, 1])
-            with col_submit:
-                submitted = st.form_submit_button("Guardar contraseÃ±a", type="primary")
-            with col_back:
-                back_to_login = st.form_submit_button("Volver al inicio de sesiÃ³n", type="secondary")
-            if back_to_login:
+        top_left, top_right = st.columns([4.2, 1.3])
+        with top_right:
+            if st.button("Iniciar sesión", key="btn_top_login_password_recovery"):
                 st.session_state["password_recovery_mode"] = False
                 st.session_state.pop("recovery_email", None)
                 st.session_state.pop("active_reset_token", None)
+                st.query_params.clear()
                 st.rerun()
+        logo_html = _logo_html(140)
+        if logo_html:
+            st.markdown(logo_html, unsafe_allow_html=True)
+        st.markdown("<div class='auth-title'>Reestablecer contraseña</div>", unsafe_allow_html=True)
+        st.info("Introduce tu nueva contraseña y confírmala para finalizar el proceso.")
+        preset_email = st.session_state.get("recovery_email", "")
+        active_token = st.session_state.get("active_reset_token")
+        with st.form("password_recovery_form"):
+            email = st.text_input("Correo electrónico", value=preset_email, disabled=bool(preset_email))
+            new_password = st.text_input("Nueva contraseña", type="password")
+            confirm_password = st.text_input("Confirmar contraseña", type="password")
+            submitted = st.form_submit_button("Guardar contraseña", type="primary")
             if submitted:
                 if not email or not new_password or not confirm_password:
                     st.error("Completa todos los campos.")
@@ -1569,11 +1565,11 @@ def _render_login():
         logo_html = _logo_html(160)
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Iniciar sesiÃ³n</div>", unsafe_allow_html=True)
+        st.markdown("<div class='auth-title'>Iniciar sesión</div>", unsafe_allow_html=True)
         with st.form("login_form"):
-            email = st.text_input("Correo electrÃ³nico")
-            password = st.text_input("ContraseÃ±a", type="password")
-            submitted = st.form_submit_button("Iniciar sesiÃ³n", type="primary")
+            email = st.text_input("Correo electrónico")
+            password = st.text_input("Contraseña", type="password")
+            submitted = st.form_submit_button("Iniciar sesión", type="primary")
         st.markdown(
             "<div style='display:flex; justify-content:flex-end; margin-top:8px;'>"
             "<a href='?reset_request=1' style='color:#77aaff;text-decoration:underline;font-size:0.9rem;'>¿Olvidaste tu contraseña?</a>"
@@ -1602,9 +1598,10 @@ def _render_login():
                     st.session_state.pop("license_last_check", None)
                 _persist_session_state()
                 if cached_ok:
-                    st.success("Inicio de sesiÃ³n exitoso.")
+                    st.success("Inicio de sesión exitoso.")
                 else:
-                    st.success("Inicio de sesiÃ³n exitoso. ContinÃºa con la activaciÃ³n.")
+                    st.success("Inicio de sesión exitoso. Continúa con la activación.")
+                st.rerun()
             except Exception as err:
                 st.error(f"Error al autenticar: {err}")
 
@@ -1613,14 +1610,25 @@ def _render_activation():
     st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
     _, center_col, _ = st.columns([1, 0.9, 1])
     with center_col:
+        top_left_col, _ = st.columns([1.2, 4.8])
+        with top_left_col:
+            if st.button(" Volver a inicio de sesión", key="btn_back_login_activation"):
+                device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
+                _clear_cached_auth_only()
+                for key in ("auth_token", "user_email", "license_validated", "license_last_check"):
+                    st.session_state.pop(key, None)
+                if device_id:
+                    st.session_state["_device_id"] = device_id
+                st.rerun()
+
         logo_html = _logo_html(130)
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
         st.markdown(
-            "<h1 style='text-align:center; margin: 0.9rem 0;'>ActivaciÃ³n de licencia</h1>",
+            "<h1 style='text-align:center; margin: 0.9rem 0;'>Activación de licencia</h1>",
             unsafe_allow_html=True,
         )
-        st.warning("Introduce tu cÃ³digo de licencia para vincular este equipo.")
+        st.warning("Introduce tu código de licencia para vincular este equipo.")
         client_device_id = _require_client_device_id()
         if not client_device_id:
             st.stop()
@@ -1629,17 +1637,17 @@ def _render_activation():
         ).hexdigest()
         st.session_state["device_fingerprint"] = default_fp
         with st.form("activation_form"):
-            code = st.text_input("CÃ³digo de licencia")
+            code = st.text_input("Código de licencia")
             fingerprint = st.text_input(
                 "Identificador del equipo",
                 value=default_fp,
-                help="Este identificador se genera automÃ¡ticamente para este equipo.",
+                help="Este identificador se genera automáticamente para este equipo.",
                 disabled=True,
             )
             submitted = st.form_submit_button("Activar licencia", type="primary")
             if submitted:
                 if not code:
-                    st.error("Debes ingresar tu cÃ³digo de licencia.")
+                    st.error("Debes ingresar tu código de licencia.")
                 else:
                     try:
                         LICENSE_CLIENT.activate_license(
@@ -1651,6 +1659,7 @@ def _render_activation():
                         st.session_state["license_last_check"] = time.time()
                         _persist_session_state()
                         st.success("Licencia activada correctamente.")
+                        st.rerun()
                     except Exception as err:
                         st.error(f"No se pudo activar la licencia: {err}")
 def _ensure_access():
@@ -1708,7 +1717,7 @@ with st.sidebar:
     with st.expander("Perfil", expanded=False):
         st.markdown("**Usuario conectado**")
         st.caption(user_email)
-        if st.button("Cerrar sesiÃ³n"):
+        if st.button("Cerrar sesión"):
             device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
             _clear_cached_auth_only()
             st.session_state.clear()
@@ -1722,12 +1731,12 @@ with st.sidebar:
     st.markdown("###  Auditora Web SRI Robot")
     st.write("Automatiza descargas, valida comprobantes y genera reportes tributarios.")
     st.markdown("---")
-    st.markdown("**VersiÃ³n:** 2.0  \n**Actualizado:** Febrero 2026")
+    st.markdown("**Versión:** 2.0  \n**Actualizado:** Febrero 2026")
 
 # ==============================
 # INTERFAZ PRINCIPAL
 # ==============================
-st.markdown('<h1 class="app-title">SRI Robot Audit Descarga y Reporte AutomÃ¡tico</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="app-title">SRI Robot Audit Descarga y Reporte Automático</h1>', unsafe_allow_html=True)
 
 tab1, tab2, tab3 = st.tabs([" Descarga de Comprobantes", " Reportes e Historial", " Consolidacion de documentos"])
 
@@ -1750,18 +1759,18 @@ with tab1:
             tipo_opciones = [
                 "Facturas",
                 "Retenciones",
-                "Notas de crÃ©dito",
-                "Notas de dÃ©bito",
-                "LiquidaciÃ³n de compra",
+                "Notas de crédito",
+                "Notas de débito",
+                "Liquidación de compra",
             ]
         else:
             tipo_opciones = [
                 "Facturas",
-                "LiquidaciÃ³n de compra",
+                "Liquidación de compra",
                 "Retenciones",
-                "Notas de crÃ©dito",
-                "Notas de dÃ©bito",
-                "GuÃ­a de remisiÃ³n",
+                "Notas de crédito",
+                "Notas de débito",
+                "Guía de remisión",
             ]
         tipo = st.selectbox("Tipo de comprobante", tipo_opciones)
 
@@ -1799,7 +1808,7 @@ with tab1:
     if origen == "Recibidos":
         modo_fechas_recibidos = st.radio(
             "Modo de fecha",
-            ["Mes y dí­a", "Rango de meses", "Año completo"],
+            ["Mes y día", "Rango de meses", "Año completo"],
             horizontal=True,
             key="modo_fechas_recibidos",
         )
@@ -1807,7 +1816,7 @@ with tab1:
             col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
             with col_r1:
                 anio_recibidos = st.number_input(
-                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_r2:
                 mes_inicio_label = st.selectbox(
@@ -1826,11 +1835,11 @@ with tab1:
             mes_recibidos = meses_es.index(mes_inicio_label) + 1
             mes_fin_recibidos = meses_es.index(mes_fin_label) + 1
             dia_recibidos = 0
-        elif modo_fechas_recibidos == "AÃ±o completo":
+        elif modo_fechas_recibidos == "Año completo":
             col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
             with col_r1:
                 anio_recibidos = st.number_input(
-                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             mes_recibidos = 1
             mes_fin_recibidos = 12
@@ -1839,7 +1848,7 @@ with tab1:
             col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
             with col_r1:
                 anio_recibidos = st.number_input(
-                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_r2:
                 mes_label = st.selectbox(
@@ -1885,11 +1894,11 @@ with tab1:
             mes_emitidos = meses_es.index(mes_inicio_label) + 1
             mes_fin_emitidos = meses_es.index(mes_fin_label) + 1
             dia_emitidos = 0
-        elif modo_fechas_emitidos == "AÃ±o completo":
+        elif modo_fechas_emitidos == "Año completo":
             col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
             with col_f1:
                 anio_emitidos = st.number_input(
-                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             mes_emitidos = 1
             mes_fin_emitidos = 12
@@ -1898,7 +1907,7 @@ with tab1:
             col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
             with col_f1:
                 anio_emitidos = st.number_input(
-                    "AÃ±o", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
                 )
             with col_f2:
                 mes_label = st.selectbox(
@@ -1956,7 +1965,7 @@ with tab1:
         if descargar_xml_emitidos:
             formatos.append("XML")
     st.markdown("---")
-    st.markdown('<h3 class="section-title">Carpeta base donde se guardarÃ¡n las descargas</h3>', unsafe_allow_html=True)
+    st.markdown('<h3 class="section-title">Carpeta base donde se guardarán las descargas</h3>', unsafe_allow_html=True)
     current_dir = st.session_state.get("download_base_dir", str(DESC_DIR))
     st.text_input(
         "Ruta seleccionada",
@@ -1996,11 +2005,11 @@ with tab1:
         last_err = st.session_state.get("last_manual_dir_error")
         if last_err:
             if "tk" in str(last_err).lower() or "libtk" in str(last_err).lower():
-                st.info("El selector nativo no estÃ¡ disponible en este entorno. Usa la ruta manual.")
+                st.info("El selector nativo no está disponible en este entorno. Usa la ruta manual.")
             else:
                 st.warning(last_err)
     st.caption(
-        f"Carpeta activa: `{st.session_state.get('download_base_dir', str(DESC_DIR))}`. Dentro se almacenarÃ¡n tus descargas."
+        f"Carpeta activa: `{st.session_state.get('download_base_dir', str(DESC_DIR))}`. Dentro se almacenarán tus descargas."
     )
     start_clicked = st.button(" Iniciar proceso", use_container_width=True, type="primary", key="start_process")
     stop_clicked = st.button(" Detener proceso", use_container_width=True, key="stop_process")
@@ -2031,7 +2040,7 @@ with tab1:
                         st.error("El mes fin debe ser mayor o igual al mes inicio.")
                         st.stop()
                     dia_val = 0
-                elif modo_fechas_recibidos == "AÃ±o completo":
+                elif modo_fechas_recibidos == "Año completo":
                     mes_val = 1
                     mes_fin_val = 12
                     dia_val = 0
@@ -2049,7 +2058,7 @@ with tab1:
                         st.error("El mes fin debe ser mayor o igual al mes inicio.")
                         st.stop()
                     dia_val = 0
-                elif modo_fechas_emitidos == "AÃ±o completo":
+                elif modo_fechas_emitidos == "Año completo":
                     mes_val = 1
                     mes_fin_val = 12
                     dia_val = 0
@@ -2123,7 +2132,7 @@ with tab1:
         ahora = time.time()
         if st.session_state.stop_notice_ts and (ahora - st.session_state.stop_notice_ts) <= 10:
             st.warning("Cancelando proceso. Espera a que se cierre el navegador...")
-        # Si el hilo ya terminÃ³ y no llegÃ³ mensaje, marcar como cancelado
+        # Si el hilo ya terminó y no llegó mensaje, marcar como cancelado
         hilo = st.session_state.download_thread
         if hilo and not hilo.is_alive() and not st.session_state.download_error and not st.session_state.download_result:
             st.session_state.download_error = "Proceso cancelado por el usuario."
@@ -2133,7 +2142,7 @@ with tab1:
         if st.session_state.stop_notice_ts and (ahora - st.session_state.stop_notice_ts) <= 10:
             st.warning("Solicitud de detener registrada. Esperando a que el proceso termine...")
         if st.session_state.running_notice_ts and (ahora - st.session_state.running_notice_ts) <= 10:
-            st.info("Proceso en ejecuciÃ³n. Puedes detenerlo con el botÃ³n rojo.")
+            st.info("Proceso en ejecución. Puedes detenerlo con el botón rojo.")
         if st.session_state.last_download_message:
             msg, ts = st.session_state.last_download_message
             if (ahora - ts) <= 10:
@@ -2147,7 +2156,7 @@ with tab1:
             if "Proceso cancelado por el usuario" in st.session_state.download_error:
                 st.warning("Proceso cancelado por el usuario.")
             else:
-                st.error(f"OcurriÃ³ un error inesperado: {st.session_state.download_error}")
+                st.error(f"Ocurrió un error inesperado: {st.session_state.download_error}")
         resultado = st.session_state.download_result or {}
         params = st.session_state.download_params
         if resultado and not st.session_state.download_registered:
@@ -2171,7 +2180,7 @@ with tab1:
             if aviso_recorte:
                 st.warning(aviso_recorte)
             if estado in {"sin_descargas", "sin_resultados"}:
-                st.warning(" No se encontraron comprobantes para el perÃ­odo seleccionado.")
+                st.warning(" No se encontraron comprobantes para el período seleccionado.")
             elif params.get("origen") == "Emitidos":
                 n_regs = resultado.get("n_registros", 0)
                 st.success(f' Reporte de emitidos generado con {n_regs} registros.')
@@ -2302,25 +2311,43 @@ with tab1:
                             )
                 else:
                     if n_xml > 0:
-                        xml_folder = Path(resultado.get("xml_dir") or (carpeta_tipo / "XML"))
-                        tipo_param = params.get("tipo") or ""
-                        tipo_slug = resultado.get("tipo_slug", tipo_param.lower().replace(" ", "_"))
-                        anio_param = params.get("anio") or 0
-                        mes_param = params.get("mes") or 0
-                        try:
-                            mes_int = int(mes_param)
-                        except Exception:
-                            mes_int = 0
-                        excel_path = carpeta_tipo / f"reporte_{tipo_slug}_{anio_param}_{mes_int:02d}.xlsx"
-                        construir_reporte(xml_folder, excel_path)
-                        if excel_path.exists():
-                            with open(excel_path, "rb") as f:
+                        reporte_xml_path = resultado.get("reporte_xml")
+                        if reporte_xml_path and Path(reporte_xml_path).exists():
+                            with open(reporte_xml_path, "rb") as f:
                                 st.download_button(
                                     " Descargar reporte Excel (Recibidos)",
                                     f,
-                                    file_name=excel_path.name,
+                                    file_name=Path(reporte_xml_path).name,
                                     use_container_width=True,
                                 )
+                        else:
+                            xml_folder = Path(resultado.get("xml_dir") or (carpeta_tipo / "XML"))
+                            tipo_param = params.get("tipo") or ""
+                            tipo_slug = resultado.get("tipo_slug", tipo_param.lower().replace(" ", "_"))
+                            anio_param = params.get("anio") or 0
+                            mes_param = params.get("mes") or 0
+                            try:
+                                mes_int = int(mes_param)
+                            except Exception:
+                                mes_int = 0
+                            excel_path = carpeta_tipo / f"reporte_{tipo_slug}_{anio_param}_{mes_int:02d}.xlsx"
+                            construir_reporte(xml_folder, excel_path)
+                            if not excel_path.exists():
+                                # Fallback para estructura por dias (base del mes).
+                                xml_base_mes = Path(resultado.get("xml_dir") or carpeta_tipo)
+                                tipo_visible_tmp = resultado.get("tipo_visible", tipo_param)
+                                _, _, tipo_prefijo_tmp = _prefijo_tipo(tipo_visible_tmp)
+                                xml_files_tmp = _xml_files_por_tipo(xml_base_mes, tipo_prefijo_tmp)
+                                if xml_files_tmp:
+                                    construir_reporte(xml_base_mes, excel_path, None, xml_files=xml_files_tmp)
+                            if excel_path.exists():
+                                with open(excel_path, "rb") as f:
+                                    st.download_button(
+                                        " Descargar reporte Excel (Recibidos)",
+                                        f,
+                                        file_name=excel_path.name,
+                                        use_container_width=True,
+                                    )
 
                     reporte_pdf_path = resultado.get("reporte_pdf")
                     if reporte_pdf_path and Path(reporte_pdf_path).exists():
@@ -2358,7 +2385,7 @@ with tab1:
     if st.session_state.download_status in {"running", "cancelling"}:
         time.sleep(0.6)
         try:
-            st.experimental_rerun()
+            st.rerun()
         except Exception:
             pass
 
@@ -2457,7 +2484,7 @@ with tab2:
         f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
         with f1:
             filtro_busqueda = st.text_input(
-                "BÃºsqueda",
+                "Búsqueda",
                 placeholder="RUC, descripcion, estado, etc.",
                 key="historial_busqueda",
             ).strip()
@@ -2498,7 +2525,7 @@ with tab2:
         with f6:
             opciones_anio = _opciones_columna(base_opciones, "anio", ordenar_numerico=True)
             filtro_anio = _selectbox_con_opciones(
-                "AÃ±o",
+                "Año",
                 opciones_anio,
                 "historial_filtro_anio",
             )
@@ -2804,7 +2831,7 @@ with tab3:
         )
     with col_c2:
         anio_consolidar = st.number_input(
-            "AÃ±o a consolidar",
+            "Año a consolidar",
             min_value=2015,
             max_value=datetime.now().year,
             value=int(datetime.now().year),

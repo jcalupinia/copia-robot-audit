@@ -122,6 +122,27 @@ try:
 except ValueError:
     RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC = 1.2
 try:
+    RECIBIDOS_AUTO_PRE_EXECUTE_MS = max(
+        0,
+        int(os.getenv("RECIBIDOS_AUTO_PRE_EXECUTE_MS", "450")),
+    )
+except ValueError:
+    RECIBIDOS_AUTO_PRE_EXECUTE_MS = 450
+try:
+    RECIBIDOS_AUTO_POST_EXECUTE_MS = max(
+        0,
+        int(os.getenv("RECIBIDOS_AUTO_POST_EXECUTE_MS", "300")),
+    )
+except ValueError:
+    RECIBIDOS_AUTO_POST_EXECUTE_MS = 300
+try:
+    RECIBIDOS_AUTO_RESULT_TIMEOUT_MS = max(
+        10000,
+        int(os.getenv("RECIBIDOS_AUTO_RESULT_TIMEOUT_MS", "60000")),
+    )
+except ValueError:
+    RECIBIDOS_AUTO_RESULT_TIMEOUT_MS = 60000
+try:
     RECIBIDOS_REHIDRATAR_DESDE_INTENTO = max(
         2,
         int(os.getenv("RECIBIDOS_REHIDRATAR_DESDE_INTENTO", "3")),
@@ -137,7 +158,7 @@ DEVTOOLS = DEVTOOLS_ENV in {"1", "true", "yes", "on"}
 PERSISTENT_PROFILE_ENV = os.getenv("PLAYWRIGHT_PERSISTENT_PROFILE", "1").strip().lower()
 USE_PERSISTENT_PROFILE = PERSISTENT_PROFILE_ENV in {"1", "true", "yes", "on"}
 USER_DATA_DIR = os.getenv("PLAYWRIGHT_USER_DATA_DIR", "browser_profile").strip()
-MANUAL_CONSULTA_RECIBIDOS_ENV = os.getenv("RECIBIDOS_MANUAL_CONSULTA", "1").strip().lower()
+MANUAL_CONSULTA_RECIBIDOS_ENV = os.getenv("RECIBIDOS_MANUAL_CONSULTA", "0").strip().lower()
 MANUAL_CONSULTA_RECIBIDOS = MANUAL_CONSULTA_RECIBIDOS_ENV in {"1", "true", "yes", "on"}
 
 URLS = {
@@ -6055,6 +6076,70 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         except Exception as err:
             print(f"[WARN] No se pudo configurar submit unico en Recibidos: {err}")
 
+    def _esperar_api_recaptcha_lista(timeout: int = 8000) -> bool:
+        try:
+            page.wait_for_function(
+                """() => {
+                    return !!(
+                        window.grecaptcha &&
+                        grecaptcha.enterprise &&
+                        typeof grecaptcha.enterprise.execute === 'function' &&
+                        typeof window.executeRecaptcha === 'function'
+                    );
+                }""",
+                timeout=timeout,
+            )
+            return True
+        except Exception:
+            return False
+
+    def _disparar_consulta_recibidos_automatica() -> str:
+        try:
+            modo = page.evaluate(
+                """() => {
+                    const actionName = 'consulta_recibidos';
+                    try {
+                        const campos = document.querySelectorAll(
+                            'textarea[name="g-recaptcha-response"], input[name="g-recaptcha-response"], textarea[id*="g-recaptcha-response"], input[id*="g-recaptcha-response"]'
+                        );
+                        campos.forEach((el) => {
+                            el.value = '';
+                            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+                            try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+                        });
+                    } catch (e) {}
+                    try { window.__auditRecibidosSubmitting = false; } catch (e) {}
+                    try {
+                        if (window.grecaptcha && grecaptcha.enterprise && typeof grecaptcha.enterprise.reset === 'function') {
+                            grecaptcha.enterprise.reset();
+                        }
+                    } catch (e) {}
+                    try {
+                        if (typeof window.executeRecaptcha === 'function') {
+                            window.executeRecaptcha(actionName);
+                            return 'executeRecaptcha';
+                        }
+                    } catch (e) {}
+                    try {
+                        if (typeof window.rcBuscar === 'function') {
+                            window.rcBuscar();
+                            return 'rcBuscar';
+                        }
+                    } catch (e) {}
+                    try {
+                        const btn = document.getElementById('frmPrincipal:btnBuscar');
+                        if (btn) {
+                            btn.click();
+                            return 'btn.click';
+                        }
+                    } catch (e) {}
+                    return '';
+                }"""
+            )
+            return str(modo or "").strip()
+        except Exception:
+            return ""
+
     def _esperar_resultado_consulta(timeout: int = 300000) -> bool:
         limite = time.time() + (timeout / 1000)
         while time.time() < limite:
@@ -6145,46 +6230,39 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 _limpiar_estado_consulta()
             if RECIBIDOS_REHIDRATAR_ON_CAPTCHA and intento >= RECIBIDOS_REHIDRATAR_DESDE_INTENTO:
                 _rehidratar_consulta_recibidos()
+            _esperar_api_recaptcha_lista(timeout=7000)
+            if RECIBIDOS_AUTO_PRE_EXECUTE_MS > 0:
+                try:
+                    page.wait_for_timeout(RECIBIDOS_AUTO_PRE_EXECUTE_MS)
+                except Exception:
+                    pass
+            modo_disparo = _disparar_consulta_recibidos_automatica()
+            if RECIBIDOS_AUTO_POST_EXECUTE_MS > 0:
+                try:
+                    page.wait_for_timeout(RECIBIDOS_AUTO_POST_EXECUTE_MS)
+                except Exception:
+                    pass
             token_ok, token_actual = _esperar_token_recaptcha(
                 timeout=RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
-                token_previo=token_previo if intento > 1 else "",
+                token_previo=token_previo,
             )
             print(
-                f"[INFO] Recibidos intento {intento}/{intentos}: token_ok={token_ok}, "
+                f"[INFO] Recibidos intento {intento}/{intentos}: "
+                f"modo={modo_disparo or 'desconocido'}, token_ok={token_ok}, "
                 f"token_len={len(token_actual or '')}"
             )
-            try:
-                boton_consultar.first.scroll_into_view_if_needed()
-                boton_consultar.first.hover()
-            except Exception:
-                pass
-            try:
-                page.bring_to_front()
-            except Exception:
-                pass
-            box = None
-            try:
-                box = boton_consultar.first.bounding_box()
-            except Exception:
-                box = None
-            if box:
-                x = box["x"] + (box["width"] * 0.5)
-                y = box["y"] + (box["height"] * 0.5)
+            if not modo_disparo:
                 try:
-                    page.mouse.move(x, y, steps=12)
-                    time.sleep(0.08)
-                    page.mouse.down()
-                    time.sleep(0.05)
-                    page.mouse.up()
-                except Exception:
+                    boton_consultar.first.scroll_into_view_if_needed()
                     boton_consultar.first.click(delay=80)
-            else:
-                boton_consultar.first.click(delay=80)
+                    modo_disparo = "fallback-click"
+                except Exception:
+                    pass
             try:
                 page.wait_for_load_state("networkidle", timeout=1000)
             except Exception:
                 pass
-            _esperar_resultado_consulta(timeout=45000)
+            _esperar_resultado_consulta(timeout=RECIBIDOS_AUTO_RESULT_TIMEOUT_MS)
             alerta_post = _texto_alerta()
             if alerta_post and _es_alerta_captcha(alerta_post):
                 dur = time.perf_counter() - inicio_intento
@@ -7478,6 +7556,131 @@ def descargar_sri(
         if origen == "Recibidos":
             modulo_page = _abrir_modulo_consultas(page, origen)
             destino_objetivo = destino_recibidos
+            consultas_recibidos = 0
+
+            def _reabrir_modulo_recibidos_si_toca() -> None:
+                nonlocal modulo_page, consultas_recibidos
+                if consultas_recibidos <= 0:
+                    return
+                if consultas_recibidos % 15 != 0:
+                    return
+                print(
+                    f"[INFO] Recibidos: reabriendo modulo tras {consultas_recibidos} consultas para reducir bloqueos de captcha."
+                )
+                modulo_page = _abrir_modulo_consultas(page, origen)
+
+            def _consultar_recibidos_dia(mes_actual: int, dia_actual: int):
+                nonlocal consultas_recibidos
+                _reabrir_modulo_recibidos_si_toca()
+                resultado_dia = _flujo_recibidos(
+                    modulo_page,
+                    destino_objetivo,
+                    anio,
+                    mes_actual,
+                    dia_actual,
+                    tipo,
+                    formatos,
+                )
+                consultas_recibidos += 1
+                return resultado_dia
+
+            formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
+
+            def _recibidos_por_mes(mes_actual: int, dia_actual: int):
+                nonlocal aviso_recorte
+                if anio > hoy.year:
+                    return {"estado": "sin_resultados", "n_xml": 0, "n_pdf": 0}
+                if anio == hoy.year and mes_actual > hoy.month:
+                    return {"estado": "sin_resultados", "n_xml": 0, "n_pdf": 0}
+
+                dias_en_mes = calendar.monthrange(anio, mes_actual)[1]
+                limite_dia = dias_en_mes
+                if anio == hoy.year and mes_actual == hoy.month:
+                    limite_dia = min(limite_dia, hoy.day)
+                    if limite_dia < dias_en_mes:
+                        aviso_recorte = (
+                            f"Rango ajustado hasta el día actual ({hoy.day:02d}/{hoy.month:02d}/{hoy.year})."
+                        )
+
+                if dia_actual in (0, None):
+                    dias_consultar = list(range(1, limite_dia + 1))
+                else:
+                    dia_int = int(dia_actual)
+                    if dia_int > limite_dia:
+                        return {"estado": "sin_resultados", "n_xml": 0, "n_pdf": 0}
+                    dias_consultar = [dia_int]
+
+                if not dias_consultar:
+                    return {"estado": "sin_resultados", "n_xml": 0, "n_pdf": 0}
+
+                total_xml = 0
+                total_pdf = 0
+                detalle_dias = []
+                reportes_pdf_dia = []
+                resultado_mes = None
+
+                for dia_iter in dias_consultar:
+                    _check_cancel("recibidos_dia")
+                    resultado_dia = _consultar_recibidos_dia(mes_actual, dia_iter)
+                    total_xml += resultado_dia.get("n_xml", 0)
+                    total_pdf += resultado_dia.get("n_pdf", 0)
+                    detalle_dias.append(
+                        {
+                            "dia": dia_iter,
+                            "estado": resultado_dia.get("estado"),
+                            "n_xml": resultado_dia.get("n_xml", 0),
+                            "n_pdf": resultado_dia.get("n_pdf", 0),
+                        }
+                    )
+                    reporte_pdf_dia = resultado_dia.get("reporte_pdf")
+                    if reporte_pdf_dia and Path(reporte_pdf_dia).exists():
+                        reportes_pdf_dia.append(str(reporte_pdf_dia))
+                    resultado_mes = resultado_dia
+
+                if len(dias_consultar) == 1:
+                    return resultado_mes
+
+                resultado_mes = dict(resultado_mes or {})
+                resultado_mes["n_xml"] = total_xml
+                resultado_mes["n_pdf"] = total_pdf
+                resultado_mes["estado"] = "sin_resultados" if total_xml == 0 and total_pdf == 0 else "ok"
+                resultado_mes["mensaje"] = f"Procesados {len(dias_consultar)} días del mes"
+                resultado_mes["detalles_dias"] = detalle_dias
+                resultado_mes["fecha_filtro"] = (
+                    f"{dias_consultar[0]:02d}/{mes_actual:02d}/{anio}"
+                    f" - {dias_consultar[-1]:02d}/{mes_actual:02d}/{anio}"
+                )
+
+                tipo_visible = TIPOS_MAP.get(tipo, tipo)
+                tipo_slug = resultado_mes.get("tipo_slug", _slug_tipo(tipo_visible or tipo))
+                _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
+                base_mes = destino_objetivo / f"{anio:04d}" / _mes_a_texto(mes_actual)
+
+                if "XML" in formatos_norm and total_xml > 0 and base_mes.exists():
+                    xml_files = _xml_files_por_tipo(base_mes, tipo_prefijo)
+                    if xml_files:
+                        destino_xml_mes = base_mes / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
+                        try:
+                            construir_reporte(base_mes, destino_xml_mes, None, xml_files=xml_files)
+                        except Exception as err:
+                            print(f"[WARN] No se pudo construir el reporte XML mensual de recibidos: {err}")
+                        if destino_xml_mes.exists():
+                            resultado_mes["reporte_xml"] = str(destino_xml_mes)
+                    resultado_mes["xml_dir"] = str(base_mes)
+
+                if "PDF" in formatos_norm and reportes_pdf_dia:
+                    destino_pdf_mes = base_mes / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
+                    try:
+                        pdf_mes = _consolidar_reportes_excel(reportes_pdf_dia, destino_pdf_mes)
+                    except Exception as err:
+                        print(f"[WARN] No se pudo consolidar reporte PDF mensual de recibidos: {err}")
+                        pdf_mes = None
+                    if pdf_mes and Path(pdf_mes).exists():
+                        resultado_mes["reporte_pdf"] = str(pdf_mes)
+
+                resultado_mes["carpeta_tipo"] = str(base_mes if base_mes.exists() else destino_objetivo)
+                return resultado_mes
+
             mes_fin_val = None
             try:
                 if mes_fin not in (None, "", 0):
@@ -7513,7 +7716,6 @@ def descargar_sri(
                         "aviso_recorte": aviso_recorte,
                     }
             if mes_fin_val and mes_fin_val >= mes and dia in (0, None):
-                formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
                 reportes_xml = []
                 reportes_pdf = []
                 detalle_meses = []
@@ -7524,7 +7726,7 @@ def descargar_sri(
                 resultado_mes = None
                 for mes_actual in range(mes_inicio, mes_fin_val + 1):
                     _check_cancel("recibidos_mes")
-                    resultado_mes = _flujo_recibidos(modulo_page, destino_objetivo, anio, mes_actual, 0, tipo, formatos)
+                    resultado_mes = _recibidos_por_mes(mes_actual, 0)
                     total_xml += resultado_mes.get("n_xml", 0)
                     total_pdf += resultado_mes.get("n_pdf", 0)
                     detalle_meses.append(
@@ -7535,23 +7737,8 @@ def descargar_sri(
                             "n_pdf": resultado_mes.get("n_pdf", 0),
                         }
                     )
-                    if "XML" in formatos_norm and resultado_mes.get("n_xml", 0) > 0:
-                        try:
-                            xml_folder = Path(
-                                resultado_mes.get("xml_dir")
-                                or (Path(resultado_mes.get("carpeta_tipo") or destino_objetivo) / "XML")
-                            )
-                            tipo_slug = resultado_mes.get(
-                                "tipo_slug",
-                                _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
-                            )
-                            carpeta_tipo_mes = Path(resultado_mes.get("carpeta_tipo") or destino_objetivo)
-                            excel_path = carpeta_tipo_mes / f"reporte_{tipo_slug}_{anio}_{mes_actual:02d}.xlsx"
-                            construir_reporte(xml_folder, excel_path)
-                            if excel_path.exists():
-                                reportes_xml.append(str(excel_path))
-                        except Exception as err:
-                            print(f"[WARN] No se pudo construir reporte XML mensual (recibidos): {err}")
+                    if resultado_mes.get("reporte_xml") and Path(resultado_mes.get("reporte_xml")).exists():
+                        reportes_xml.append(str(resultado_mes.get("reporte_xml")))
                     reporte_pdf_mes = resultado_mes.get("reporte_pdf")
                     if reporte_pdf_mes and Path(reporte_pdf_mes).exists():
                         reportes_pdf.append(str(reporte_pdf_mes))
@@ -7567,7 +7754,10 @@ def descargar_sri(
                 resultado["mes_inicio"] = mes_inicio
                 resultado["mes_fin"] = mes_fin_val
                 fecha_inicio = f"01/{mes_inicio:02d}/{anio}"
-                fecha_fin = f"{calendar.monthrange(anio, mes_fin_val)[1]:02d}/{mes_fin_val:02d}/{anio}"
+                dia_fin = calendar.monthrange(anio, mes_fin_val)[1]
+                if anio == hoy.year and mes_fin_val == hoy.month:
+                    dia_fin = min(dia_fin, hoy.day)
+                fecha_fin = f"{dia_fin:02d}/{mes_fin_val:02d}/{anio}"
                 resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
                 resultado["reportes_xml"] = reportes_xml
                 resultado["reportes_pdf"] = reportes_pdf
@@ -7623,7 +7813,10 @@ def descargar_sri(
                 carpeta_rango = destino_objetivo / f"{anio:04d}"
                 resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_objetivo)
             else:
-                resultado = _flujo_recibidos(modulo_page, destino_objetivo, anio, mes, dia, tipo, formatos)
+                if dia in (0, None):
+                    resultado = _recibidos_por_mes(int(mes), 0)
+                else:
+                    resultado = _recibidos_por_mes(int(mes), int(dia))
                 if aviso_recorte:
                     resultado["aviso_recorte"] = aviso_recorte
         elif origen == "Emitidos":
