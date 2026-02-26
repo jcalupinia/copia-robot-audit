@@ -801,7 +801,7 @@ def _download_worker(params: dict, q: "queue.Queue"):
 # ==============================
 st.set_page_config(
     page_title="SRI Robot Audit",
-    page_icon="",
+    page_icon=str(Path(__file__).parent / "AUDIT_IA_sin_fondo_transparente_FINAL.png"),
     layout="wide",
     initial_sidebar_state="expanded",
 )

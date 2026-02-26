@@ -9,8 +9,15 @@ call .venv\Scripts\activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip install pyinstaller
+python scripts\generate_icon.py
 python scripts\generate_version.py
+set ICON_ARG=
+if exist "LogoAUDIT.ico" (
+  set ICON_ARG=--icon "LogoAUDIT.ico"
+)
 pyinstaller --noconfirm --onefile --name "ROBOT_AUDIT_SRI" ^
+  --noupx ^
+  %ICON_ARG% ^
   --collect-all streamlit ^
   --collect-all streamlit.runtime ^
   --collect-all streamlit.elements ^

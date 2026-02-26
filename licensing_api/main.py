@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 
 import boto3
 from botocore.config import Config
@@ -105,6 +105,31 @@ def _r2_presigned_url() -> str | None:
         )
     except Exception:
         return None
+
+
+def _r2_download_source() -> tuple[object, str, str] | tuple[None, None, None]:
+    bucket = os.getenv("R2_BUCKET", "").strip()
+    object_key = os.getenv("R2_OBJECT_KEY", "").strip() or os.getenv("UPDATE_OBJECT_KEY", "").strip()
+    if not object_key:
+        object_key = "ROBOT_AUDIT_SRI.exe"
+    if not bucket:
+        return None, None, None
+    client = _r2_client()
+    if client is None:
+        return None, None, None
+    return client, bucket, object_key
+
+
+def _iter_r2_body(stream_body, chunk_size: int = 1024 * 512):
+    try:
+        for chunk in stream_body.iter_chunks(chunk_size=chunk_size):
+            if chunk:
+                yield chunk
+    finally:
+        try:
+            stream_body.close()
+        except Exception:
+            pass
 
 def get_current_user(
 
@@ -324,9 +349,29 @@ def updates_download(request: Request):
     file_path = os.getenv("UPDATE_FILE_PATH", "").strip()
     if file_path:
         return FileResponse(file_path, filename="ROBOT_AUDIT_SRI.exe", media_type="application/octet-stream")
-    r2_url = _r2_presigned_url()
-    if r2_url:
-        return RedirectResponse(r2_url)
+    client, bucket, object_key = _r2_download_source()
+    if client and bucket and object_key:
+        try:
+            r2_obj = client.get_object(Bucket=bucket, Key=object_key)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archivo de actualizacion no encontrado en R2.")
+
+        body = r2_obj.get("Body")
+        if body is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se pudo leer el archivo de actualizacion en R2.")
+        filename = Path(object_key).name or "ROBOT_AUDIT_SRI.exe"
+        media_type = r2_obj.get("ContentType") or "application/octet-stream"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        }
+        content_length = r2_obj.get("ContentLength")
+        if content_length is not None:
+            headers["Content-Length"] = str(content_length)
+        return StreamingResponse(
+            _iter_r2_body(body),
+            media_type=media_type,
+            headers=headers,
+        )
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archivo de actualizacion no configurado.")
 
 @app.get("/", response_class=HTMLResponse)
@@ -480,7 +525,7 @@ def landing_page(request: Request):
         <p class="meta">Haz clic para bajar el ejecutable.</p>
         <p class="meta">Version actual: {version}</p>
       </div>
-      <a class="cta" href="{download_url}">Descargar ROBOT_AUDIT_SRI.exe</a>
+      <a class="cta" href="{download_url}" download="ROBOT_AUDIT_SRI.exe">Descargar ROBOT_AUDIT_SRI.exe</a>
       <div class="info">Si ya tienes la app instalada, solo abre el exe y se actualizara automaticamente.</div>
     </aside>
   </div>
