@@ -63,5 +63,13 @@ class PasswordResetConfirm(BaseModel):
     new_password: constr(min_length=6)
 
 
+class PasswordResetPreviewRequest(BaseModel):
+    token: constr(min_length=16)
+
+
+class PasswordResetPreviewResponse(BaseModel):
+    email: EmailStr
+
+
 class MessageResponse(BaseModel):
     detail: str

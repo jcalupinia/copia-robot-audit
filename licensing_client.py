@@ -63,3 +63,9 @@ class LicensingClient:
             "/auth/password-reset/confirm",
             json={"token": token, "new_password": new_password},
         )
+
+    def preview_password_reset(self, token: str) -> dict:
+        return self._post(
+            "/auth/password-reset/preview",
+            json={"token": token},
+        )

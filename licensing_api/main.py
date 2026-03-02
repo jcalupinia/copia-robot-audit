@@ -144,13 +144,14 @@ def _password_reset_hash(token: str) -> str:
 
 
 def _build_reset_link(request: Request, token: str) -> str:
-    base_url = os.getenv("APP_BASE_URL", "").strip()
+    base_url = os.getenv("RESET_LINK_BASE_URL", "").strip() or os.getenv("APP_BASE_URL", "").strip()
     if not base_url:
-        base_url = str(request.base_url).rstrip("/")
+        base_url = "http://127.0.0.1:8501"
+    base_url = base_url.rstrip("/")
     return f"{base_url}/?reset_token={token}"
 
 
-def _send_reset_email(target_email: str, reset_link: str, token: str) -> None:
+def _send_reset_email(target_email: str, reset_link: str) -> None:
     sender = os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "no-reply@example.com"
     host = os.getenv("SMTP_HOST")
     port = int(os.getenv("SMTP_PORT", "587"))
@@ -170,9 +171,6 @@ Hemos recibido una solicitud para restablecer tu contraseña.
 
 Enlace de recuperación:
 {reset_link}
-
-Si el enlace no abre en tu app local, usa este código en la pantalla de recuperación:
-{token}
 
 Si no solicitaste este cambio, ignora este mensaje.
 """
@@ -217,6 +215,28 @@ def _create_password_reset_token(db: Session, user: models.User) -> str:
     )
     db.commit()
     return token
+
+
+def _get_valid_password_reset(db: Session, raw_token: str) -> tuple[models.PasswordResetToken, models.User]:
+    token_hash = _password_reset_hash(raw_token.strip())
+    now = datetime.utcnow()
+    reset_req = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.token_hash == token_hash,
+            models.PasswordResetToken.used_at.is_(None),
+        )
+        .first()
+    )
+    if not reset_req:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token de recuperación inválido.")
+    if reset_req.expires_at < now:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El token de recuperación expiró.")
+
+    user = db.query(models.User).filter(models.User.id == reset_req.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no válido para recuperación.")
+    return reset_req, user
 
 def get_current_user(
 
@@ -282,7 +302,7 @@ def request_password_reset(
     try:
         token = _create_password_reset_token(db, user)
         reset_link = _build_reset_link(request, token)
-        _send_reset_email(user.email, reset_link, token)
+        _send_reset_email(user.email, reset_link)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -291,29 +311,22 @@ def request_password_reset(
     return schemas.MessageResponse(detail=generic_message)
 
 
+@app.post("/auth/password-reset/preview", response_model=schemas.PasswordResetPreviewResponse)
+def preview_password_reset(
+    payload: schemas.PasswordResetPreviewRequest,
+    db: Session = Depends(get_db),
+):
+    _, user = _get_valid_password_reset(db, payload.token)
+    return schemas.PasswordResetPreviewResponse(email=user.email)
+
+
 @app.post("/auth/password-reset/confirm", response_model=schemas.MessageResponse)
 def confirm_password_reset(
     payload: schemas.PasswordResetConfirm,
     db: Session = Depends(get_db),
 ):
-    token_hash = _password_reset_hash(payload.token.strip())
     now = datetime.utcnow()
-    reset_req = (
-        db.query(models.PasswordResetToken)
-        .filter(
-            models.PasswordResetToken.token_hash == token_hash,
-            models.PasswordResetToken.used_at.is_(None),
-        )
-        .first()
-    )
-    if not reset_req:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token de recuperación inválido.")
-    if reset_req.expires_at < now:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El token de recuperación expiró.")
-
-    user = db.query(models.User).filter(models.User.id == reset_req.user_id).first()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no válido para recuperación.")
+    reset_req, user = _get_valid_password_reset(db, payload.token)
 
     user.password_hash = get_password_hash(payload.new_password)
     reset_req.used_at = now

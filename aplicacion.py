@@ -1337,6 +1337,11 @@ def _confirm_password_reset(token: str, new_password: str) -> None:
     LICENSE_CLIENT.confirm_password_reset(token.strip(), new_password)
 
 
+def _preview_password_reset(token: str) -> str:
+    data = LICENSE_CLIENT.preview_password_reset(token.strip())
+    return str(data.get("email") or "").strip()
+
+
 def _handle_reset_query_token():
     params = st.query_params
     if "reset_request" in params:
@@ -1350,8 +1355,19 @@ def _handle_reset_query_token():
         token = token_values
     else:
         token = token_values[0]
+    try:
+        email = _preview_password_reset(token)
+    except Exception:
+        st.warning("El enlace de recuperación no es válido o ya expiró.")
+        st.query_params.clear()
+        return
+    if not email:
+        st.warning("No se pudo validar el enlace de recuperación.")
+        st.query_params.clear()
+        return
     st.session_state["password_recovery_mode"] = True
     st.session_state["active_reset_token"] = token
+    st.session_state["recovery_email"] = email
     st.query_params.clear()
 
 
@@ -1387,10 +1403,6 @@ def _render_reset_request():
                         st.rerun()
                     except Exception as err:
                         st.error(f"No se pudo enviar el correo: {err}")
-        if st.button("Ya tengo token", key="btn_have_reset_token"):
-            st.session_state["reset_request_mode"] = False
-            st.session_state["password_recovery_mode"] = True
-            st.rerun()
 
 
 def _render_password_recovery():
@@ -1410,21 +1422,25 @@ def _render_password_recovery():
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
         st.markdown("<div class='auth-title'>Reestablecer contraseña</div>", unsafe_allow_html=True)
-        st.info("Abre el enlace recibido por correo o pega el token para finalizar el proceso.")
+        st.info("Crea tu nueva contraseña para finalizar el acceso a tu cuenta.")
         active_token = st.session_state.get("active_reset_token") or ""
+        recovery_email = st.session_state.get("recovery_email") or ""
+        if not active_token or not recovery_email:
+            st.warning("Abre el enlace de recuperación desde tu correo para continuar.")
+            return
         with st.form("password_recovery_form"):
-            token_value = st.text_input("Código o token de recuperación", value=active_token)
+            st.text_input("Correo electrónico", value=recovery_email, disabled=True)
             new_password = st.text_input("Nueva contraseña", type="password")
             confirm_password = st.text_input("Confirmar contraseña", type="password")
             submitted = st.form_submit_button("Guardar contraseña", type="primary")
             if submitted:
-                if not token_value or not new_password or not confirm_password:
+                if not new_password or not confirm_password:
                     st.error("Completa todos los campos.")
                 elif new_password != confirm_password:
                     st.error("Las contraseñas no coinciden.")
                 else:
                     try:
-                        _confirm_password_reset(token_value.strip(), new_password)
+                        _confirm_password_reset(active_token, new_password)
                         st.success("Tu contraseña se actualizó correctamente.")
                         st.session_state["password_recovery_mode"] = False
                         st.session_state.pop("recovery_email", None)
