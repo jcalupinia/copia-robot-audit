@@ -18,6 +18,7 @@ APP_NAME = "ROBOT_AUDIT_SRI"
 VERSION_FILENAME = "version.txt"
 
 DEFAULT_LICENSE_API_URL = os.getenv("DEFAULT_LICENSE_API_URL", "https://sri-robot-audit-ik01.onrender.com")
+DEFAULT_UPDATE_TOKEN = os.getenv("DEFAULT_UPDATE_TOKEN", "256ed0dd9849466ebd29888cebdafc52")
 
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 if getattr(sys, "frozen", False):
@@ -27,6 +28,44 @@ else:
 CONFIG_FILENAME = "desktop_config.json"
 LOG_PATH = EXE_DIR / "desktop_launcher.log"
 INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / APP_NAME
+
+
+def _default_config() -> dict:
+    return {
+        "LICENSE_API_URL": DEFAULT_LICENSE_API_URL,
+        "UPDATE_TOKEN": DEFAULT_UPDATE_TOKEN,
+        "SESSION_CACHE_DIR": ".session_cache",
+    }
+
+
+def _normalize_config(raw: dict | None) -> dict:
+    cfg = {}
+    if isinstance(raw, dict):
+        cfg.update(raw)
+
+    defaults = _default_config()
+    for key, value in defaults.items():
+        current = cfg.get(key)
+        if current is None:
+            cfg[key] = value
+            continue
+        if isinstance(current, str):
+            current = current.strip()
+        else:
+            current = str(current)
+        if key == "LICENSE_API_URL":
+            cfg[key] = current or value
+        elif key == "SESSION_CACHE_DIR":
+            cfg[key] = current or ".session_cache"
+        elif key == "UPDATE_TOKEN":
+            cfg[key] = current or value
+        else:
+            cfg[key] = current
+    return cfg
+
+
+def _write_config(path: Path, config: dict) -> None:
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 def _set_console_title(title: str) -> None:
@@ -93,14 +132,24 @@ def _load_config():
     for path in candidates:
         if path.exists():
             try:
-                return json.loads(path.read_text(encoding="utf-8-sig"))
+                loaded = json.loads(path.read_text(encoding="utf-8-sig"))
             except Exception as exc:
-                _fatal(f"Config inválido en {path}.", exc)
+                _fatal(f"Config invalido en {path}.", exc)
+            if not isinstance(loaded, dict):
+                _fatal(f"Config invalido en {path}. Debe ser un objeto JSON.")
+            normalized = _normalize_config(loaded)
+            if normalized != loaded:
+                try:
+                    _write_config(path, normalized)
+                except Exception:
+                    pass
+            return normalized
     _fatal(
         "Falta LICENSE_API_URL. Agrega esa URL en desktop_config.json "
         "(junto al .exe) y vuelve a abrir la app."
     )
     return {}
+
 
 def _resolve_config_path() -> Path | None:
     candidates = [EXE_DIR / CONFIG_FILENAME, Path.cwd() / CONFIG_FILENAME]
@@ -124,15 +173,18 @@ def _ensure_installed() -> None:
         INSTALL_DIR.mkdir(parents=True, exist_ok=True)
         target_exe = INSTALL_DIR / f"{APP_NAME}.exe"
         shutil.copy2(exe_path, target_exe)
+        target_config = INSTALL_DIR / CONFIG_FILENAME
 
         config_src = _resolve_config_path()
         if config_src:
-            shutil.copy2(config_src, INSTALL_DIR / CONFIG_FILENAME)
-        elif DEFAULT_LICENSE_API_URL:
-            (INSTALL_DIR / CONFIG_FILENAME).write_text(
-                json.dumps({"LICENSE_API_URL": DEFAULT_LICENSE_API_URL}, indent=2),
-                encoding="utf-8",
-            )
+            shutil.copy2(config_src, target_config)
+            try:
+                loaded = json.loads(target_config.read_text(encoding="utf-8-sig"))
+            except Exception:
+                loaded = {}
+            _write_config(target_config, _normalize_config(loaded))
+        else:
+            _write_config(target_config, _default_config())
 
         subprocess.Popen([str(target_exe)])
     except Exception as exc:

@@ -1440,11 +1440,16 @@ Si no solicitaste este cambio, ignora este mensaje.
         raise RuntimeError("Configura SMTP_HOST, SMTP_PORT, SMTP_USER y SMTP_PASSWORD para enviar correos.")
     use_tls = os.getenv("SMTP_USE_TLS", "1").lower() not in {"0", "false", "no"}
     context = ssl.create_default_context()
-    with smtplib.SMTP(host, port, timeout=10) as server:
-        if use_tls:
-            server.starttls(context=context)
-        server.login(user, password)
-        server.send_message(msg)
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, context=context, timeout=10) as server:
+            server.login(user, password)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=10) as server:
+            if use_tls:
+                server.starttls(context=context)
+            server.login(user, password)
+            server.send_message(msg)
 
 
 def _handle_reset_query_token():
