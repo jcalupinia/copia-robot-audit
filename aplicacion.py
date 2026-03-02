@@ -963,6 +963,30 @@ button[aria-label="Detener proceso"]{
         border:1px solid rgba(16,25,54,0.4);
         box-shadow:none;
     }
+    .auth-reset-wrap{
+        display:flex;
+        justify-content:flex-end;
+        margin-top:10px;
+    }
+    .auth-reset-link{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        padding:10px 14px;
+        border-radius:10px;
+        border:1px solid rgba(35, 84, 190, 0.55);
+        background:rgba(16, 44, 110, 0.92);
+        color:#f4f8ff !important;
+        font-size:0.92rem;
+        font-weight:700;
+        text-decoration:none !important;
+        box-shadow:0 10px 18px rgba(9, 18, 36, 0.26);
+    }
+    .auth-reset-link:hover{
+        background:rgba(24, 61, 148, 0.96);
+        color:#ffffff !important;
+        text-decoration:none !important;
+    }
     .app-title {
         font-size: clamp(2.1rem, 2.7vw, 2.7rem) !important;
         font-weight: 800 !important;
@@ -1472,8 +1496,8 @@ def _render_login():
             password = st.text_input("Contraseña", type="password")
             submitted = st.form_submit_button("Iniciar sesión", type="primary")
         st.markdown(
-            "<div style='display:flex; justify-content:flex-end; margin-top:8px;'>"
-            "<a href='?reset_request=1' style='color:#77aaff;text-decoration:underline;font-size:0.9rem;'>¿Olvidaste tu contraseña?</a>"
+            "<div class='auth-reset-wrap'>"
+            "<a class='auth-reset-link' href='?reset_request=1'>&iquest;Olvidaste tu contrase&ntilde;a?</a>"
             "</div>",
             unsafe_allow_html=True,
         )
