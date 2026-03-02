@@ -53,3 +53,15 @@ class UserInfo(BaseModel):
     class Config:
         orm_mode = True
 
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: constr(min_length=16)
+    new_password: constr(min_length=6)
+
+
+class MessageResponse(BaseModel):
+    detail: str

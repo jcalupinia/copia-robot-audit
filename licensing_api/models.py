@@ -28,6 +28,11 @@ class User(Base):
     )
 
     licenses = relationship("License", back_populates="user", cascade="all,delete")
+    password_resets = relationship(
+        "PasswordResetToken",
+        back_populates="user",
+        cascade="all,delete-orphan",
+    )
 
 
 class License(Base):
@@ -71,3 +76,16 @@ class LicenseDevice(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     license = relationship("License", back_populates="devices")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(128), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user = relationship("User", back_populates="password_resets")

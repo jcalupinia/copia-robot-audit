@@ -51,3 +51,15 @@ class LicensingClient:
             detail = response.json().get("detail") if response.headers.get("content-type", "").startswith("application/json") else response.text
             raise ValueError(detail or f"Error {response.status_code}")
         return response.json()
+
+    def request_password_reset(self, email: str) -> dict:
+        return self._post(
+            "/auth/password-reset/request",
+            json={"email": email},
+        )
+
+    def confirm_password_reset(self, token: str, new_password: str) -> dict:
+        return self._post(
+            "/auth/password-reset/confirm",
+            json={"token": token, "new_password": new_password},
+        )

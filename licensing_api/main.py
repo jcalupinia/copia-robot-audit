@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from email.message import EmailMessage
+import hashlib
 import os
 from pathlib import Path
+import secrets
+import smtplib
+import ssl
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
@@ -26,6 +31,7 @@ from licensing_api.security import (
     create_access_token,
 
     decode_access_token,
+    get_password_hash,
 
 )
 
@@ -131,6 +137,86 @@ def _iter_r2_body(stream_body, chunk_size: int = 1024 * 512):
         except Exception:
             pass
 
+
+def _password_reset_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _build_reset_link(request: Request, token: str) -> str:
+    base_url = os.getenv("APP_BASE_URL", "").strip()
+    if not base_url:
+        base_url = str(request.base_url).rstrip("/")
+    return f"{base_url}/?reset_token={token}"
+
+
+def _send_reset_email(target_email: str, reset_link: str, token: str) -> None:
+    sender = os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "no-reply@example.com"
+    host = os.getenv("SMTP_HOST")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER")
+    password = os.getenv("SMTP_PASSWORD")
+    if not all([host, user, password]):
+        raise RuntimeError("SMTP no configurado en el servidor.")
+
+    msg = EmailMessage()
+    msg["Subject"] = "Recupera tu contraseña - SRI Robot"
+    msg["From"] = sender
+    msg["To"] = target_email
+    msg.set_content(
+        f"""Hola,
+
+Hemos recibido una solicitud para restablecer tu contraseña.
+
+Enlace de recuperación:
+{reset_link}
+
+Si el enlace no abre en tu app local, usa este código en la pantalla de recuperación:
+{token}
+
+Si no solicitaste este cambio, ignora este mensaje.
+"""
+    )
+
+    use_tls = os.getenv("SMTP_USE_TLS", "1").lower() not in {"0", "false", "no"}
+    context = ssl.create_default_context()
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, context=context, timeout=10) as server:
+            server.login(user, password)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=10) as server:
+            if use_tls:
+                server.starttls(context=context)
+            server.login(user, password)
+            server.send_message(msg)
+
+
+def _create_password_reset_token(db: Session, user: models.User) -> str:
+    ttl_raw = os.getenv("RESET_TOKEN_TTL", "3600").strip()
+    try:
+        ttl_seconds = max(300, int(ttl_raw))
+    except ValueError:
+        ttl_seconds = 3600
+
+    now = datetime.utcnow()
+    token = secrets.token_urlsafe(32)
+    token_hash = _password_reset_hash(token)
+    expires_at = now + timedelta(seconds=ttl_seconds)
+
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user.id
+    ).delete(synchronize_session=False)
+    db.add(
+        models.PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            used_at=None,
+        )
+    )
+    db.commit()
+    return token
+
 def get_current_user(
 
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
@@ -178,6 +264,66 @@ def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
 def read_current_user(user: models.User = Depends(get_current_user)):
 
     return user
+
+
+@app.post("/auth/password-reset/request", response_model=schemas.MessageResponse)
+def request_password_reset(
+    payload: schemas.PasswordResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    # Respuesta uniforme para no revelar si el correo existe o no.
+    generic_message = "Si el correo existe, enviaremos un enlace de recuperación."
+    user = crud.get_user_by_email(db, email=payload.email.strip().lower())
+    if not user or not user.is_active:
+        return schemas.MessageResponse(detail=generic_message)
+
+    try:
+        token = _create_password_reset_token(db, user)
+        reset_link = _build_reset_link(request, token)
+        _send_reset_email(user.email, reset_link, token)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"No se pudo enviar el correo de recuperación: {exc}",
+        )
+    return schemas.MessageResponse(detail=generic_message)
+
+
+@app.post("/auth/password-reset/confirm", response_model=schemas.MessageResponse)
+def confirm_password_reset(
+    payload: schemas.PasswordResetConfirm,
+    db: Session = Depends(get_db),
+):
+    token_hash = _password_reset_hash(payload.token.strip())
+    now = datetime.utcnow()
+    reset_req = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.token_hash == token_hash,
+            models.PasswordResetToken.used_at.is_(None),
+        )
+        .first()
+    )
+    if not reset_req:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token de recuperación inválido.")
+    if reset_req.expires_at < now:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El token de recuperación expiró.")
+
+    user = db.query(models.User).filter(models.User.id == reset_req.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no válido para recuperación.")
+
+    user.password_hash = get_password_hash(payload.new_password)
+    reset_req.used_at = now
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user.id,
+        models.PasswordResetToken.id != reset_req.id,
+    ).delete(synchronize_session=False)
+    db.add(user)
+    db.add(reset_req)
+    db.commit()
+    return schemas.MessageResponse(detail="Contraseña actualizada correctamente.")
 
 
 

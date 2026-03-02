@@ -14,13 +14,9 @@ import json
 import re
 import unicodedata
 import calendar
-import secrets
-import smtplib
-import ssl
 import base64
 from datetime import datetime, timedelta, date
 from pathlib import Path
-from email.message import EmailMessage
 
 import pandas as pd
 import streamlit as st
@@ -47,14 +43,6 @@ try:
     import desktop_launcher as _desktop_launcher
 except Exception:
     _desktop_launcher = None
-# Para restablecer contraseñas directamente en la base local
-try:
-    from licensing_api.database import SessionLocal
-    from licensing_api import crud as lic_crud, security as lic_security
-except Exception:
-    SessionLocal = None
-    lic_crud = None
-    lic_security = None
 
 import asyncio
 import threading
@@ -1148,8 +1136,6 @@ SESSION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 SESSION_CACHE = SESSION_CACHE_DIR / "session_cache.json"
 ENABLE_SESSION_CACHE = os.getenv("ENABLE_SESSION_CACHE", "1").strip().lower() not in {"0", "false", "no"}
 PREFERENCES_FILE = Path(os.getenv("USER_PREFS_PATH", SESSION_CACHE_DIR / "user_prefs.json"))
-RESET_REQUESTS_FILE = BASE_DIR / "password_reset_requests.json"
-RESET_TOKEN_TTL = 3600
 _SESSION_CACHE_MEMORY: dict[str, dict] = {}
 
 def _generate_device_fingerprint() -> str:
@@ -1343,113 +1329,12 @@ def _select_directory_dialog(initial_dir: str | None = None):
         return None, str(err)
 
 
-def _load_reset_requests() -> dict:
-    if RESET_REQUESTS_FILE.exists():
-        try:
-            with open(RESET_REQUESTS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
+def _request_password_reset(email: str) -> None:
+    LICENSE_CLIENT.request_password_reset(email.strip())
 
 
-def _save_reset_requests(data: dict) -> None:
-    RESET_REQUESTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _create_reset_token(email: str) -> str:
-    data = _load_reset_requests()
-    token = secrets.token_urlsafe(32)
-    now = time.time()
-    data[token] = {
-        "email": email,
-        "created": now,
-        "expires_at": now + RESET_TOKEN_TTL,
-    }
-    _save_reset_requests(data)
-    return token
-
-
-def _validate_reset_token(token: str) -> str | None:
-    data = _load_reset_requests()
-    info = data.get(token)
-    if not info:
-        return None
-    # Compatibilidad con tokens antiguos sin expires_at
-    if "expires_at" not in info:
-        info["expires_at"] = info.get("created", 0) + RESET_TOKEN_TTL
-        data[token] = info
-        _save_reset_requests(data)
-
-    if time.time() > info.get("expires_at", 0):
-        data.pop(token, None)
-        _save_reset_requests(data)
-        return None
-    return info.get("email")
-
-
-def _update_local_password(email: str, new_password: str) -> None:
-    """
-    Actualiza la contraseña en la base local licensing_api.db.
-    """
-    if not SessionLocal or not lic_crud or not lic_security:
-        raise RuntimeError("No se puede acceder a la base de licencias para actualizar la contraseña.")
-    db = SessionLocal()
-    try:
-        user = lic_crud.get_user_by_email(db, email=email)
-        if not user:
-            raise ValueError("Usuario no encontrado.")
-        user.password_hash = lic_security.get_password_hash(new_password)
-        db.add(user)
-        db.commit()
-    finally:
-        db.close()
-
-
-def _discard_reset_token(token: str) -> None:
-    data = _load_reset_requests()
-    if token in data:
-        data.pop(token, None)
-        _save_reset_requests(data)
-
-
-def _send_reset_email_message(email: str, token: str) -> None:
-    base_url = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip("/")
-    link = f"{base_url}/?reset_token={token}"
-    sender = os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "no-reply@example.com"
-
-    msg = EmailMessage()
-    msg["Subject"] = "Recupera tu contraseña - SRI Robot"
-    msg["From"] = sender
-    msg["To"] = email
-    msg.set_content(
-        f"""Hola,
-
-Hemos recibido una solicitud para restablecer tu contraseña en SRI Robot.
-Haz clic en el siguiente enlace para crear una nueva contraseña:
-{link}
-
-Si no solicitaste este cambio, ignora este mensaje.
-"""
-    )
-    host = os.getenv("SMTP_HOST")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER")
-    password = os.getenv("SMTP_PASSWORD")
-    if not all([host, user, password]):
-        raise RuntimeError("Configura SMTP_HOST, SMTP_PORT, SMTP_USER y SMTP_PASSWORD para enviar correos.")
-    use_tls = os.getenv("SMTP_USE_TLS", "1").lower() not in {"0", "false", "no"}
-    context = ssl.create_default_context()
-    if port == 465:
-        with smtplib.SMTP_SSL(host, port, context=context, timeout=10) as server:
-            server.login(user, password)
-            server.send_message(msg)
-    else:
-        with smtplib.SMTP(host, port, timeout=10) as server:
-            if use_tls:
-                server.starttls(context=context)
-            server.login(user, password)
-            server.send_message(msg)
+def _confirm_password_reset(token: str, new_password: str) -> None:
+    LICENSE_CLIENT.confirm_password_reset(token.strip(), new_password)
 
 
 def _handle_reset_query_token():
@@ -1465,13 +1350,8 @@ def _handle_reset_query_token():
         token = token_values
     else:
         token = token_values[0]
-    email = _validate_reset_token(token)
-    if email:
-        st.session_state["password_recovery_mode"] = True
-        st.session_state["recovery_email"] = email
-        st.session_state["active_reset_token"] = token
-    else:
-        st.warning("El enlace de recuperación no es válido o ya expiró.")
+    st.session_state["password_recovery_mode"] = True
+    st.session_state["active_reset_token"] = token
     st.query_params.clear()
 
 
@@ -1499,15 +1379,18 @@ def _render_reset_request():
                     st.error("Ingresa el correo registrado.")
                 else:
                     try:
-                        token = _create_reset_token(email.strip())
-                        _send_reset_email_message(email.strip(), token)
-                        st.success("Hemos enviado un enlace de recuperación a tu correo.")
+                        _request_password_reset(email.strip())
+                        st.success("Si el correo existe, enviaremos un enlace de recuperación.")
                         st.session_state["reset_request_mode"] = False
                         st.session_state["password_recovery_mode"] = False
                         st.query_params.clear()
                         st.rerun()
                     except Exception as err:
                         st.error(f"No se pudo enviar el correo: {err}")
+        if st.button("Ya tengo token", key="btn_have_reset_token"):
+            st.session_state["reset_request_mode"] = False
+            st.session_state["password_recovery_mode"] = True
+            st.rerun()
 
 
 def _render_password_recovery():
@@ -1527,31 +1410,28 @@ def _render_password_recovery():
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
         st.markdown("<div class='auth-title'>Reestablecer contraseña</div>", unsafe_allow_html=True)
-        st.info("Introduce tu nueva contraseña y confírmala para finalizar el proceso.")
-        preset_email = st.session_state.get("recovery_email", "")
-        active_token = st.session_state.get("active_reset_token")
+        st.info("Abre el enlace recibido por correo o pega el token para finalizar el proceso.")
+        active_token = st.session_state.get("active_reset_token") or ""
         with st.form("password_recovery_form"):
-            email = st.text_input("Correo electrónico", value=preset_email, disabled=bool(preset_email))
+            token_value = st.text_input("Código o token de recuperación", value=active_token)
             new_password = st.text_input("Nueva contraseña", type="password")
             confirm_password = st.text_input("Confirmar contraseña", type="password")
             submitted = st.form_submit_button("Guardar contraseña", type="primary")
             if submitted:
-                if not email or not new_password or not confirm_password:
+                if not token_value or not new_password or not confirm_password:
                     st.error("Completa todos los campos.")
                 elif new_password != confirm_password:
-                    st.error("Las contrase?as no coinciden.")
+                    st.error("Las contraseñas no coinciden.")
                 else:
                     try:
-                        _update_local_password(email.strip(), new_password)
-                        st.success("Tu contrase?a se actualiz? correctamente.")
-                        if active_token:
-                            _discard_reset_token(active_token)
+                        _confirm_password_reset(token_value.strip(), new_password)
+                        st.success("Tu contraseña se actualizó correctamente.")
                         st.session_state["password_recovery_mode"] = False
                         st.session_state.pop("recovery_email", None)
                         st.session_state.pop("active_reset_token", None)
                         st.rerun()
                     except Exception as err:
-                        st.error(f"No se pudo actualizar la contrase?a: {err}")
+                        st.error(f"No se pudo actualizar la contraseña: {err}")
 
 
 def _render_login():
@@ -3067,7 +2947,3 @@ with tab3:
                 st.success(f"PDF copiados: {copiados_pdf} en `{destino_copia_pdf}`")
             else:
                 st.info("No se copiaron PDF porque no hubo documentos para el periodo seleccionado.")
-
-
-
-
