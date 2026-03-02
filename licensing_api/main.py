@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 
+import base64
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 import hashlib
@@ -520,6 +521,37 @@ def updates_download(request: Request):
         )
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archivo de actualizacion no configurado.")
 
+
+def _landing_logo_data_uri() -> str:
+    logo_env = os.getenv("LANDING_LOGO_PATH", "").strip()
+    candidates = []
+    if logo_env:
+        candidates.append(Path(logo_env))
+    candidates.extend(
+        [
+            Path("AUDIT_IA_sin_fondo_transparente_FINAL.png"),
+            Path("LogoAUDIT.png"),
+            Path("logo.png"),
+        ]
+    )
+    for path in candidates:
+        try:
+            if not path.exists():
+                continue
+            ext = path.suffix.lower()
+            if ext == ".svg":
+                mime = "image/svg+xml"
+            elif ext == ".jpg" or ext == ".jpeg":
+                mime = "image/jpeg"
+            else:
+                mime = "image/png"
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            return f"data:{mime};base64,{encoded}"
+        except Exception:
+            continue
+    return ""
+
+
 @app.get("/", response_class=HTMLResponse)
 def landing_page(request: Request):
     version = os.getenv("UPDATE_VERSION", "").strip()
@@ -535,6 +567,12 @@ def landing_page(request: Request):
     token = os.getenv("UPDATE_TOKEN", "").strip()
     if token:
         download_url = f"{download_url}?token={token}"
+    logo_uri = _landing_logo_data_uri()
+    logo_html = (
+        f"<img src='{logo_uri}' alt='Audit IA' class='logo-img'/>"
+        if logo_uri
+        else "<div class='logo-fallback'>AUDIT IA</div>"
+    )
     html = f"""
 <!doctype html>
 <html lang="es">
@@ -544,135 +582,241 @@ def landing_page(request: Request):
   <title>ROBOT AUDIT SRI</title>
   <style>
     :root {{
-      --bg: #fdfaf6;
-      --panel: #ffffff;
-      --ink: #1b1b1b;
-      --muted: #836f60;
-      --accent: #e38a53;
-      --accent-dark: #cf7a45;
-      --shadow: rgba(17, 13, 9, 0.08);
+      --brand-navy: #0b1c54;
+      --brand-blue: #2563eb;
+      --brand-cyan: #16c7d7;
+      --brand-soft: #eaf4ff;
+      --ink: #0f172a;
+      --muted: #475569;
+      --white: #ffffff;
+      --shadow: rgba(15, 23, 42, 0.16);
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: "Georgia", "Times New Roman", serif;
+      font-family: "Segoe UI", "Calibri", sans-serif;
       color: var(--ink);
-      background: radial-gradient(circle at top left, #fffdf7 0%, #faf6f1 45%, #f4ede4 100%);
+      background:
+        radial-gradient(1200px 620px at 12% 12%, rgba(37,99,235,0.20), transparent 60%),
+        radial-gradient(900px 500px at 88% 14%, rgba(22,199,215,0.24), transparent 60%),
+        linear-gradient(160deg, #f4f9ff 0%, #eaf5ff 46%, #f7fbff 100%);
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 32px;
+      padding: 28px;
     }}
     .shell {{
-      max-width: 980px;
+      max-width: 1080px;
       width: 100%;
       display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 28px;
-      background: var(--panel);
-      border-radius: 28px;
-      box-shadow: 0 16px 36px var(--shadow);
-      padding: 40px;
-      border: 1px solid rgba(17, 13, 9, 0.08);
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 24px;
+      background: rgba(255,255,255,0.88);
+      border-radius: 26px;
+      box-shadow: 0 22px 54px var(--shadow);
+      padding: 30px;
+      border: 1px solid rgba(37, 99, 235, 0.16);
+      backdrop-filter: blur(6px);
     }}
-    .badge {{
-      font-size: 13px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--muted);
+    .hero {{
+      padding: 8px 8px 8px 10px;
+    }}
+    .brand {{
+      display: flex;
+      align-items: center;
+      gap: 14px;
       margin-bottom: 16px;
     }}
-    h1 {{
-      font-size: 46px;
-      margin: 0 0 12px;
+    .logo-img {{
+      width: 64px;
+      height: 64px;
+      object-fit: contain;
+      border-radius: 12px;
+      background: var(--white);
+      border: 1px solid rgba(37,99,235,0.16);
+      padding: 6px;
     }}
-    h2 {{
-      margin: 0;
-      font-size: 22px;
-    }}
-    p {{
-      margin: 0 0 18px;
-      color: var(--muted);
-      line-height: 1.7;
-      font-size: 17px;
-    }}
-    ul {{
-      margin: 0 0 24px;
-      padding-left: 18px;
-      color: var(--muted);
-      line-height: 1.7;
-      font-size: 16px;
-    }}
-    .card {{
-      background: #fff;
-      border-radius: 22px;
-      padding: 28px;
-      box-shadow: inset 0 0 0 1px rgba(17, 13, 9, 0.08);
+    .logo-fallback {{
+      width: 64px;
+      height: 64px;
+      border-radius: 12px;
       display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      gap: 20px;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, var(--brand-blue), var(--brand-cyan));
+      color: var(--white);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }}
+    .brand-title {{
+      margin: 0;
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      color: var(--brand-navy);
+    }}
+    .tag {{
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 500;
+    }}
+    .hero h1 {{
+      margin: 10px 0 10px;
+      font-size: clamp(32px, 4.2vw, 46px);
+      line-height: 1.08;
+      color: #0f1f57;
+      letter-spacing: -0.02em;
+    }}
+    .lead {{
+      margin: 0 0 20px;
+      font-size: 18px;
+      line-height: 1.6;
+      color: var(--muted);
+      max-width: 90%;
+    }}
+    .benefits {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }}
+    .benefit {{
+      background: var(--brand-soft);
+      border: 1px solid rgba(37,99,235,0.16);
+      border-radius: 14px;
+      padding: 14px 14px;
+    }}
+    .benefit b {{
+      display: block;
+      margin-bottom: 4px;
+      color: #123375;
+      font-size: 15px;
+    }}
+    .benefit span {{
+      color: #46607f;
+      font-size: 14px;
+      line-height: 1.4;
+    }}
+    .download-card {{
+      background: linear-gradient(170deg, #0f2d70 0%, #0b1f52 62%, #0a1b48 100%);
+      color: var(--white);
+      border-radius: 22px;
+      padding: 26px 24px;
+      box-shadow: 0 18px 40px rgba(11, 28, 84, 0.35);
+      border: 1px solid rgba(115, 169, 255, 0.26);
+    }}
+    .download-card h2 {{
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+    }}
+    .download-card p {{
+      margin: 0;
+      color: rgba(230,240,255,0.92);
+      font-size: 15px;
+      line-height: 1.5;
     }}
     .cta {{
-      display: inline-flex;
+      margin-top: 20px;
+      width: 100%;
+      display: flex;
       align-items: center;
       justify-content: center;
       text-decoration: none;
-      padding: 16px 26px;
+      padding: 18px 18px;
       border-radius: 16px;
-      background: var(--accent);
-      color: #fff;
-      font-weight: 700;
-      font-size: 16px;
-      transition: transform 0.2s ease, background 0.2s ease;
+      background: linear-gradient(140deg, var(--brand-cyan), #42d9e6 45%, #6be4ee 100%);
+      color: #08283d;
+      font-weight: 800;
+      font-size: 18px;
+      letter-spacing: 0.01em;
+      border: 0;
+      box-shadow: 0 10px 24px rgba(13, 216, 235, 0.32);
+      transition: transform 0.18s ease, filter 0.18s ease;
     }}
     .cta:hover {{
-      background: var(--accent-dark);
-      transform: translateY(-2px);
+      transform: translateY(-1px);
+      filter: brightness(1.04);
     }}
-    .info {{
-      background: #fff2e5;
-      border-radius: 14px;
-      padding: 14px 16px;
+    .version {{
+      margin-top: 14px;
+      padding: 11px 12px;
+      border-radius: 12px;
+      background: rgba(122, 177, 255, 0.14);
+      border: 1px solid rgba(122, 177, 255, 0.26);
+      font-weight: 600;
+      color: #d6e9ff;
       font-size: 14px;
-      color: var(--muted);
     }}
-    .meta {{
+    .note {{
+      margin-top: 12px;
+      font-size: 13px;
+      color: rgba(230,240,255,0.85);
+    }}
+    .trust {{
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(122, 177, 255, 0.24);
       font-size: 14px;
-      color: var(--muted);
+      color: rgba(215, 232, 255, 0.9);
     }}
     @media (max-width: 860px) {{
       .shell {{
         grid-template-columns: 1fr;
-        padding: 28px;
+        padding: 22px;
       }}
-      h1 {{
-        font-size: 36px;
+      .lead {{
+        max-width: 100%;
+      }}
+      .benefits {{
+        grid-template-columns: 1fr;
       }}
     }}
   </style>
 </head>
 <body>
   <div class="shell">
-    <section>
-      <div class="badge">Descarga segura</div>
-      <h1>ROBOT AUDIT SRI</h1>
-      <p>Descarga el ejecutable oficial y mantente actualizado con la ultima version aprobada.</p>
-      <ul>
-        <li>Actualizacion silenciosa desde el propio ejecutable.</li>
-        <li>Instalacion automatica en AppData sin permisos de admin.</li>
-        <li>Compatible con Windows 10/11.</li>
-      </ul>
-    </section>
-    <aside class="card">
-      <div>
-        <h2>Descarga directa</h2>
-        <p class="meta">Haz clic para bajar el ejecutable.</p>
-        <p class="meta">Version actual: {version}</p>
+    <section class="hero">
+      <div class="brand">
+        {logo_html}
+        <div>
+          <h3 class="brand-title">ROBOT AUDIT SRI</h3>
+          <p class="tag">Audit Consulting</p>
+        </div>
       </div>
+      <h1>Controla tus comprobantes en minutos.</h1>
+      <p class="lead">
+        Una sola aplicacion para ordenar tu gestion, ahorrar tiempo y mantener tus reportes siempre al dia.
+      </p>
+      <div class="benefits">
+        <div class="benefit">
+          <b>Rapido y simple</b>
+          <span>Reduce tareas repetitivas y gana tiempo desde el primer dia.</span>
+        </div>
+        <div class="benefit">
+          <b>Mas claridad</b>
+          <span>Revisa tu informacion organizada para tomar decisiones con confianza.</span>
+        </div>
+        <div class="benefit">
+          <b>Mejor control</b>
+          <span>Ten todo centralizado para que tu seguimiento sea mas facil.</span>
+        </div>
+        <div class="benefit">
+          <b>Siempre al dia</b>
+          <span>Recibe mejoras continuas sin complicaciones para tu equipo.</span>
+        </div>
+      </div>
+    </section>
+    <aside class="download-card">
+      <h2>Descarga ahora</h2>
+      <p>Instala tu software de forma inmediata y empieza a usarlo hoy mismo.</p>
       <a class="cta" href="{download_url}" download="ROBOT_AUDIT_SRI.exe">Descargar ROBOT_AUDIT_SRI.exe</a>
-      <div class="info">Si ya tienes la app instalada, solo abre el exe y se actualizara automaticamente.</div>
+      <div class="version">Version actual: {version}</div>
+      <p class="note">Haz clic en el boton y la descarga iniciara automaticamente.</p>
+      <div class="trust">Solucion profesional para equipos que buscan orden, velocidad y confianza.</div>
     </aside>
   </div>
 </body>
