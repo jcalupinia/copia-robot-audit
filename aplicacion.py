@@ -784,6 +784,55 @@ def _download_worker(params: dict, q: "queue.Queue"):
     finally:
         set_user_notifier(None)
 
+
+def _friendly_download_error_message(raw_error: str, origen: str | None = None) -> tuple[str, str]:
+    err = (raw_error or "").strip()
+    low = err.lower()
+    origen_low = (origen or "").strip().lower()
+
+    if "proceso cancelado por el usuario" in low:
+        return "warning", "Proceso cancelado por el usuario."
+
+    if "no se pudo abrir el formulario de emitidos" in low or ("emitidos" in low and "timeout" in low):
+        return (
+            "warning",
+            "No se pudo abrir el formulario de Emitidos en este momento. El portal del SRI puede estar lento. Vuelve a intentar en unos segundos.",
+        )
+
+    if "captcha" in low:
+        return (
+            "warning",
+            "La consulta no pudo validarse por captcha. Vuelve a intentar. Si persiste, espera 1 o 2 minutos y prueba otra vez.",
+        )
+
+    if "indisponibilidad temporal" in low or ("portal del sri" in low and "indispon" in low):
+        return (
+            "warning",
+            "El portal del SRI esta temporalmente no disponible. Intenta nuevamente en unos minutos.",
+        )
+
+    if "login del sri" in low or "credenciales" in low:
+        return (
+            "error",
+            "No se pudo iniciar sesion en el portal del SRI. Verifica tus credenciales e intenta nuevamente.",
+        )
+
+    if "error http" in low:
+        return (
+            "error",
+            "La consulta no pudo completarse por una respuesta inesperada del portal. Intenta nuevamente.",
+        )
+
+    if "timeout" in low:
+        if origen_low == "emitidos":
+            return (
+                "warning",
+                "La consulta de Emitidos tardo mas de lo esperado. Vuelve a intentar en unos segundos.",
+            )
+        return "warning", "La consulta tardo mas de lo esperado. Vuelve a intentar."
+
+    return "error", "Ocurrio un inconveniente durante la consulta. Vuelve a intentar."
+
 # ==============================
 # CONFIGURACIN GENERAL
 # ==============================
@@ -2077,13 +2126,17 @@ with tab1:
     if st.session_state.download_status in {"done", "error"} and st.session_state.download_params:
         st.session_state.running_notice_ts = None
         st.session_state.stop_notice_ts = None
-        if st.session_state.download_error:
-            if "Proceso cancelado por el usuario" in st.session_state.download_error:
-                st.warning("Proceso cancelado por el usuario.")
-            else:
-                st.error(f"Ocurrió un error inesperado: {st.session_state.download_error}")
         resultado = st.session_state.download_result or {}
-        params = st.session_state.download_params
+        params = st.session_state.download_params or {}
+        if st.session_state.download_error:
+            raw_error = str(st.session_state.download_error)
+            level, user_msg = _friendly_download_error_message(raw_error, params.get("origen"))
+            if level == "warning":
+                st.warning(user_msg)
+            else:
+                st.error(user_msg)
+            if user_msg.strip() != raw_error.strip():
+                st.caption(f"Detalle tecnico: {raw_error}")
         if resultado and not st.session_state.download_registered:
             dia_registro = params.get("dia")
             registrar_descarga(
