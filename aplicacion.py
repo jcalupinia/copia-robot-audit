@@ -2060,6 +2060,48 @@ with tab1:
                 if not any(fmt in formatos_final for fmt in ("PDF", "XML")):
                     st.warning("Selecciona al menos un formato (PDF o XML).")
                     st.stop()
+                estado_emitidos_norm = (
+                    unicodedata.normalize("NFKD", estado_emitidos_val or "")
+                    .encode("ascii", "ignore")
+                    .decode("ascii")
+                    .strip()
+                    .lower()
+                )
+                es_emitidos_autorizados = estado_emitidos_norm == "autorizados"
+                selecciono_xml_emitidos = "XML" in formatos_final
+                selecciono_pdf_emitidos = "PDF" in formatos_final
+                if es_emitidos_autorizados and selecciono_xml_emitidos:
+                    if modo_fechas_emitidos == "Mes y dÃ­a":
+                        if dia_val in (0, None):
+                            fecha_inicio_sel = date(anio_val, mes_val, 1)
+                            fecha_fin_sel = date(anio_val, mes_val, calendar.monthrange(anio_val, mes_val)[1])
+                            periodo_txt = f"{meses_es[mes_val - 1]} {anio_val}"
+                        else:
+                            fecha_inicio_sel = date(anio_val, mes_val, int(dia_val))
+                            fecha_fin_sel = fecha_inicio_sel
+                            periodo_txt = fecha_inicio_sel.strftime("%d/%m/%Y")
+                    elif modo_fechas_emitidos == "Rango de meses":
+                        mes_fin_real = int(mes_fin_val or mes_val)
+                        fecha_inicio_sel = date(anio_val, mes_val, 1)
+                        fecha_fin_sel = date(anio_val, mes_fin_real, calendar.monthrange(anio_val, mes_fin_real)[1])
+                        periodo_txt = f"{meses_es[mes_val - 1]} {anio_val} a {meses_es[mes_fin_real - 1]} {anio_val}"
+                    else:
+                        fecha_inicio_sel = date(anio_val, 1, 1)
+                        fecha_fin_sel = date(anio_val, 12, 31)
+                        periodo_txt = f"Ano completo {anio_val}"
+
+                    limite_xml_emitidos = date.today() - timedelta(days=30)
+                    if fecha_fin_sel < limite_xml_emitidos:
+                        aviso_fecha_xml = (
+                            f"Advertencia de fecha: para XML Emitidos, el periodo {periodo_txt} esta fuera del limite de 30 dias "
+                            f"(antes del {limite_xml_emitidos.strftime('%d/%m/%Y')})."
+                        )
+                        if selecciono_pdf_emitidos:
+                            formatos_final = [fmt for fmt in formatos_final if fmt != "XML"]
+                            st.warning(aviso_fecha_xml + " Se continuara automaticamente solo con PDF.")
+                        else:
+                            st.warning(aviso_fecha_xml + " Selecciona PDF o usa una fecha dentro de los ultimos 30 dias.")
+                            st.stop()
 
             base_descargas = _get_download_base_dir()
             destino = base_descargas / ruc
