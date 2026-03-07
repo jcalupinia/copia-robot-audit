@@ -7483,6 +7483,7 @@ def descargar_sri(
     punto_emision: Optional[str] = None,
 ):
     _check_cancel("inicio_descarga")
+    formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
     hoy = datetime.now().date()
     aviso_recorte = None
     destino.mkdir(parents=True, exist_ok=True)
