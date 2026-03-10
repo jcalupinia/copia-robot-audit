@@ -1356,6 +1356,7 @@ def _load_user_preferences():
         "consolidate_base_dir",
         st.session_state["download_base_dir"],
     )
+    st.session_state["first_use_tour_completed"] = bool(data.get("first_use_tour_completed", False))
     st.session_state["_prefs_loaded"] = True
 
 
@@ -1371,10 +1372,80 @@ def _persist_user_preferences():
         "consolidate_base_dir",
         data.get("download_base_dir", str(DESC_DIR)),
     )
+    data["first_use_tour_completed"] = bool(st.session_state.get("first_use_tour_completed", False))
     try:
         PREFERENCES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     except Exception as err:
         st.warning(f"No se pudo guardar la configuracin local: {err}")
+
+
+def _onboarding_steps() -> list[dict[str, str]]:
+    return [
+        {
+            "title": "Credenciales",
+            "content": "Ingresa RUC y clave del SRI. Luego selecciona el origen: Recibidos o Emitidos.",
+        },
+        {
+            "title": "Fechas y filtros",
+            "content": "Configura modo de fecha (Mes y dia, Rango o Ano completo) y el tipo de comprobante.",
+        },
+        {
+            "title": "Formatos",
+            "content": "Elige XML y/o PDF segun tu necesidad. En Emitidos puedes marcar formatos individuales.",
+        },
+        {
+            "title": "Carpeta de descarga",
+            "content": "Selecciona la carpeta base donde se guardaran los documentos y reportes.",
+        },
+        {
+            "title": "Ejecucion",
+            "content": "Haz clic en Iniciar proceso y espera el resumen final con reportes descargables.",
+        },
+    ]
+
+
+def _start_first_use_tour(reset_step: bool = True) -> None:
+    st.session_state["first_use_tour_active"] = True
+    if reset_step:
+        st.session_state["first_use_tour_step"] = 0
+
+
+def _finish_first_use_tour() -> None:
+    st.session_state["first_use_tour_active"] = False
+    st.session_state["first_use_tour_completed"] = True
+    _persist_user_preferences()
+
+
+def _render_first_use_tour() -> None:
+    steps = _onboarding_steps()
+    total = len(steps)
+    step_idx = int(st.session_state.get("first_use_tour_step", 0))
+    step_idx = max(0, min(step_idx, total - 1))
+    st.session_state["first_use_tour_step"] = step_idx
+    step = steps[step_idx]
+
+    st.markdown("#### Tour de primer uso")
+    st.info(f"Paso {step_idx + 1} de {total}: {step['title']}")
+    st.caption(step["content"])
+
+    col_prev, col_next, col_finish, col_skip = st.columns([1, 1, 1, 1.1])
+    with col_prev:
+        if st.button("Anterior", key="tour_prev", use_container_width=True, disabled=step_idx == 0):
+            st.session_state["first_use_tour_step"] = max(0, step_idx - 1)
+            st.rerun()
+    with col_next:
+        if st.button("Siguiente", key="tour_next", use_container_width=True, disabled=step_idx >= total - 1):
+            st.session_state["first_use_tour_step"] = min(total - 1, step_idx + 1)
+            st.rerun()
+    with col_finish:
+        if st.button("Finalizar", key="tour_finish", use_container_width=True):
+            _finish_first_use_tour()
+            st.success("Tour completado. Puedes verlo nuevamente desde la pestana Ayuda.")
+            st.rerun()
+    with col_skip:
+        if st.button("Omitir y no mostrar", key="tour_skip", use_container_width=True):
+            _finish_first_use_tour()
+            st.rerun()
 
 
 def _get_download_base_dir() -> Path:
@@ -1681,6 +1752,10 @@ def _ensure_access():
 
 _ensure_access()
 _load_user_preferences()
+if "first_use_tour_active" not in st.session_state:
+    st.session_state["first_use_tour_active"] = not st.session_state.get("first_use_tour_completed", False)
+if "first_use_tour_step" not in st.session_state:
+    st.session_state["first_use_tour_step"] = 0
 DEVICE_FINGERPRINT = st.session_state.get("device_fingerprint") or st.session_state.get("user_email")
 
 # ==============================
@@ -1712,13 +1787,29 @@ with st.sidebar:
 # ==============================
 st.markdown('<h1 class="app-title">SRI Robot Audit Descarga y Reporte Automático</h1>', unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs([" Descarga de Comprobantes", " Reportes e Historial", " Consolidacion de documentos"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    [" Descarga de Comprobantes", " Reportes e Historial", " Consolidacion de documentos", " Ayuda"]
+)
 
 # =====================================================
 # TAB 1  DESCARGA Y PROCESAMIENTO AUTOMTICO
 # =====================================================
 with tab1:
     st.markdown('<h3 class="section-title">Ingreso de Credenciales y Filtros</h3>', unsafe_allow_html=True)
+    col_tour_a, col_tour_b = st.columns([1, 1])
+    with col_tour_a:
+        if st.button("Ver tour de primer uso", key="btn_open_tour", use_container_width=True):
+            _start_first_use_tour(reset_step=True)
+            st.rerun()
+    with col_tour_b:
+        if st.session_state.get("first_use_tour_completed"):
+            st.caption("Tour completado. Puedes abrirlo cuando quieras.")
+        else:
+            st.caption("Tour pendiente de primer uso.")
+
+    if st.session_state.get("first_use_tour_active"):
+        _render_first_use_tour()
+        st.markdown("---")
 
     col_base1, col_base2 = st.columns([2, 2])
     with col_base1:
@@ -3082,3 +3173,64 @@ with tab3:
                 st.success(f"PDF copiados: {copiados_pdf} en `{destino_copia_pdf}`")
             else:
                 st.info("No se copiaron PDF porque no hubo documentos para el periodo seleccionado.")
+
+with tab4:
+    st.markdown('<h3 class="section-title" style="color:#ffffff !important;">Centro de ayuda</h3>', unsafe_allow_html=True)
+    st.write("Guia rapida para usar el sistema paso a paso.")
+
+    st.markdown(
+        """
+1. Inicia sesion con tu correo y contrasena.
+2. En Descarga de Comprobantes, completa RUC, clave SRI y filtros.
+3. Elige formato XML y/o PDF segun la necesidad.
+4. Selecciona la carpeta base de descarga.
+5. Ejecuta Iniciar proceso y revisa el resumen final.
+"""
+    )
+
+    col_help_1, col_help_2 = st.columns([1, 1])
+    with col_help_1:
+        if st.button("Activar tour de primer uso", key="help_start_tour", use_container_width=True):
+            _start_first_use_tour(reset_step=True)
+            st.success("Tour activado. Ve a la pestana 'Descarga de Comprobantes' para verlo.")
+    with col_help_2:
+        if st.button("Marcar tour como no visto", key="help_reset_tour", use_container_width=True):
+            st.session_state["first_use_tour_completed"] = False
+            st.session_state["first_use_tour_active"] = True
+            st.session_state["first_use_tour_step"] = 0
+            _persist_user_preferences()
+            st.success("Listo. El tour volvera a mostrarse.")
+
+    with st.expander("Inicio de sesion y licencias", expanded=True):
+        st.write(
+            "Si no puedes entrar, verifica correo, contrasena y estado de licencia. "
+            "El acceso depende de la base en Render; si el usuario no existe o no tiene licencia activa, no podra ingresar."
+        )
+
+    with st.expander("Descarga de Recibidos"):
+        st.write(
+            "Usa Recibidos para descargar comprobantes por mes, dia, rango de meses o ano completo. "
+            "Puedes combinar XML y PDF en la misma ejecucion."
+        )
+
+    with st.expander("Descarga de Emitidos"):
+        st.write(
+            "En Emitidos define estado de autorizacion, establecimiento y punto de emision si aplica. "
+            "Para XML de Emitidos Autorizados, el sistema valida automaticamente el limite operativo de 30 dias."
+        )
+
+    with st.expander("Consolidacion desde carpeta"):
+        st.write(
+            "Permite generar reportes consolidados desde documentos ya descargados. "
+            "Puedes consolidar XML, PDF o ambos y copiar todos los archivos encontrados al directorio final."
+        )
+
+    with st.expander("Errores frecuentes y que hacer"):
+        st.markdown(
+            """
+- Si aparece timeout o portal lento: vuelve a intentar en unos segundos.
+- Si aparece captcha incorrecta: espera 1 a 2 minutos y repite la consulta.
+- Si no hay resultados: valida rango de fechas, tipo y estado seleccionado.
+- Si no descarga archivos: revisa permisos de carpeta y espacio disponible.
+"""
+        )
