@@ -1357,6 +1357,7 @@ def _load_user_preferences():
         st.session_state["download_base_dir"],
     )
     st.session_state["first_use_tour_completed"] = bool(data.get("first_use_tour_completed", False))
+    st.session_state["first_use_tour_prompt_dismissed"] = bool(data.get("first_use_tour_prompt_dismissed", False))
     st.session_state["_prefs_loaded"] = True
 
 
@@ -1373,6 +1374,7 @@ def _persist_user_preferences():
         data.get("download_base_dir", str(DESC_DIR)),
     )
     data["first_use_tour_completed"] = bool(st.session_state.get("first_use_tour_completed", False))
+    data["first_use_tour_prompt_dismissed"] = bool(st.session_state.get("first_use_tour_prompt_dismissed", False))
     try:
         PREFERENCES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     except Exception as err:
@@ -1406,6 +1408,8 @@ def _onboarding_steps() -> list[dict[str, str]]:
 
 def _start_first_use_tour(reset_step: bool = True) -> None:
     st.session_state["first_use_tour_active"] = True
+    st.session_state["first_use_tour_prompt_dismissed"] = True
+    _persist_user_preferences()
     if reset_step:
         st.session_state["first_use_tour_step"] = 0
 
@@ -1413,6 +1417,7 @@ def _start_first_use_tour(reset_step: bool = True) -> None:
 def _finish_first_use_tour() -> None:
     st.session_state["first_use_tour_active"] = False
     st.session_state["first_use_tour_completed"] = True
+    st.session_state["first_use_tour_prompt_dismissed"] = True
     _persist_user_preferences()
 
 
@@ -1428,7 +1433,7 @@ def _render_first_use_tour() -> None:
     st.info(f"Paso {step_idx + 1} de {total}: {step['title']}")
     st.caption(step["content"])
 
-    col_prev, col_next, col_finish, col_skip = st.columns([1, 1, 1, 1.1])
+    col_prev, col_next, col_later, col_finish, col_skip = st.columns([1, 1, 1, 1, 1.1])
     with col_prev:
         if st.button("Anterior", key="tour_prev", use_container_width=True, disabled=step_idx == 0):
             st.session_state["first_use_tour_step"] = max(0, step_idx - 1)
@@ -1437,6 +1442,12 @@ def _render_first_use_tour() -> None:
         if st.button("Siguiente", key="tour_next", use_container_width=True, disabled=step_idx >= total - 1):
             st.session_state["first_use_tour_step"] = min(total - 1, step_idx + 1)
             st.rerun()
+    with col_later:
+        if st.button("Mas tarde", key="tour_later", use_container_width=True):
+            st.session_state["first_use_tour_active"] = False
+            st.session_state["first_use_tour_prompt_dismissed"] = True
+            _persist_user_preferences()
+            st.rerun()
     with col_finish:
         if st.button("Finalizar", key="tour_finish", use_container_width=True):
             _finish_first_use_tour()
@@ -1444,6 +1455,24 @@ def _render_first_use_tour() -> None:
             st.rerun()
     with col_skip:
         if st.button("Omitir y no mostrar", key="tour_skip", use_container_width=True):
+            _finish_first_use_tour()
+            st.rerun()
+
+
+def _render_first_use_prompt() -> None:
+    st.write("Quieres ver un recorrido rapido para aprender el uso del sistema?")
+    col_p1, col_p2, col_p3 = st.columns([1, 1, 1.1])
+    with col_p1:
+        if st.button("Iniciar recorrido", key="tour_prompt_start", use_container_width=True):
+            _start_first_use_tour(reset_step=True)
+            st.rerun()
+    with col_p2:
+        if st.button("Mas tarde", key="tour_prompt_later", use_container_width=True):
+            st.session_state["first_use_tour_prompt_dismissed"] = True
+            _persist_user_preferences()
+            st.rerun()
+    with col_p3:
+        if st.button("No volver a mostrar", key="tour_prompt_never", use_container_width=True):
             _finish_first_use_tour()
             st.rerun()
 
@@ -1753,9 +1782,11 @@ def _ensure_access():
 _ensure_access()
 _load_user_preferences()
 if "first_use_tour_active" not in st.session_state:
-    st.session_state["first_use_tour_active"] = not st.session_state.get("first_use_tour_completed", False)
+    st.session_state["first_use_tour_active"] = False
 if "first_use_tour_step" not in st.session_state:
     st.session_state["first_use_tour_step"] = 0
+if "first_use_tour_prompt_shown_session" not in st.session_state:
+    st.session_state["first_use_tour_prompt_shown_session"] = False
 DEVICE_FINGERPRINT = st.session_state.get("device_fingerprint") or st.session_state.get("user_email")
 
 # ==============================
@@ -1787,6 +1818,33 @@ with st.sidebar:
 # ==============================
 st.markdown('<h1 class="app-title">SRI Robot Audit Descarga y Reporte Automático</h1>', unsafe_allow_html=True)
 
+if hasattr(st, "dialog"):
+    @st.dialog("Recorrido rapido del sistema")
+    def _tour_dialog():
+        _render_first_use_tour()
+
+    @st.dialog("Bienvenido")
+    def _tour_prompt_dialog():
+        _render_first_use_prompt()
+else:
+    def _tour_dialog():
+        _render_first_use_tour()
+
+    def _tour_prompt_dialog():
+        _render_first_use_prompt()
+
+if (
+    not st.session_state.get("first_use_tour_completed", False)
+    and not st.session_state.get("first_use_tour_prompt_dismissed", False)
+    and not st.session_state.get("first_use_tour_active", False)
+    and not st.session_state.get("first_use_tour_prompt_shown_session", False)
+):
+    st.session_state["first_use_tour_prompt_shown_session"] = True
+    _tour_prompt_dialog()
+
+if st.session_state.get("first_use_tour_active", False):
+    _tour_dialog()
+
 tab1, tab2, tab3, tab4 = st.tabs(
     [" Descarga de Comprobantes", " Reportes e Historial", " Consolidacion de documentos", " Ayuda"]
 )
@@ -1795,21 +1853,13 @@ tab1, tab2, tab3, tab4 = st.tabs(
 # TAB 1  DESCARGA Y PROCESAMIENTO AUTOMTICO
 # =====================================================
 with tab1:
-    st.markdown('<h3 class="section-title">Ingreso de Credenciales y Filtros</h3>', unsafe_allow_html=True)
-    col_tour_a, col_tour_b = st.columns([1, 1])
-    with col_tour_a:
-        if st.button("Ver tour de primer uso", key="btn_open_tour", use_container_width=True):
+    col_title, col_tour_link = st.columns([5, 1.6])
+    with col_title:
+        st.markdown('<h3 class="section-title">Ingreso de Credenciales y Filtros</h3>', unsafe_allow_html=True)
+    with col_tour_link:
+        if st.button("Primera vez? Ver recorrido", key="btn_open_tour"):
             _start_first_use_tour(reset_step=True)
             st.rerun()
-    with col_tour_b:
-        if st.session_state.get("first_use_tour_completed"):
-            st.caption("Tour completado. Puedes abrirlo cuando quieras.")
-        else:
-            st.caption("Tour pendiente de primer uso.")
-
-    if st.session_state.get("first_use_tour_active"):
-        _render_first_use_tour()
-        st.markdown("---")
 
     col_base1, col_base2 = st.columns([2, 2])
     with col_base1:
