@@ -143,6 +143,20 @@ try:
 except ValueError:
     RECIBIDOS_AUTO_RESULT_TIMEOUT_MS = 60000
 try:
+    EMITIDOS_RESET_AFTER_DAY_DOCS = max(
+        1,
+        int(os.getenv("EMITIDOS_RESET_AFTER_DAY_DOCS", "51")),
+    )
+except ValueError:
+    EMITIDOS_RESET_AFTER_DAY_DOCS = 51
+try:
+    EMITIDOS_RESET_PAUSE_MS = max(
+        0,
+        int(os.getenv("EMITIDOS_RESET_PAUSE_MS", "1800")),
+    )
+except ValueError:
+    EMITIDOS_RESET_PAUSE_MS = 1800
+try:
     RECIBIDOS_REHIDRATAR_DESDE_INTENTO = max(
         2,
         int(os.getenv("RECIBIDOS_REHIDRATAR_DESDE_INTENTO", "3")),
@@ -7824,6 +7838,27 @@ def descargar_sri(
             modulo_page = _abrir_modulo_consultas(page, origen)
             _resolver_captcha(modulo_page, f"{origen.lower()}_Modulo")
             destino_objetivo = destino_emitidos
+
+            def _reiniciar_emitidos_para_siguiente_dia(fecha_actual: str, total_docs_dia: int) -> None:
+                nonlocal modulo_page
+                mensaje = (
+                    f"[INFO] Emitidos: el dia {fecha_actual} termino con {total_docs_dia} documentos. "
+                    "Se reabrira el modulo antes de continuar con el siguiente dia."
+                )
+                _notificar_usuario_accion(mensaje)
+                try:
+                    page.goto(PORTAL_HOME, wait_until="domcontentloaded", timeout=15000)
+                    page.wait_for_load_state("domcontentloaded", timeout=3000)
+                except Exception as err:
+                    print(f"[WARN] No se pudo volver al menu principal antes del reinicio de Emitidos: {err}")
+                if EMITIDOS_RESET_PAUSE_MS > 0:
+                    try:
+                        page.wait_for_timeout(EMITIDOS_RESET_PAUSE_MS)
+                    except Exception:
+                        pass
+                modulo_page = _abrir_modulo_consultas(page, origen)
+                _resolver_captcha(modulo_page, f"{origen.lower()}_Modulo_Reinicio")
+
             def _emitidos_por_mes(mes_actual: int, dia_actual: int):
                 nonlocal aviso_recorte
                 if anio > hoy.year:
@@ -7850,7 +7885,7 @@ def descargar_sri(
                 descargar_pdf_mes = "PDF" in formatos_norm
                 reportes_dia = []
                 resultado_mes = None
-                for dia_iter in dias_consultar:
+                for idx_dia, dia_iter in enumerate(dias_consultar):
                     _check_cancel("emitidos_dia")
                     fecha_actual = f"{dia_iter:02d}/{mes_actual:02d}/{anio}"
                     resultado_dia = _flujo_emitidos(
@@ -7879,6 +7914,13 @@ def descargar_sri(
                         reporte_dia = resultado_dia.get("reporte_pdf")
                         if reporte_dia and Path(reporte_dia).exists():
                             reportes_dia.append(reporte_dia)
+                    n_registros_dia = int(resultado_dia.get("n_registros", 0) or 0)
+                    hay_mas_trabajo = (
+                        idx_dia < len(dias_consultar) - 1
+                        or (mes_fin_val and int(mes_fin_val) > int(mes_actual) and dia_actual in (0, None))
+                    )
+                    if hay_mas_trabajo and n_registros_dia >= EMITIDOS_RESET_AFTER_DAY_DOCS:
+                        _reiniciar_emitidos_para_siguiente_dia(fecha_actual, n_registros_dia)
                 if len(dias_consultar) > 1:
                     resultado_mes = dict(resultado_mes or {})
                     resultado_mes["n_registros"] = total_regs

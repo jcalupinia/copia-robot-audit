@@ -1047,6 +1047,44 @@ button[aria-label="Detener proceso"]{
         font-weight: 750 !important;
         line-height: 1.2 !important;
     }
+    .st-key-btn_open_tour {
+        display: flex;
+        justify-content: flex-start;
+        align-items: center;
+        padding-top: 0.3rem;
+    }
+    .st-key-btn_open_tour button {
+        width: auto !important;
+        min-height: 2rem !important;
+        padding: 0.35rem 0.8rem !important;
+        border-radius: 999px !important;
+        border: 1px solid rgba(132, 182, 228, 0.7) !important;
+        background: linear-gradient(180deg, rgba(228, 239, 251, 0.92), rgba(211, 229, 246, 0.92)) !important;
+        color: #4e6a86 !important;
+        font-size: 0.9rem !important;
+        font-weight: 600 !important;
+        box-shadow: none !important;
+    }
+    .st-key-btn_open_tour button::before {
+        content: "";
+        display: inline-block;
+        width: 0.48rem;
+        height: 0.48rem;
+        margin-right: 0.48rem;
+        border-radius: 999px;
+        background: #8fc2f0;
+        box-shadow: 0 0 0 3px rgba(143, 194, 240, 0.18);
+        vertical-align: middle;
+    }
+    .st-key-btn_open_tour button:hover {
+        color: #36506a !important;
+        border-color: rgba(115, 166, 214, 0.95) !important;
+        background: linear-gradient(180deg, rgba(235, 244, 252, 0.98), rgba(220, 235, 248, 0.98)) !important;
+    }
+    .st-key-btn_open_tour button:focus,
+    .st-key-btn_open_tour button:focus-visible {
+        box-shadow: 0 0 0 0.2rem rgba(143, 194, 240, 0.28) !important;
+    }
     .stApp [data-testid="stWidgetLabel"],
     .stApp [data-testid="stWidgetLabel"] p,
     .stApp label[data-testid="stWidgetLabel"],
@@ -1389,15 +1427,15 @@ def _onboarding_steps() -> list[dict[str, str]]:
         },
         {
             "title": "Fechas y filtros",
-            "content": "Configura modo de fecha (Mes y dia, Rango o Ano completo) y el tipo de comprobante.",
+            "content": "Configura modo de fecha (Mes y dia, Rango o Año completo) y el tipo de comprobante.",
         },
         {
             "title": "Formatos",
-            "content": "Elige XML y/o PDF segun tu necesidad. En Emitidos puedes marcar formatos individuales.",
+            "content": "Elige XML y/o PDF según tu necesidad. En Emitidos puedes marcar formatos individuales.",
         },
         {
             "title": "Carpeta de descarga",
-            "content": "Selecciona la carpeta base donde se guardaran los documentos y reportes.",
+            "content": "Selecciona la carpeta base donde se guardarán los documentos y reportes.",
         },
         {
             "title": "Ejecucion",
@@ -1857,7 +1895,7 @@ with tab1:
     with col_title:
         st.markdown('<h3 class="section-title">Ingreso de Credenciales y Filtros</h3>', unsafe_allow_html=True)
     with col_tour_link:
-        if st.button("Primera vez? Ver recorrido", key="btn_open_tour"):
+        if st.button("Primera vez? Ver tour", key="btn_open_tour"):
             _start_first_use_tour(reset_step=True)
             st.rerun()
 
