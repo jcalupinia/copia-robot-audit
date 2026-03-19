@@ -296,6 +296,100 @@ def _render_manual_consultar_modal() -> None:
     )
 
 
+def _render_download_finished_modal() -> None:
+    if st.session_state.get("download_status") != "done":
+        return
+    if not st.session_state.get("download_finished_modal_open"):
+        return
+
+    params = st.session_state.get("download_params") or {}
+    resultado = st.session_state.get("download_result") or {}
+    origen = str(params.get("origen") or "").strip() or "Proceso"
+    tipo = str(params.get("tipo") or "").strip() or "comprobantes"
+
+    lineas = []
+    if origen == "Emitidos":
+        n_registros = int(resultado.get("n_registros", 0) or 0)
+        n_xml = int(resultado.get("n_xml", 0) or 0)
+        n_pdf = int(resultado.get("n_pdf", 0) or 0)
+        lineas.append(f"Registros procesados: {n_registros}")
+        if "XML" in (params.get("formatos") or []):
+            lineas.append(f"XML descargados: {n_xml}")
+        if "PDF" in (params.get("formatos") or []):
+            lineas.append(f"PDF descargados: {n_pdf}")
+    else:
+        n_xml = int(resultado.get("n_xml", 0) or 0)
+        n_pdf = int(resultado.get("n_pdf", 0) or 0)
+        if "XML" in (params.get("formatos") or []):
+            lineas.append(f"XML descargados: {n_xml}")
+        if "PDF" in (params.get("formatos") or []):
+            lineas.append(f"PDF descargados: {n_pdf}")
+    carpeta_tipo = resultado.get("carpeta_tipo")
+    if carpeta_tipo:
+        lineas.append(f"Carpeta destino: {Path(carpeta_tipo)}")
+
+    st.write(f"El proceso de {origen.lower()} para {tipo.lower()} ha finalizado correctamente.")
+    for linea in lineas:
+        st.caption(linea)
+    if st.button("Cerrar", key="close_download_finished_modal", use_container_width=True):
+        st.session_state["download_finished_modal_open"] = False
+        st.rerun()
+
+
+def _schedule_desktop_app_exit(delay_sec: float = 0.9) -> None:
+    if st.session_state.get("_desktop_exit_scheduled"):
+        return
+    st.session_state["_desktop_exit_scheduled"] = True
+
+    def _shutdown():
+        time.sleep(max(0.1, float(delay_sec)))
+        os._exit(0)
+
+    threading.Thread(target=_shutdown, daemon=True).start()
+
+
+def _render_close_app_modal() -> None:
+    if not getattr(sys, "frozen", False):
+        st.info("Esta opcion solo esta disponible en el ejecutable de escritorio.")
+        return
+
+    if st.session_state.get("_desktop_exit_in_progress"):
+        st.success("Cerrando aplicacion...")
+        st.caption("Se cerrara el servicio local y la ventana de comandos del ejecutable.")
+        st.caption("Si la pestana del navegador queda abierta, puedes cerrarla manualmente.")
+        components.html(
+            """
+            <script>
+            setTimeout(function() {
+              try {
+                window.open('', '_self');
+                window.close();
+              } catch (e) {}
+            }, 250);
+            </script>
+            """,
+            height=0,
+        )
+        st.stop()
+
+    st.write("Esta accion cerrara la aplicacion completa en esta computadora.")
+    st.caption("Usa esta opcion solo cuando quieras salir del sistema por completo.")
+    col_cancel, col_confirm = st.columns(2)
+    with col_cancel:
+        if st.button("Cancelar", key="btn_cancel_close_app", use_container_width=True):
+            st.rerun()
+    with col_confirm:
+        if st.button(
+            "Cerrar aplicacion",
+            key="btn_confirm_close_app",
+            type="primary",
+            use_container_width=True,
+        ):
+            st.session_state["_desktop_exit_in_progress"] = True
+            _schedule_desktop_app_exit()
+            st.rerun()
+
+
 
 @st.cache_data(show_spinner=False)
 def _get_logo_data_uri():
@@ -522,6 +616,37 @@ def _buscar_reportes_por_periodo(
 
 
 def _extraer_fecha_desde_ruta_documento(ruta: Path, tipo_prefijo: str) -> tuple[int, int, int | None] | None:
+    tipo_slug = ""
+    try:
+        _, etiqueta_tipo = str(tipo_prefijo or "").split("_", 1)
+        tipo_slug = _slug_tipo(etiqueta_tipo)
+    except Exception:
+        tipo_slug = _slug_tipo(tipo_prefijo or "")
+
+    # Estructura nueva: .../<anio>/<mes>/<XML|PDF>/<tipo_slug>__YYYYMMDD__archivo.ext
+    try:
+        if ruta.parent.name.lower() in {"xml", "pdf"}:
+            mes_txt = ruta.parent.parent.name
+            anio_txt = ruta.parent.parent.parent.name
+            if anio_txt.isdigit():
+                mes = _mes_desde_texto(mes_txt)
+                if mes:
+                    patron_nombre = re.compile(
+                        r"^" + re.escape(tipo_slug) + r"__(\d{8})__",
+                        re.IGNORECASE,
+                    )
+                    match_nombre = patron_nombre.match(ruta.name)
+                    if match_nombre:
+                        fecha_token = match_nombre.group(1)
+                        anio = int(fecha_token[:4])
+                        mes_arch = int(fecha_token[4:6])
+                        dia_arch = int(fecha_token[6:8])
+                        if anio == int(anio_txt) and mes_arch == mes and 1 <= dia_arch <= 31:
+                            return anio, mes_arch, dia_arch
+    except Exception:
+        pass
+
+    # Estructura anterior: .../<anio>/<mes>/<dia>/<tipo_prefijo>/<XML|PDF>/archivo.ext
     try:
         tipo_dir = ruta.parent.parent
     except Exception:
@@ -734,6 +859,8 @@ def _init_download_state():
         st.session_state.manual_consultar_hint = None
     if "manual_consultar_hint_ts" not in st.session_state:
         st.session_state.manual_consultar_hint_ts = None
+    if "download_finished_modal_open" not in st.session_state:
+        st.session_state.download_finished_modal_open = False
 
 def _drain_download_queue():
     q = st.session_state.download_queue
@@ -759,6 +886,7 @@ def _drain_download_queue():
             st.session_state.download_status = "done"
             st.session_state.manual_consultar_hint = None
             st.session_state.manual_consultar_hint_ts = None
+            st.session_state.download_finished_modal_open = True
         elif kind == "error":
             st.session_state.download_error = str(payload)
             st.session_state.download_status = "error"
@@ -884,10 +1012,10 @@ button[aria-label="Detener proceso"]{
         --auth-card-muted: rgba(255,255,255,0.65);
     }
     .stApp {
-        background: radial-gradient(125% 125% at 12% 12%, rgba(130, 208, 247, 0.56), transparent 54%),
-                    radial-gradient(122% 122% at 88% 18%, rgba(82, 158, 221, 0.44), transparent 55%),
-                    radial-gradient(135% 135% at 28% 84%, rgba(221, 236, 247, 0.44), transparent 60%),
-                    linear-gradient(135deg, #9bd4f6 0%, #78bce9 48%, #d2e6f3 100%);
+        background: radial-gradient(125% 125% at 12% 12%, rgba(180, 232, 204, 0.52), transparent 54%),
+                    radial-gradient(122% 122% at 88% 18%, rgba(112, 181, 150, 0.40), transparent 55%),
+                    radial-gradient(135% 135% at 28% 84%, rgba(235, 243, 241, 0.46), transparent 60%),
+                    linear-gradient(135deg, #b7e6cf 0%, #8ec9ad 48%, #e4efed 100%);
         background-size: 220% 220%;
         animation: liquidShift 16s ease-in-out infinite;
     }
@@ -1842,6 +1970,9 @@ with st.sidebar:
             if device_id:
                 st.session_state["_device_id"] = device_id
             st.rerun()
+        if getattr(sys, "frozen", False):
+            if st.button("Cerrar aplicacion", key="btn_open_close_app", use_container_width=True):
+                st.session_state["open_close_app_dialog"] = True
 
     logo_path = Path(__file__).parent / "AUDIT_IA_sin_fondo_transparente_FINAL.png"
     if logo_path.exists():
@@ -1864,12 +1995,29 @@ if hasattr(st, "dialog"):
     @st.dialog("Bienvenido")
     def _tour_prompt_dialog():
         _render_first_use_prompt()
+
+    @st.dialog("Proceso terminado")
+    def _download_finished_dialog():
+        _render_download_finished_modal()
+
+    @st.dialog("Cerrar aplicacion")
+    def _close_app_dialog():
+        _render_close_app_modal()
 else:
     def _tour_dialog():
         _render_first_use_tour()
 
     def _tour_prompt_dialog():
         _render_first_use_prompt()
+
+    def _download_finished_dialog():
+        _render_download_finished_modal()
+
+    def _close_app_dialog():
+        _render_close_app_modal()
+
+if st.session_state.pop("open_close_app_dialog", False):
+    _close_app_dialog()
 
 if (
     not st.session_state.get("first_use_tour_completed", False)
@@ -1882,6 +2030,9 @@ if (
 
 if st.session_state.get("first_use_tour_active", False):
     _tour_dialog()
+
+if st.session_state.get("download_finished_modal_open", False):
+    _download_finished_dialog()
 
 tab1, tab2, tab3, tab4 = st.tabs(
     [" Descarga de Comprobantes", " Reportes e Historial", " Consolidacion de documentos", " Ayuda"]
@@ -2290,6 +2441,7 @@ with tab1:
             st.session_state.download_result = None
             st.session_state.download_error = None
             st.session_state.download_registered = False
+            st.session_state.download_finished_modal_open = False
             st.session_state.download_status = "running"
             st.session_state.running_notice_ts = time.time()
             params = {

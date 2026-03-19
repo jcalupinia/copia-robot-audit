@@ -2726,10 +2726,22 @@ def _xml_files_por_tipo(base_dir: Path, tipo_prefijo: str) -> list[Path]:
     if not base_dir.exists():
         return []
     tipo_prefijo = (tipo_prefijo or "").strip()
+    tipo_slug = ""
+    if tipo_prefijo:
+        try:
+            _, etiqueta = tipo_prefijo.split("_", 1)
+            tipo_slug = _slug_tipo(etiqueta)
+        except Exception:
+            tipo_slug = _slug_tipo(tipo_prefijo)
     encontrados: list[Path] = []
     for ruta in base_dir.rglob("*.xml"):
         try:
-            if not tipo_prefijo or tipo_prefijo in ruta.parts:
+            nombre_norm = ruta.name.lower()
+            if (
+                not tipo_prefijo
+                or tipo_prefijo in ruta.parts
+                or (tipo_slug and nombre_norm.startswith(f"{tipo_slug}__"))
+            ):
                 encontrados.append(ruta)
         except Exception:
             continue
@@ -2889,6 +2901,13 @@ def _prefijo_tipo(tipo_texto: str) -> tuple[int, str, str]:
     orden, etiqueta = _resolver_tipo_label(tipo_texto)
     prefijo = f"{orden:02d}_{etiqueta}"
     return orden, etiqueta, prefijo
+
+
+def _nombre_documento_mes(tipo_slug: str, fecha_token: str, nombre_base: str) -> str:
+    tipo_parte = _slug_tipo(tipo_slug or "") or "documento"
+    fecha_parte = re.sub(r"[^0-9]", "", fecha_token or "") or "00000000"
+    base = _sanear_nombre_archivo(nombre_base or "archivo")
+    return f"{tipo_parte}__{fecha_parte}__{base}"
 
 def _portal_indisponible(page) -> bool:
     try:
@@ -3651,6 +3670,61 @@ def _inferir_iva_columna(iva_val: float | None, base_val: float | None) -> str |
     return None
 
 
+def _valor_reporte_presente(valor) -> bool:
+    if valor is None:
+        return False
+    if isinstance(valor, (int, float)):
+        return True
+    texto = str(valor).strip()
+    if not texto:
+        return False
+    token = _normalizar_token(texto)
+    return token not in {"nodisponible", "na", "n/a", "none", "null", "sindato", "nohaydato"}
+
+
+def _texto_probable_comprador_desde_fila(texto: str) -> str:
+    valor = (texto or "").strip()
+    if not valor:
+        return ""
+    if re.fullmatch(r"\d{2}/\d{2}/\d{4}(?:\s+\d{2}:\d{2}:\d{2})?", valor):
+        return ""
+    if re.fullmatch(r"[\d.,/-]+", valor):
+        return ""
+    if not re.search(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]", valor):
+        return ""
+    return valor
+
+
+def _combinar_datos_reporte_emitidos(*fuentes: dict | None) -> dict:
+    datos = {col: "" for col in PDF_REPORT_COLUMNS}
+    for fuente in fuentes:
+        if not isinstance(fuente, dict):
+            continue
+        for col in PDF_REPORT_COLUMNS:
+            nuevo = fuente.get(col)
+            if not _valor_reporte_presente(nuevo):
+                continue
+            if not _valor_reporte_presente(datos.get(col)):
+                datos[col] = nuevo
+    return datos
+
+
+def _extraer_datos_pdf_emitido_por_tipo(
+    pdf_path: Path,
+    *,
+    es_retencion: bool = False,
+    es_nota_credito: bool = False,
+    es_nota_debito: bool = False,
+) -> dict:
+    if es_retencion:
+        return _extraer_datos_pdf_retencion(pdf_path)
+    if es_nota_credito:
+        return _extraer_datos_pdf_nota_credito(pdf_path)
+    if es_nota_debito:
+        return _extraer_datos_pdf_nota_debito(pdf_path)
+    return _extraer_datos_pdf(pdf_path)
+
+
 def _extraer_datos_emitidos_dom(
     tipo_visible: str,
     tipo_serie_texto: str,
@@ -3668,7 +3742,7 @@ def _extraer_datos_emitidos_dom(
     if not tipo_val and tipo_serie_texto:
         tipo_val = tipo_serie_texto.split()[0].strip()
     datos["tipoDocumento"] = tipo_val
-    datos["razonSocialComprador"] = (razon_texto or "").strip()
+    datos["razonSocialComprador"] = _texto_probable_comprador_desde_fila(razon_texto)
     datos["fechaEmision"] = (fecha_emision or "").strip()
     datos["fechaAutorizacion"] = (fecha_autorizacion or "").strip()
     if ruc_emisor:
@@ -5888,12 +5962,14 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
     except (TypeError, ValueError):
         dia_int = None
     dia_dir = "Todos" if dia_int in (None, 0) else f"{dia_int:02d}"
+    fecha_token_doc = f"{anio:04d}{mes:02d}{(dia_int or 0):02d}"
 
-    carpeta_tipo = destino / anio_dir / mes_dir / dia_dir / tipo_prefijo
-    carpeta_tipo.mkdir(parents=True, exist_ok=True)
-    txt_dir = carpeta_tipo / "TXT"
-    xml_dir = carpeta_tipo / "XML"
-    pdf_dir = carpeta_tipo / "PDF"
+    carpeta_mes = destino / anio_dir / mes_dir
+    carpeta_mes.mkdir(parents=True, exist_ok=True)
+    carpeta_tipo = carpeta_mes
+    txt_dir = carpeta_mes / "TXT"
+    xml_dir = carpeta_mes / "XML"
+    pdf_dir = carpeta_mes / "PDF"
 
     boton_consultar = None
     selectores_consultar = [
@@ -6444,7 +6520,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 razon_texto = celdas.nth(1).inner_text().strip()
                 bloques = [segmento.strip() for segmento in razon_texto.splitlines() if segmento.strip()]
                 razon_social = bloques[-1] if bloques else f"documento_{pagina}_{idx+1}"
-                nombre_base = _sanear_nombre_archivo(razon_social)
+                nombre_base = _nombre_documento_mes(tipo_slug, fecha_token_doc, razon_social)
 
                 xml_guardado = False
                 xml_path_report = None
@@ -6605,14 +6681,14 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         fecha_slug = f"{anio:04d}{mes:02d}"
         if dia_dir != "Todos":
             fecha_slug = f"{fecha_slug}{dia_dir}"
-        pdf_report_path = carpeta_tipo / f"recibidos_reporte_pdf_{tipo_slug}_{fecha_slug}.xlsx"
+        pdf_report_path = carpeta_mes / f"recibidos_reporte_pdf_{tipo_slug}_{fecha_slug}.xlsx"
         if pdf_report_path.exists():
             try:
                 pdf_report_path.unlink()
             except PermissionError:
                 sufijo_pdf = 1
                 while True:
-                    candidato = carpeta_tipo / f"recibidos_reporte_pdf_{tipo_slug}_{fecha_slug}_{sufijo_pdf}.xlsx"
+                    candidato = carpeta_mes / f"recibidos_reporte_pdf_{tipo_slug}_{fecha_slug}_{sufijo_pdf}.xlsx"
                     if not candidato.exists():
                         pdf_report_path = candidato
                         break
@@ -6630,7 +6706,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         "estado": "ok",
         "n_xml": n_xml,
         "n_pdf": n_pdf,
-        "carpeta_tipo": str(carpeta_tipo),
+        "carpeta_tipo": str(carpeta_mes),
         "tipo_slug": tipo_slug,
         "tipo_visible": tipo_visible,
         "txt_dir": str(txt_dir),
@@ -6922,14 +6998,14 @@ def _flujo_emitidos(
     anio_dir = f"{fecha_dt.year:04d}"
     mes_dir = _mes_a_texto(fecha_dt.month)
     dia_dir = f"{fecha_dt.day:02d}"
+    fecha_token_doc = f"{fecha_dt.year:04d}{fecha_dt.month:02d}{fecha_dt.day:02d}"
 
     _orden_tipo, _label_tipo, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
     tipo_slug = _slug_tipo(tipo_visible or tipo)
 
-    carpeta_estado = destino / estado_slug / anio_dir / mes_dir / dia_dir
+    carpeta_estado = destino / estado_slug / anio_dir / mes_dir
     carpeta_estado.mkdir(parents=True, exist_ok=True)
-    carpeta_tipo = carpeta_estado / tipo_prefijo
-    carpeta_tipo.mkdir(parents=True, exist_ok=True)
+    carpeta_tipo = carpeta_estado
     xml_dir = carpeta_tipo / "XML"
     descargar_xml_para_reporte = descargar_xml or descargar_pdf
     if descargar_xml_para_reporte:
@@ -7169,8 +7245,10 @@ def _flujo_emitidos(
                 tipo_serie_completo = " ".join(
                     fragment for fragment in [tipo_serie_texto, clave_texto] if fragment
                 ).strip()
-                nombre_base_pdf = _sanear_nombre_archivo(
-                    tipo_serie_completo or razon_texto or f"emitido_{pagina}_{idx+1}"
+                nombre_base_pdf = _nombre_documento_mes(
+                    tipo_slug,
+                    fecha_token_doc,
+                    tipo_serie_completo or razon_texto or f"emitido_{pagina}_{idx+1}",
                 )
                 xml_path_report = None
 
@@ -7337,6 +7415,19 @@ def _flujo_emitidos(
                                 except Exception as err:
                                     print(f"[WARN] No se pudo usar XML para el reporte PDF: {err}")
                             if datos_pdf is None:
+                                datos_dom = _extraer_datos_emitidos_dom(
+                                    tipo_visible,
+                                    tipo_serie_texto,
+                                    clave_texto,
+                                    fecha_emision,
+                                    fecha_aut_texto,
+                                    razon_texto,
+                                    valor_sin_imp_texto,
+                                    iva_texto,
+                                    importe_total_texto,
+                                    ruc_emisor=ruc_emisor,
+                                )
+                                detalle_data = None
                                 source_id_detalle = _obtener_source_detalle_emitido(page, idx)
                                 if source_id_detalle:
                                     detalle_data = _obtener_detalle_emitido_xhr(
@@ -7350,30 +7441,21 @@ def _flujo_emitidos(
                                         clave_texto,
                                         ruc_emisor=ruc_emisor,
                                     )
-                                    if detalle_data:
-                                        datos_pdf = detalle_data
-                            if datos_pdf is None:
-                                datos_pdf = _extraer_datos_emitidos_dom(
-                                    tipo_visible,
-                                    tipo_serie_texto,
-                                    clave_texto,
-                                    fecha_emision,
-                                    fecha_aut_texto,
-                                    razon_texto,
-                                    valor_sin_imp_texto,
-                                    iva_texto,
-                                    importe_total_texto,
-                                    ruc_emisor=ruc_emisor,
+                                datos_pdf_archivo = None
+                                try:
+                                    datos_pdf_archivo = _extraer_datos_pdf_emitido_por_tipo(
+                                        resultado_pdf,
+                                        es_retencion=es_retencion,
+                                        es_nota_credito=es_nota_credito,
+                                        es_nota_debito=es_nota_debito,
+                                    )
+                                except Exception as err:
+                                    print(f"[WARN] No se pudo leer el PDF para completar el reporte: {err}")
+                                datos_pdf = _combinar_datos_reporte_emitidos(
+                                    datos_dom,
+                                    detalle_data,
+                                    datos_pdf_archivo,
                                 )
-                            if datos_pdf is None:
-                                if es_retencion:
-                                    datos_pdf = _extraer_datos_pdf_retencion(resultado_pdf)
-                                elif es_nota_credito:
-                                    datos_pdf = _extraer_datos_pdf_nota_credito(resultado_pdf)
-                                elif es_nota_debito:
-                                    datos_pdf = _extraer_datos_pdf_nota_debito(resultado_pdf)
-                                else:
-                                    datos_pdf = _extraer_datos_pdf(resultado_pdf)
                             if datos_pdf:
                                 if clave_texto and not datos_pdf.get("claveAcceso"):
                                     datos_pdf["claveAcceso"] = clave_texto
@@ -7419,21 +7501,22 @@ def _flujo_emitidos(
 
         fecha_slug = re.sub(r"[^0-9]+", "", fecha_emision) or "consulta"
         if descargar_xml and n_xml > 0:
-            xml_report_path = carpeta_tipo / f"emitidos_reporte_xml_{tipo_slug}_{fecha_slug}.xlsx"
+            xml_report_path = carpeta_estado / f"emitidos_reporte_xml_{tipo_slug}_{fecha_slug}.xlsx"
             if xml_report_path.exists():
                 try:
                     xml_report_path.unlink()
                 except PermissionError:
                     sufijo_xml = 1
                     while True:
-                        candidato = carpeta_tipo / f"emitidos_reporte_xml_{tipo_slug}_{fecha_slug}_{sufijo_xml}.xlsx"
+                        candidato = carpeta_estado / f"emitidos_reporte_xml_{tipo_slug}_{fecha_slug}_{sufijo_xml}.xlsx"
                         if not candidato.exists():
                             xml_report_path = candidato
                             break
                         sufijo_xml += 1
             try:
                 estado_default_reporte = estado_visible if modo_no_autorizados else None
-                construir_reporte(xml_dir, xml_report_path, estado_default_reporte)
+                xml_files_emitidos = _xml_files_por_tipo(carpeta_estado, tipo_prefijo)
+                construir_reporte(carpeta_estado, xml_report_path, estado_default_reporte, xml_files=xml_files_emitidos)
                 info_base["reporte_xml"] = str(xml_report_path)
             except Exception as err:
                 print(f"[WARN] No se pudo construir el reporte XML de emitidos: {err}")
@@ -7441,14 +7524,14 @@ def _flujo_emitidos(
     df = pd.DataFrame(data)
     fecha_slug = re.sub(r"[^0-9]+", "", fecha_emision) or "consulta"
     if descargar_pdf and n_pdf > 0 and pdf_report_rows:
-        pdf_report_path = carpeta_tipo / f"emitidos_reporte_pdf_{tipo_slug}_{fecha_slug}.xlsx"
+        pdf_report_path = carpeta_estado / f"emitidos_reporte_pdf_{tipo_slug}_{fecha_slug}.xlsx"
         if pdf_report_path.exists():
             try:
                 pdf_report_path.unlink()
             except PermissionError:
                 sufijo_pdf = 1
                 while True:
-                    candidato = carpeta_tipo / f"emitidos_reporte_pdf_{tipo_slug}_{fecha_slug}_{sufijo_pdf}.xlsx"
+                    candidato = carpeta_estado / f"emitidos_reporte_pdf_{tipo_slug}_{fecha_slug}_{sufijo_pdf}.xlsx"
                     if not candidato.exists():
                         pdf_report_path = candidato
                         break
@@ -7681,7 +7764,7 @@ def descargar_sri(
                             print(f"[WARN] No se pudo construir el reporte XML mensual de recibidos: {err}")
                         if destino_xml_mes.exists():
                             resultado_mes["reporte_xml"] = str(destino_xml_mes)
-                    resultado_mes["xml_dir"] = str(base_mes)
+                    resultado_mes["xml_dir"] = str(base_mes / "XML")
 
                 if "PDF" in formatos_norm and reportes_pdf_dia:
                     destino_pdf_mes = base_mes / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
@@ -7954,7 +8037,8 @@ def descargar_sri(
                                             break
                                         sufijo_xml += 1
                             try:
-                                construir_reporte(carpeta_mes, xml_report_path, estado_default_reporte)
+                                xml_files_mes = _xml_files_por_tipo(carpeta_mes, _prefijo_tipo(tipo_visible or tipo)[2])
+                                construir_reporte(carpeta_mes, xml_report_path, estado_default_reporte, xml_files=xml_files_mes)
                                 resultado_mes["reporte_xml"] = str(xml_report_path)
                             except Exception as err:
                                 print(f"[WARN] No se pudo construir el reporte XML mensual de emitidos: {err}")
