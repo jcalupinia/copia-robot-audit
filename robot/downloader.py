@@ -16,6 +16,16 @@ import xml.etree.ElementTree as ET
 from robot import parser as xml_parser
 
 from robot.parser import construir_reporte
+try:
+    from robot.pdf_layout.main import extract_pdf_fields as _extract_pdf_layout_fields
+except Exception:
+    _extract_pdf_layout_fields = None
+from robot.download_resume import (
+    delete_checkpoint as _delete_download_checkpoint,
+    load_checkpoint as _load_download_checkpoint,
+    mark_checkpoint_running as _mark_download_checkpoint_running,
+    update_checkpoint_progress as _update_download_checkpoint_progress,
+)
 
 from typing import Callable
 
@@ -2649,7 +2659,21 @@ def _guardar_reporte_pdf_excel(rows: list[dict], excel_path: Path) -> bool:
         if col in df.columns:
             df[col] = df[col].map(_to_number)
     try:
-        df.to_excel(excel_path, index=False)
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            df.to_excel(writer, sheet_name="Detalle PDF", index=False)
+            ws = writer.sheets["Detalle PDF"]
+            col_index = {cell.value: idx + 1 for idx, cell in enumerate(ws[1])}
+            for columna in ("rucEmisor", "numeroComprobante", "establecimiento", "puntoEmision", "secuencial", "claveAcceso"):
+                idx = col_index.get(columna)
+                if not idx:
+                    continue
+                col_letter = get_column_letter(idx)
+                for row_idx in range(2, ws.max_row + 1):
+                    celda = ws[f"{col_letter}{row_idx}"]
+                    celda.number_format = "@"
+                    if celda.value is not None:
+                        celda.value = str(celda.value)
+                    celda.alignment = Alignment(horizontal="left")
     except Exception:
         return False
     return True
@@ -2691,6 +2715,26 @@ def _consolidar_reportes_excel(reportes: list[str], destino: Path) -> Path | Non
     except Exception as err:
         print(f"[WARN] No se pudo escribir reporte consolidado: {destino} ({err})")
         return None
+
+
+def _collect_existing_reports(base_dir: Path, prefix: str, tipo_slug: str, suffixes) -> list[str]:
+    if not base_dir.exists():
+        return []
+    encontrados: dict[str, Path] = {}
+    for suffix in suffixes or []:
+        suffix_str = str(suffix or "").strip()
+        if not suffix_str:
+            continue
+        patron = f"{prefix}_{tipo_slug}_{suffix_str}*.xlsx"
+        for ruta in sorted(base_dir.glob(patron)):
+            if not ruta.is_file():
+                continue
+            stem = ruta.stem
+            esperado = f"{prefix}_{tipo_slug}_{suffix_str}"
+            if stem != esperado and not re.fullmatch(rf"{re.escape(esperado)}_\d+", stem):
+                continue
+            encontrados[str(ruta.resolve())] = ruta
+    return [str(ruta) for ruta in sorted(encontrados.values())]
 
 EMITIDOS_FECHA_SELECTORS = [
     "input[id$='fecha_input']",
@@ -3709,20 +3753,31 @@ def _combinar_datos_reporte_emitidos(*fuentes: dict | None) -> dict:
     return datos
 
 
-def _extraer_datos_pdf_emitido_por_tipo(
+def _extraer_datos_pdf_por_tipo_layout_first(
     pdf_path: Path,
     *,
     es_retencion: bool = False,
     es_nota_credito: bool = False,
     es_nota_debito: bool = False,
 ) -> dict:
+    layout_data = {}
+    if _extract_pdf_layout_fields is not None and not es_retencion:
+        try:
+            layout_data = _extract_pdf_layout_fields(pdf_path) or {}
+        except Exception as err:
+            print(f"[WARN] No se pudo extraer por layout visual el PDF '{pdf_path.name}': {err}")
+
     if es_retencion:
-        return _extraer_datos_pdf_retencion(pdf_path)
-    if es_nota_credito:
-        return _extraer_datos_pdf_nota_credito(pdf_path)
-    if es_nota_debito:
-        return _extraer_datos_pdf_nota_debito(pdf_path)
-    return _extraer_datos_pdf(pdf_path)
+        legacy_data = _extraer_datos_pdf_retencion(pdf_path)
+    elif es_nota_credito:
+        legacy_data = _extraer_datos_pdf_nota_credito(pdf_path)
+    elif es_nota_debito:
+        legacy_data = _extraer_datos_pdf_nota_debito(pdf_path)
+    else:
+        legacy_data = _extraer_datos_pdf(pdf_path)
+    if not layout_data:
+        return legacy_data
+    return _combinar_datos_reporte_emitidos(layout_data, legacy_data)
 
 
 def _extraer_datos_emitidos_dom(
@@ -6636,14 +6691,12 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                         lote_pdf_ok += 1
                         if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
                             if not usar_xml_reporte:
-                                if es_retencion:
-                                    datos_pdf = _extraer_datos_pdf_retencion(resultado_pdf)
-                                elif es_nota_credito:
-                                    datos_pdf = _extraer_datos_pdf_nota_credito(resultado_pdf)
-                                elif es_nota_debito:
-                                    datos_pdf = _extraer_datos_pdf_nota_debito(resultado_pdf)
-                                else:
-                                    datos_pdf = _extraer_datos_pdf(resultado_pdf)
+                                datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
+                                    resultado_pdf,
+                                    es_retencion=es_retencion,
+                                    es_nota_credito=es_nota_credito,
+                                    es_nota_debito=es_nota_debito,
+                                )
                                 pdf_report_rows.append(datos_pdf)
                     else:
                         print(f"[WARN] No se pudo descargar PDF para '{razon_social}': no se obtuvo archivo.")
@@ -7324,14 +7377,12 @@ def _flujo_emitidos(
                                             except Exception as err:
                                                 print(f"[WARN] No se pudo usar XML para el reporte PDF: {err}")
                                         if datos_pdf is None:
-                                            if es_retencion:
-                                                datos_pdf = _extraer_datos_pdf_retencion(resultado_pdf)
-                                            elif es_nota_credito:
-                                                datos_pdf = _extraer_datos_pdf_nota_credito(resultado_pdf)
-                                            elif es_nota_debito:
-                                                datos_pdf = _extraer_datos_pdf_nota_debito(resultado_pdf)
-                                            else:
-                                                datos_pdf = _extraer_datos_pdf(resultado_pdf)
+                                            datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
+                                                resultado_pdf,
+                                                es_retencion=es_retencion,
+                                                es_nota_credito=es_nota_credito,
+                                                es_nota_debito=es_nota_debito,
+                                            )
                                         if datos_pdf:
                                             if clave_texto and not datos_pdf.get("claveAcceso"):
                                                 datos_pdf["claveAcceso"] = clave_texto
@@ -7578,6 +7629,8 @@ def descargar_sri(
     estado_emitidos: Optional[str] = None,
     establecimiento: Optional[str] = None,
     punto_emision: Optional[str] = None,
+    checkpoint_path: Optional[str] = None,
+    resume_download: bool = False,
 ):
     _check_cancel("inicio_descarga")
     formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
@@ -7590,6 +7643,19 @@ def descargar_sri(
     destino_emitidos.mkdir(parents=True, exist_ok=True)
     destino_objetivo = destino
     cookies_path = Path(f"cookies_{ruc}.json")
+    checkpoint_path_str = str(checkpoint_path or "").strip()
+    checkpoint_data = _load_download_checkpoint(checkpoint_path_str) if checkpoint_path_str else None
+    progress_data = checkpoint_data.get("progress") if isinstance(checkpoint_data, dict) and isinstance(checkpoint_data.get("progress"), dict) else {}
+    try:
+        resume_month = int(progress_data.get("next_month") or mes)
+    except Exception:
+        resume_month = int(mes)
+    try:
+        resume_day = int(progress_data.get("next_day") or (dia if dia not in (None, "") else 0))
+    except Exception:
+        resume_day = int(dia or 0)
+    if checkpoint_path_str and checkpoint_data:
+        _mark_download_checkpoint_running(checkpoint_path_str)
 
     with sync_playwright() as p:
         launch_kwargs = dict(
@@ -7701,7 +7767,10 @@ def descargar_sri(
                         )
 
                 if dia_actual in (0, None):
-                    dias_consultar = list(range(1, limite_dia + 1))
+                    dia_inicio = 1
+                    if resume_download and mes_actual == resume_month and resume_day not in (0, None):
+                        dia_inicio = max(1, min(int(resume_day), limite_dia))
+                    dias_consultar = list(range(dia_inicio, limite_dia + 1))
                 else:
                     dia_int = int(dia_actual)
                     if dia_int > limite_dia:
@@ -7717,7 +7786,7 @@ def descargar_sri(
                 reportes_pdf_dia = []
                 resultado_mes = None
 
-                for dia_iter in dias_consultar:
+                for idx_dia, dia_iter in enumerate(dias_consultar):
                     _check_cancel("recibidos_dia")
                     resultado_dia = _consultar_recibidos_dia(mes_actual, dia_iter)
                     total_xml += resultado_dia.get("n_xml", 0)
@@ -7733,9 +7802,18 @@ def descargar_sri(
                     reporte_pdf_dia = resultado_dia.get("reporte_pdf")
                     if reporte_pdf_dia and Path(reporte_pdf_dia).exists():
                         reportes_pdf_dia.append(str(reporte_pdf_dia))
+                    if checkpoint_path_str and idx_dia < len(dias_consultar) - 1:
+                        siguiente_dia = dias_consultar[idx_dia + 1]
+                        _update_download_checkpoint_progress(
+                            checkpoint_path_str,
+                            next_month=int(mes_actual),
+                            next_day=int(siguiente_dia),
+                            last_completed_day=int(dia_iter),
+                            last_completed_label=f"{dia_iter:02d}/{mes_actual:02d}/{anio}",
+                        )
                     resultado_mes = resultado_dia
 
-                if len(dias_consultar) == 1:
+                if dia_actual not in (0, None) and len(dias_consultar) == 1:
                     return resultado_mes
 
                 resultado_mes = dict(resultado_mes or {})
@@ -7766,15 +7844,23 @@ def descargar_sri(
                             resultado_mes["reporte_xml"] = str(destino_xml_mes)
                     resultado_mes["xml_dir"] = str(base_mes / "XML")
 
-                if "PDF" in formatos_norm and reportes_pdf_dia:
-                    destino_pdf_mes = base_mes / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
-                    try:
-                        pdf_mes = _consolidar_reportes_excel(reportes_pdf_dia, destino_pdf_mes)
-                    except Exception as err:
-                        print(f"[WARN] No se pudo consolidar reporte PDF mensual de recibidos: {err}")
-                        pdf_mes = None
-                    if pdf_mes and Path(pdf_mes).exists():
-                        resultado_mes["reporte_pdf"] = str(pdf_mes)
+                if "PDF" in formatos_norm:
+                    sufijos_dia = [f"{anio:04d}{mes_actual:02d}{int(d):02d}" for d in dias_consultar]
+                    reportes_pdf_dia = _collect_existing_reports(
+                        base_mes,
+                        "recibidos_reporte_pdf",
+                        tipo_slug,
+                        sufijos_dia,
+                    )
+                    if reportes_pdf_dia:
+                        destino_pdf_mes = base_mes / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
+                        try:
+                            pdf_mes = _consolidar_reportes_excel(reportes_pdf_dia, destino_pdf_mes)
+                        except Exception as err:
+                            print(f"[WARN] No se pudo consolidar reporte PDF mensual de recibidos: {err}")
+                            pdf_mes = None
+                        if pdf_mes and Path(pdf_mes).exists():
+                            resultado_mes["reporte_pdf"] = str(pdf_mes)
 
                 resultado_mes["carpeta_tipo"] = str(base_mes if base_mes.exists() else destino_objetivo)
                 return resultado_mes
@@ -7819,7 +7905,7 @@ def descargar_sri(
                 detalle_meses = []
                 total_xml = 0
                 total_pdf = 0
-                mes_inicio = int(mes)
+                mes_inicio = int(resume_month if resume_download else mes)
                 mes_fin_val = int(mes_fin_val)
                 resultado_mes = None
                 for mes_actual in range(mes_inicio, mes_fin_val + 1):
@@ -7840,6 +7926,15 @@ def descargar_sri(
                     reporte_pdf_mes = resultado_mes.get("reporte_pdf")
                     if reporte_pdf_mes and Path(reporte_pdf_mes).exists():
                         reportes_pdf.append(str(reporte_pdf_mes))
+                    if checkpoint_path_str:
+                        siguiente_mes = mes_actual + 1 if mes_actual < mes_fin_val else None
+                        _update_download_checkpoint_progress(
+                            checkpoint_path_str,
+                            next_month=siguiente_mes,
+                            next_day=0,
+                            last_completed_day=None,
+                            last_completed_label=f"{_mes_a_texto(mes_actual)} {anio}",
+                        )
                 resultado = dict(resultado_mes or {})
                 resultado["n_xml"] = total_xml
                 resultado["n_pdf"] = total_pdf
@@ -7858,12 +7953,21 @@ def descargar_sri(
                 fecha_fin = f"{dia_fin:02d}/{mes_fin_val:02d}/{anio}"
                 resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
                 resultado["reportes_xml"] = reportes_xml
+                tipo_slug = resultado.get(
+                    "tipo_slug",
+                    _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
+                )
+                if "PDF" in formatos_norm:
+                    sufijos_mes = [f"{anio:04d}{m:02d}" for m in range(mes_inicio, mes_fin_val + 1)]
+                    carpeta_rango = destino_objetivo / f"{anio:04d}"
+                    reportes_pdf = _collect_existing_reports(
+                        carpeta_rango,
+                        "recibidos_reporte_pdf",
+                        tipo_slug,
+                        sufijos_mes,
+                    )
                 resultado["reportes_pdf"] = reportes_pdf
                 if mes_inicio == 1 and mes_fin_val == 12:
-                    tipo_slug = resultado.get(
-                        "tipo_slug",
-                        _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
-                    )
                     if "XML" in formatos_norm:
                         base_anual = destino_objetivo / f"{anio:04d}"
                         if base_anual.exists():
@@ -7911,10 +8015,12 @@ def descargar_sri(
                 carpeta_rango = destino_objetivo / f"{anio:04d}"
                 resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_objetivo)
             else:
+                mes_objetivo = int(resume_month if resume_download else mes)
+                dia_objetivo = int(resume_day) if resume_download else int(dia)
                 if dia in (0, None):
-                    resultado = _recibidos_por_mes(int(mes), 0)
+                    resultado = _recibidos_por_mes(mes_objetivo, 0)
                 else:
-                    resultado = _recibidos_por_mes(int(mes), int(dia))
+                    resultado = _recibidos_por_mes(mes_objetivo, int(dia_objetivo))
                 if aviso_recorte:
                     resultado["aviso_recorte"] = aviso_recorte
         elif origen == "Emitidos":
@@ -7956,7 +8062,10 @@ def descargar_sri(
                     if limite_dia < dias_en_mes:
                         aviso_recorte = f"Rango ajustado hasta el día actual ({hoy.day:02d}/{hoy.month:02d}/{hoy.year})."
                 if dia_actual in (0, None):
-                    dias_consultar = list(range(1, limite_dia + 1))
+                    dia_inicio = 1
+                    if resume_download and mes_actual == resume_month and resume_day not in (0, None):
+                        dia_inicio = max(1, min(int(resume_day), limite_dia))
+                    dias_consultar = list(range(dia_inicio, limite_dia + 1))
                 else:
                     dia_int = int(dia_actual)
                     if dia_int > limite_dia:
@@ -7997,6 +8106,14 @@ def descargar_sri(
                         reporte_dia = resultado_dia.get("reporte_pdf")
                         if reporte_dia and Path(reporte_dia).exists():
                             reportes_dia.append(reporte_dia)
+                    if checkpoint_path_str and idx_dia < len(dias_consultar) - 1:
+                        _update_download_checkpoint_progress(
+                            checkpoint_path_str,
+                            next_month=int(mes_actual),
+                            next_day=int(dias_consultar[idx_dia + 1]),
+                            last_completed_day=int(dia_iter),
+                            last_completed_label=f"{dia_iter:02d}/{mes_actual:02d}/{anio}",
+                        )
                     n_registros_dia = int(resultado_dia.get("n_registros", 0) or 0)
                     hay_mas_trabajo = (
                         idx_dia < len(dias_consultar) - 1
@@ -8004,7 +8121,7 @@ def descargar_sri(
                     )
                     if hay_mas_trabajo and n_registros_dia >= EMITIDOS_RESET_AFTER_DAY_DOCS:
                         _reiniciar_emitidos_para_siguiente_dia(fecha_actual, n_registros_dia)
-                if len(dias_consultar) > 1:
+                if dia_actual in (0, None):
                     resultado_mes = dict(resultado_mes or {})
                     resultado_mes["n_registros"] = total_regs
                     resultado_mes["n_xml"] = total_xml
@@ -8012,17 +8129,17 @@ def descargar_sri(
                     resultado_mes["estado"] = "sin_descargas" if total_regs == 0 else "ok"
                     resultado_mes["mensaje"] = f"Procesados {len(dias_consultar)} días del mes"
                     resultado_mes["detalles_dias"] = detalle_dias
+                    estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
+                    estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
+                    estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
+                    estado_norm = estado_normalizado.lower()
+                    estado_default_reporte = estado_nombre if "no autoriz" in estado_norm else None
+                    tipo_visible = TIPOS_MAP.get(tipo, tipo)
+                    tipo_slug = _slug_tipo(tipo_visible or tipo)
+                    anio_dir = f"{anio:04d}"
+                    mes_dir = _mes_a_texto(mes_actual)
+                    carpeta_mes = destino_emitidos / estado_slug / anio_dir / mes_dir
                     if "XML" in formatos_norm and total_xml > 0:
-                        estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
-                        estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
-                        estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
-                        estado_norm = estado_normalizado.lower()
-                        estado_default_reporte = estado_nombre if "no autoriz" in estado_norm else None
-                        tipo_visible = TIPOS_MAP.get(tipo, tipo)
-                        tipo_slug = _slug_tipo(tipo_visible or tipo)
-                        anio_dir = f"{anio:04d}"
-                        mes_dir = _mes_a_texto(mes_actual)
-                        carpeta_mes = destino_emitidos / estado_slug / anio_dir / mes_dir
                         if carpeta_mes.exists():
                             xml_report_path = carpeta_mes / f"emitidos_reporte_xml_{tipo_slug}_{anio_dir}{mes_actual:02d}.xlsx"
                             if xml_report_path.exists():
@@ -8042,6 +8159,14 @@ def descargar_sri(
                                 resultado_mes["reporte_xml"] = str(xml_report_path)
                             except Exception as err:
                                 print(f"[WARN] No se pudo construir el reporte XML mensual de emitidos: {err}")
+                    if descargar_pdf_mes:
+                        sufijos_dia = [f"{anio:04d}{mes_actual:02d}{int(d):02d}" for d in dias_consultar]
+                        reportes_dia = _collect_existing_reports(
+                            carpeta_mes,
+                            "emitidos_reporte_pdf",
+                            tipo_slug,
+                            sufijos_dia,
+                        )
                     if descargar_pdf_mes and reportes_dia:
                         frames = []
                         for ruta_excel in reportes_dia:
@@ -8054,14 +8179,6 @@ def descargar_sri(
                                 frames.append(df_dia)
                         if frames:
                             df_mes = pd.concat(frames, ignore_index=True)
-                            estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
-                            estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
-                            estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
-                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
-                            tipo_slug = _slug_tipo(tipo_visible or tipo)
-                            anio_dir = f"{anio:04d}"
-                            mes_dir = _mes_a_texto(mes_actual)
-                            carpeta_mes = destino_emitidos / estado_slug / anio_dir / mes_dir
                             carpeta_mes.mkdir(parents=True, exist_ok=True)
                             pdf_report_path = carpeta_mes / f"emitidos_reporte_pdf_{tipo_slug}_{anio_dir}{mes_actual:02d}.xlsx"
                             if pdf_report_path.exists():
@@ -8103,7 +8220,7 @@ def descargar_sri(
                 reportes_pdf = []
                 detalle_meses = []
                 total_regs = total_xml = total_pdf = 0
-                mes_inicio = int(mes)
+                mes_inicio = int(resume_month if resume_download else mes)
                 mes_fin_val = int(mes_fin_val)
                 resultado_mes = None
                 for mes_actual in range(mes_inicio, mes_fin_val + 1):
@@ -8123,6 +8240,15 @@ def descargar_sri(
                         reportes_xml.append(resultado_mes["reporte_xml"])
                     if resultado_mes.get("reporte_pdf"):
                         reportes_pdf.append(resultado_mes["reporte_pdf"])
+                    if checkpoint_path_str:
+                        siguiente_mes = mes_actual + 1 if mes_actual < mes_fin_val else None
+                        _update_download_checkpoint_progress(
+                            checkpoint_path_str,
+                            next_month=siguiente_mes,
+                            next_day=0,
+                            last_completed_day=None,
+                            last_completed_label=f"{_mes_a_texto(mes_actual)} {anio}",
+                        )
                 resultado = dict(resultado_mes or {})
                 resultado["n_registros"] = total_regs
                 resultado["n_xml"] = total_xml
@@ -8139,15 +8265,24 @@ def descargar_sri(
                 fecha_fin = f"{calendar.monthrange(anio, mes_fin_val)[1]:02d}/{mes_fin_val:02d}/{anio}"
                 resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
                 resultado["reportes_xml"] = reportes_xml
-                resultado["reportes_pdf"] = reportes_pdf
                 estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
                 estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
                 estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
-                if mes_inicio == 1 and mes_fin_val == 12:
-                    tipo_slug = resultado.get(
-                        "tipo_slug",
-                        _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
+                tipo_slug = resultado.get(
+                    "tipo_slug",
+                    _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
+                )
+                if "PDF" in formatos_norm:
+                    sufijos_mes = [f"{anio:04d}{m:02d}" for m in range(mes_inicio, mes_fin_val + 1)]
+                    carpeta_rango_pdf = destino_emitidos / estado_slug / f"{anio:04d}"
+                    reportes_pdf = _collect_existing_reports(
+                        carpeta_rango_pdf,
+                        "emitidos_reporte_pdf",
+                        tipo_slug,
+                        sufijos_mes,
                     )
+                resultado["reportes_pdf"] = reportes_pdf
+                if mes_inicio == 1 and mes_fin_val == 12:
                     if "XML" in formatos_norm:
                         base_anual = destino_emitidos / estado_slug / f"{anio:04d}"
                         if base_anual.exists():
@@ -8199,7 +8334,9 @@ def descargar_sri(
                 carpeta_rango = destino_emitidos / estado_slug / f"{anio:04d}"
                 resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_emitidos)
             else:
-                resultado = _emitidos_por_mes(mes, dia)
+                mes_objetivo = int(resume_month if resume_download else mes)
+                dia_objetivo = int(resume_day) if resume_download else int(dia)
+                resultado = _emitidos_por_mes(mes_objetivo, 0 if dia in (0, None) else dia_objetivo)
             if isinstance(resultado, dict) and aviso_recorte:
                 resultado.setdefault("aviso_recorte", aviso_recorte)
         else:

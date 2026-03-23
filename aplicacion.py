@@ -29,14 +29,29 @@ from robot.downloader import (
     set_user_notifier,
     MANUAL_CONSULTA_RECIBIDOS,
     _consolidar_reportes_excel,
+    _extraer_datos_pdf_por_tipo_layout_first,
+    _guardar_reporte_pdf_excel,
+    _guardar_reporte_pdf_retencion_excel,
     _prefijo_tipo,
     _xml_files_por_tipo,
     _slug_tipo,
+    PDF_REPORT_COLUMNS,
+    RETENCION_REPORT_COLUMNS,
     TIPOS_MAP,
     ESTADOS_EMITIDOS_MAP,
 )
-from robot.parser import construir_reporte
+from robot.parser import construir_reporte, _parse_recibido_xml
 from robot.historial import registrar_descarga, obtener_historial   #  FIX import correcto
+from robot.download_resume import (
+    build_checkpoint_payload,
+    checkpoint_path as build_download_checkpoint_path,
+    delete_checkpoint as delete_download_checkpoint,
+    deserialize_params as deserialize_download_params,
+    load_checkpoint as load_download_checkpoint,
+    mark_checkpoint_failed as mark_download_checkpoint_failed,
+    mark_checkpoint_running as mark_download_checkpoint_running,
+    save_checkpoint as save_download_checkpoint,
+)
 from licensing_client import LicensingClient
 # Actualizador de escritorio
 try:
@@ -904,10 +919,17 @@ def _download_worker(params: dict, q: "queue.Queue"):
 
     clear_cancel()
     set_user_notifier(_notify)
+    checkpoint_path = params.get("checkpoint_path")
     try:
+        if checkpoint_path:
+            mark_download_checkpoint_running(checkpoint_path)
         resultado = descargar_sri(**params)
+        if checkpoint_path:
+            delete_download_checkpoint(checkpoint_path)
         q.put(("done", resultado))
     except Exception as err:
+        if checkpoint_path:
+            mark_download_checkpoint_failed(checkpoint_path, str(err))
         q.put(("error", str(err)))
     finally:
         set_user_notifier(None)
@@ -1375,6 +1397,8 @@ SESSION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 SESSION_CACHE = SESSION_CACHE_DIR / "session_cache.json"
 ENABLE_SESSION_CACHE = os.getenv("ENABLE_SESSION_CACHE", "1").strip().lower() not in {"0", "false", "no"}
 PREFERENCES_FILE = Path(os.getenv("USER_PREFS_PATH", SESSION_CACHE_DIR / "user_prefs.json"))
+DOWNLOAD_RESUME_DIR = SESSION_CACHE_DIR / "download_resume"
+DOWNLOAD_RESUME_DIR.mkdir(parents=True, exist_ok=True)
 _SESSION_CACHE_MEMORY: dict[str, dict] = {}
 
 def _generate_device_fingerprint() -> str:
@@ -1649,6 +1673,110 @@ def _get_download_base_dir() -> Path:
     return base
 
 
+def _current_download_checkpoint_path(user_email: str | None = None) -> Path:
+    email = (user_email or st.session_state.get("user_email") or "").strip().lower()
+    return build_download_checkpoint_path(DOWNLOAD_RESUME_DIR, email)
+
+
+def _format_download_resume_period(summary: dict | None) -> str:
+    summary = summary or {}
+    meses = [
+        "",
+        "Enero",
+        "Febrero",
+        "Marzo",
+        "Abril",
+        "Mayo",
+        "Junio",
+        "Julio",
+        "Agosto",
+        "Septiembre",
+        "Octubre",
+        "Noviembre",
+        "Diciembre",
+    ]
+    try:
+        anio = int(summary.get("anio") or 0)
+    except Exception:
+        anio = 0
+    try:
+        mes = int(summary.get("mes") or 0)
+    except Exception:
+        mes = 0
+    try:
+        mes_fin = int(summary.get("mes_fin") or 0)
+    except Exception:
+        mes_fin = 0
+    try:
+        dia = int(summary.get("dia") or 0)
+    except Exception:
+        dia = 0
+
+    if anio and mes == 1 and mes_fin == 12 and dia in (0, None):
+        return f"Año completo {anio}"
+    if anio and mes and mes_fin and mes_fin >= mes and dia in (0, None):
+        return f"{meses[mes]} {anio} a {meses[mes_fin]} {anio}"
+    if anio and mes and dia not in (0, None):
+        return f"{dia:02d}/{mes:02d}/{anio}"
+    if anio and mes:
+        return f"{meses[mes]} {anio}"
+    return "Periodo no disponible"
+
+
+def _load_pending_download_checkpoint_for_current_user() -> dict | None:
+    path = _current_download_checkpoint_path()
+    data = load_download_checkpoint(path)
+    if not data:
+        return None
+    if str(data.get("status") or "").strip().lower() == "completed":
+        delete_download_checkpoint(path)
+        return None
+    data["_path"] = str(path)
+    return data
+
+
+def _start_download_process(
+    params: dict,
+    *,
+    resume_download: bool = False,
+    checkpoint_payload: dict | None = None,
+) -> None:
+    checkpoint_file = _current_download_checkpoint_path()
+    if resume_download:
+        if load_download_checkpoint(checkpoint_file):
+            mark_download_checkpoint_running(checkpoint_file)
+        else:
+            payload = checkpoint_payload or build_checkpoint_payload(st.session_state.get("user_email"), params)
+            save_download_checkpoint(checkpoint_file, payload)
+            mark_download_checkpoint_running(checkpoint_file)
+    else:
+        payload = checkpoint_payload or build_checkpoint_payload(st.session_state.get("user_email"), params)
+        save_download_checkpoint(checkpoint_file, payload)
+
+    st.session_state.download_messages = []
+    st.session_state.download_result = None
+    st.session_state.download_error = None
+    st.session_state.download_registered = False
+    st.session_state.download_finished_modal_open = False
+    st.session_state.download_status = "running"
+    st.session_state.running_notice_ts = time.time()
+    st.session_state.stop_notice_ts = None
+    st.session_state.manual_consultar_hint = None
+    st.session_state.manual_consultar_hint_ts = None
+    st.session_state.download_params = dict(params)
+
+    worker_params = dict(params)
+    worker_params["checkpoint_path"] = str(checkpoint_file)
+    worker_params["resume_download"] = bool(resume_download)
+    worker = threading.Thread(
+        target=_download_worker,
+        args=(worker_params, st.session_state.download_queue),
+        daemon=True,
+    )
+    st.session_state.download_thread = worker
+    worker.start()
+
+
 def _select_directory_dialog(initial_dir: str | None = None):
     try:
         import tkinter as tk
@@ -1708,6 +1836,286 @@ def _handle_reset_query_token():
     st.session_state["active_reset_token"] = token
     st.session_state["recovery_email"] = email
     st.query_params.clear()
+
+
+def _normalize_compare_text(value: str | None) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+    return text
+
+
+def _canonical_tipo(value: str | None) -> str:
+    text = _normalize_compare_text(value)
+    if "retencion" in text:
+        return "retenciones"
+    if "nota" in text and "credito" in text:
+        return "notas_de_credito"
+    if "nota" in text and "debito" in text:
+        return "notas_de_debito"
+    if "liquidacion" in text:
+        return "liquidacion_de_compra"
+    if "guia" in text or "remision" in text:
+        return "guia_de_remision"
+    if "factura" in text:
+        return "facturas"
+    return text
+
+
+def _infer_origin_and_status_from_path(path: Path) -> tuple[str, str]:
+    parts = [_normalize_compare_text(part) for part in path.parts]
+    if "emitidos" in parts:
+        origen = "Emitidos"
+    elif "recibidos" in parts:
+        origen = "Recibidos"
+    else:
+        origen = "Desconocido"
+    estado = ""
+    if origen == "Emitidos":
+        if any(part == "no_autorizados" for part in parts):
+            estado = "No autorizados"
+        elif any(part == "autorizados" for part in parts):
+            estado = "Autorizados"
+    return origen, estado
+
+
+def _parse_report_date(value) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    candidatos = [
+        text,
+        text[:10],
+        text.replace("T", " ")[:19],
+    ]
+    formatos = [
+        "%Y-%m-%d",
+        "%d/%m/%Y",
+        "%d/%m/%Y %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+    ]
+    for candidato in candidatos:
+        for formato in formatos:
+            try:
+                return datetime.strptime(candidato, formato).date()
+            except Exception:
+                continue
+    return None
+
+
+def _report_row_key(row: dict) -> str:
+    if not isinstance(row, dict):
+        return ""
+    for key in ("claveAcceso", "CLAVE_ACCESO"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    numero = str(row.get("numeroComprobante") or row.get("SERIE_COMPROBANTE") or "").strip()
+    fecha = str(row.get("fechaEmision") or row.get("FECHA_EMISION") or "").strip()
+    ruc = str(row.get("rucEmisor") or row.get("RUC_EMISOR") or "").strip()
+    return "|".join(part for part in (numero, fecha, ruc) if part)
+
+
+def _map_xml_to_standard_row(cabecera: dict, detalles: list[dict]) -> dict:
+    row = {col: "" for col in PDF_REPORT_COLUMNS}
+    row["tipoDocumento"] = cabecera.get("DESCRIPCION_DOC", "")
+    row["rucEmisor"] = cabecera.get("RUC_EMISOR", "")
+    row["razonSocialEmisor"] = cabecera.get("RAZON_SOCIAL_EMISOR", "")
+    row["nombreComercial"] = cabecera.get("NOMBRE_COMERCIAL_EMISOR", "")
+    row["direccionMatrizEmisor"] = cabecera.get("DIR_MATRIZ", "")
+    row["direccionSucursalEmisor"] = cabecera.get("DIR_ESTABLECIMIENTO", "")
+    row["obligadoContabilidad"] = cabecera.get("OBLIGADO_CONTABILIDAD", "")
+    row["tipoContribuyenteRIMPE"] = cabecera.get("CONTRIBUYENTE_RIMPE", "")
+    row["numeroComprobante"] = cabecera.get("SERIE_COMPROBANTE", "")
+    row["establecimiento"] = cabecera.get("ESTAB", "")
+    row["puntoEmision"] = cabecera.get("PTO_EMI", "")
+    row["secuencial"] = cabecera.get("SECUENCIAL", "")
+    row["fechaEmision"] = cabecera.get("FECHA_EMISION", "")
+    row["fechaAutorizacion"] = cabecera.get("FECHA_AUTORIZACION", "")
+    row["razonSocialComprador"] = cabecera.get("RAZON_SOCIAL_COMPRADOR", "")
+    row["identificacionComprador"] = cabecera.get("IDENTIFICACION_COMPRADOR", "")
+    row["direccionComprador"] = cabecera.get("DIRECCION_COMPRADOR", "")
+    row["comprobanteModificado"] = cabecera.get("NUM_DOC_MODIFICADO", "")
+    row["fechaEmisionModificado"] = cabecera.get("FECHA_EMISION_DOC_SUSTENTO", "")
+    row["razonModificacion"] = cabecera.get("MOTIVO_MODIFICACION", "")
+    row["valorModificacion"] = cabecera.get("VALOR_MODIFICACION") or cabecera.get("VALOR_MODIFICACION_XML") or ""
+    row["descripcionesProductos"] = " | ".join(
+        str(det.get("DESCRIPCION") or "").strip()
+        for det in (detalles or [])
+        if str(det.get("DESCRIPCION") or "").strip()
+    )
+    row["subtotalSinImpuestos"] = cabecera.get("TOTAL_SIN_IMPUESTOS", "")
+    row["totalDescuento"] = cabecera.get("TOTAL_DESCUENTO", "")
+    row["propina"] = cabecera.get("PROPINA", "")
+    row["valorTotal"] = cabecera.get("IMPORTE_TOTAL", "") or cabecera.get("VALOR_TOTAL", "")
+    row["ambiente"] = cabecera.get("AMBIENTE", "")
+    row["emision"] = cabecera.get("TIPO_EMISION", "")
+    row["claveAcceso"] = cabecera.get("CLAVE_ACCESO", "")
+    row["informacionAdicional"] = cabecera.get("INFO_ADICIONAL_JSON", "")
+    return row
+
+
+def _map_xml_to_retencion_row(cabecera: dict, retenciones: list[dict]) -> dict:
+    row = {col: "" for col in RETENCION_REPORT_COLUMNS}
+    row["tipoDocumento"] = cabecera.get("DESCRIPCION_DOC", "")
+    row["rucEmisor"] = cabecera.get("RUC_EMISOR", "")
+    row["razonSocialEmisor"] = cabecera.get("RAZON_SOCIAL_EMISOR", "")
+    row["nombreComercial"] = cabecera.get("NOMBRE_COMERCIAL_EMISOR", "")
+    row["direccionMatrizEmisor"] = cabecera.get("DIR_MATRIZ", "")
+    row["direccionSucursalEmisor"] = cabecera.get("DIR_ESTABLECIMIENTO", "")
+    row["obligadoContabilidad"] = cabecera.get("OBLIGADO_CONTABILIDAD", "")
+    row["fechaAutorizacion"] = cabecera.get("FECHA_AUTORIZACION", "")
+    row["ambiente"] = cabecera.get("AMBIENTE", "")
+    row["emision"] = cabecera.get("TIPO_EMISION", "")
+    row["numeroComprobante"] = cabecera.get("SERIE_COMPROBANTE", "")
+    row["establecimiento"] = cabecera.get("ESTAB", "")
+    row["puntoEmision"] = cabecera.get("PTO_EMI", "")
+    row["secuencial"] = cabecera.get("SECUENCIAL", "")
+    row["fechaEmision"] = cabecera.get("FECHA_EMISION", "")
+    row["razonSocialSujetoRetenido"] = cabecera.get("RAZON_SOCIAL_COMPRADOR", "")
+    row["identificacionSujetoRetenido"] = cabecera.get("IDENTIFICACION_COMPRADOR", "")
+    row["claveAcceso"] = cabecera.get("CLAVE_ACCESO", "")
+    row["informacionAdicional"] = cabecera.get("INFO_ADICIONAL_JSON", "")
+    iva_idx = 0
+    ir_idx = 0
+    for item in retenciones or []:
+        tipo_imp = _normalize_compare_text(item.get("TIPO_IMPUESTO", ""))
+        suffix = ""
+        if "iva" in tipo_imp:
+            suffix = "" if iva_idx == 0 else "_1"
+            iva_idx += 1
+            row[f"Base_Imponible_Ret_IVA{suffix}"] = item.get("BASE_IMPONIBLE", "")
+            row[f"Impuesto_Ret_IVA{suffix}"] = item.get("TIPO_IMPUESTO", "")
+            row[f"Porcentaje_Ret_IVA{suffix}"] = item.get("PORCENTAJE_RETENER", "")
+            row[f"Valor_Retenido_IVA{suffix}"] = item.get("VALOR_RETENIDO", "")
+        else:
+            suffix = "" if ir_idx == 0 else "_1"
+            ir_idx += 1
+            row[f"Base_Imponible_Ret_IR{suffix}"] = item.get("BASE_IMPONIBLE", "")
+            row[f"Impuesto_Ret_IR{suffix}"] = item.get("TIPO_IMPUESTO", "")
+            row[f"Porcentaje_Ret_IR{suffix}"] = item.get("PORCENTAJE_RETENER", "")
+            row[f"Valor_Retenido_IR{suffix}"] = item.get("VALOR_RETENIDO", "")
+        row["Comprobante_Sustento"] = row["Comprobante_Sustento"] or item.get("DOC_SUSTENTO_TIPO", "")
+        row["Numero_Sustento"] = row["Numero_Sustento"] or item.get("DOC_SUSTENTO_SECUENCIAL", "")
+        row["Fecha_Emision_Sustento"] = row["Fecha_Emision_Sustento"] or item.get("FECHA_EMISION_DOC_SUSTENTO", "")
+        row["Ejercicio_Fiscal"] = row["Ejercicio_Fiscal"] or item.get("PERIODO_FISCAL", "")
+    return row
+
+
+def _build_custom_report_from_folder(
+    base_dir: Path,
+    *,
+    origen: str,
+    tipo: str,
+    fecha_inicio: date,
+    fecha_fin: date,
+    estado_emitidos: str | None = None,
+) -> dict:
+    base_dir = Path(base_dir).expanduser()
+    target_tipo = _canonical_tipo(tipo)
+    is_retencion = target_tipo == "retenciones"
+    is_nota_credito = target_tipo == "notas_de_credito"
+    is_nota_debito = target_tipo == "notas_de_debito"
+    rows: list[dict] = []
+    seen_keys: set[str] = set()
+    xml_count = 0
+    pdf_count = 0
+    errores: list[str] = []
+
+    for xml_path in sorted(base_dir.rglob("*.xml")):
+        path_origen, path_estado = _infer_origin_and_status_from_path(xml_path)
+        if path_origen != origen:
+            continue
+        if origen == "Emitidos" and estado_emitidos and path_estado and path_estado != estado_emitidos:
+            continue
+        cabecera, detalles, _, _, _, retenciones, error_entry, _ = _parse_recibido_xml(xml_path)
+        if error_entry or not cabecera:
+            continue
+        if _canonical_tipo(cabecera.get("DESCRIPCION_DOC")) != target_tipo:
+            continue
+        fecha_doc = _parse_report_date(cabecera.get("FECHA_EMISION")) or _parse_report_date(cabecera.get("FECHA_AUTORIZACION"))
+        if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
+            continue
+        row = _map_xml_to_retencion_row(cabecera, retenciones) if is_retencion else _map_xml_to_standard_row(cabecera, detalles)
+        key = _report_row_key(row)
+        if key:
+            seen_keys.add(key)
+        rows.append(row)
+        xml_count += 1
+
+    for pdf_path in sorted(base_dir.rglob("*.pdf")):
+        path_origen, path_estado = _infer_origin_and_status_from_path(pdf_path)
+        if path_origen != origen:
+            continue
+        if origen == "Emitidos" and estado_emitidos and path_estado and path_estado != estado_emitidos:
+            continue
+        try:
+            row = _extraer_datos_pdf_por_tipo_layout_first(
+                pdf_path,
+                es_retencion=is_retencion,
+                es_nota_credito=is_nota_credito,
+                es_nota_debito=is_nota_debito,
+            )
+        except Exception as err:
+            errores.append(f"{pdf_path.name}: {err}")
+            continue
+        if _canonical_tipo(row.get("tipoDocumento")) != target_tipo:
+            continue
+        key = _report_row_key(row)
+        if key and key in seen_keys:
+            continue
+        fecha_doc = _parse_report_date(row.get("fechaEmision")) or _parse_report_date(row.get("fechaAutorizacion"))
+        if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
+            continue
+        if key:
+            seen_keys.add(key)
+        rows.append(row)
+        pdf_count += 1
+
+    if not rows:
+        return {
+            "ok": False,
+            "message": "No se encontraron documentos en el rango indicado.",
+            "xml_count": 0,
+            "pdf_count": 0,
+            "errors": errores,
+        }
+
+    report_dir = base_dir / "Reportes_personalizados"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    origen_slug = _normalize_compare_text(origen)
+    tipo_slug = _canonical_tipo(tipo)
+    sufijo = f"{fecha_inicio.strftime('%Y%m%d')}_{fecha_fin.strftime('%Y%m%d')}"
+    output_path = report_dir / f"reporte_personalizado_{origen_slug}_{tipo_slug}_{sufijo}.xlsx"
+    if output_path.exists():
+        timestamp = datetime.now().strftime("%H%M%S")
+        output_path = report_dir / f"reporte_personalizado_{origen_slug}_{tipo_slug}_{sufijo}_{timestamp}.xlsx"
+
+    guardado = (
+        _guardar_reporte_pdf_retencion_excel(rows, output_path)
+        if is_retencion
+        else _guardar_reporte_pdf_excel(rows, output_path)
+    )
+    if not guardado or not output_path.exists():
+        return {
+            "ok": False,
+            "message": "No se pudo generar el archivo Excel del reporte personalizado.",
+            "xml_count": xml_count,
+            "pdf_count": pdf_count,
+            "errors": errores,
+        }
+    return {
+        "ok": True,
+        "path": output_path,
+        "xml_count": xml_count,
+        "pdf_count": pdf_count,
+        "rows": len(rows),
+        "errors": errores,
+    }
 
 
 def _render_reset_request():
@@ -2042,6 +2450,39 @@ tab1, tab2, tab3, tab4 = st.tabs(
 # TAB 1  DESCARGA Y PROCESAMIENTO AUTOMTICO
 # =====================================================
 with tab1:
+    pending_download_checkpoint = None
+    if st.session_state.download_status not in {"running", "cancelling"}:
+        pending_download_checkpoint = _load_pending_download_checkpoint_for_current_user()
+    if pending_download_checkpoint:
+        resume_summary = pending_download_checkpoint.get("summary") if isinstance(pending_download_checkpoint.get("summary"), dict) else {}
+        resume_progress = pending_download_checkpoint.get("progress") if isinstance(pending_download_checkpoint.get("progress"), dict) else {}
+        resume_period = _format_download_resume_period(resume_summary)
+        resume_last_point = str(resume_progress.get("last_completed_label") or "").strip()
+        resume_origen = str(resume_summary.get("origen") or "No disponible")
+        resume_tipo = str(resume_summary.get("tipo") or "No disponible")
+        resume_formatos = ", ".join(resume_summary.get("formatos") or []) or "No disponible"
+        st.info(
+            f"Descarga pendiente detectada. Origen: {resume_origen}. Tipo: {resume_tipo}. "
+            f"Periodo: {resume_period}. Ultimo punto guardado: {resume_last_point or 'inicio del proceso'}."
+        )
+        st.caption(f"Formatos: {resume_formatos}")
+        resume_error = str(pending_download_checkpoint.get("last_error") or "").strip()
+        if resume_error:
+            st.caption(f"Ultimo error registrado: {resume_error}")
+        col_resume_1, col_resume_2 = st.columns([1, 1])
+        with col_resume_1:
+            if st.button("Reanudar descarga", key="btn_resume_download", use_container_width=True, type="secondary"):
+                resume_params = deserialize_download_params(pending_download_checkpoint.get("params"))
+                if not resume_params:
+                    st.error("No se pudo recuperar la configuración de la descarga pendiente.")
+                else:
+                    _start_download_process(resume_params, resume_download=True)
+                    st.rerun()
+        with col_resume_2:
+            if st.button("Descartar", key="btn_discard_resume_download", use_container_width=True):
+                delete_download_checkpoint(pending_download_checkpoint.get("_path"))
+                st.rerun()
+
     col_title, col_tour_link = st.columns([5, 1.6])
     with col_title:
         st.markdown('<h3 class="section-title">Ingreso de Credenciales y Filtros</h3>', unsafe_allow_html=True)
@@ -2437,13 +2878,6 @@ with tab1:
             destino = base_descargas / ruc
             destino.mkdir(parents=True, exist_ok=True)
 
-            st.session_state.download_messages = []
-            st.session_state.download_result = None
-            st.session_state.download_error = None
-            st.session_state.download_registered = False
-            st.session_state.download_finished_modal_open = False
-            st.session_state.download_status = "running"
-            st.session_state.running_notice_ts = time.time()
             params = {
                 "ruc": ruc,
                 "clave": clave,
@@ -2461,14 +2895,8 @@ with tab1:
                 "establecimiento": establecimiento_val,
                 "punto_emision": punto_emision_val,
             }
-            st.session_state.download_params = params
-            worker = threading.Thread(
-                target=_download_worker,
-                args=(params, st.session_state.download_queue),
-                daemon=True,
-            )
-            st.session_state.download_thread = worker
-            worker.start()
+            checkpoint_payload = build_checkpoint_payload(st.session_state.get("user_email"), params)
+            _start_download_process(params, resume_download=False, checkpoint_payload=checkpoint_payload)
             st.rerun()
 
     if st.session_state.download_status not in {"running", "cancelling"}:
@@ -2741,6 +3169,187 @@ with tab1:
             pass
 
 with tab2:
+    st.markdown('<h3 class="section-title">Reporte por fechas</h3>', unsafe_allow_html=True)
+    st.caption("Genera un Excel desde una carpeta ya descargada. Se usarán XML cuando existan y PDF como respaldo para los documentos sin XML.")
+
+    if "custom_report_base_dir" not in st.session_state:
+        st.session_state["custom_report_base_dir"] = st.session_state.get("download_base_dir", str(DESC_DIR))
+    custom_dir_value = st.session_state.get("custom_report_base_dir", str(DESC_DIR))
+    st.text_input(
+        "Carpeta fuente",
+        key="custom_report_base_dir",
+        help="Selecciona la carpeta donde ya tienes descargados los comprobantes.",
+    )
+    if st.button("Seleccionar carpeta fuente", key="btn_select_custom_report_dir"):
+        seleccionada, error = _select_directory_dialog(custom_dir_value)
+        if seleccionada:
+            st.session_state["custom_report_base_dir"] = str(Path(seleccionada).expanduser())
+            st.rerun()
+        if error:
+            st.warning(error)
+
+    meses_es_report = [
+        "Enero",
+        "Febrero",
+        "Marzo",
+        "Abril",
+        "Mayo",
+        "Junio",
+        "Julio",
+        "Agosto",
+        "Septiembre",
+        "Octubre",
+        "Noviembre",
+        "Diciembre",
+    ]
+    cr1, cr2, cr3 = st.columns([1.2, 1.2, 1.2])
+    with cr1:
+        custom_origen = st.selectbox("Origen", ["Recibidos", "Emitidos"], key="custom_report_origen")
+    with cr2:
+        custom_tipo = st.selectbox(
+            "Tipo de comprobante",
+            [
+                "Facturas",
+                "Retenciones",
+                "Notas de crédito",
+                "Notas de débito",
+                "Liquidación de compra",
+                "Guía de remisión",
+            ],
+            key="custom_report_tipo",
+        )
+    with cr3:
+        custom_estado_emitidos = None
+        if custom_origen == "Emitidos":
+            custom_estado_emitidos = st.selectbox(
+                "Estado de autorización",
+                ["Autorizados", "No autorizados"],
+                key="custom_report_estado_emitidos",
+            )
+
+    custom_mode = st.radio(
+        "Modo de fecha",
+        ["Día específico", "Mes completo", "Rango de fechas", "Rango de meses", "Año completo"],
+        horizontal=True,
+        key="custom_report_mode",
+    )
+    fecha_inicio_custom = None
+    fecha_fin_custom = None
+    today_local = date.today()
+    if custom_mode == "Día específico":
+        fecha_unica = st.date_input("Fecha", value=today_local, key="custom_report_single_date")
+        fecha_inicio_custom = fecha_unica
+        fecha_fin_custom = fecha_unica
+    elif custom_mode == "Mes completo":
+        cm1, cm2 = st.columns([1, 1])
+        with cm1:
+            custom_year = st.number_input(
+                "Año",
+                min_value=2015,
+                max_value=today_local.year,
+                value=today_local.year,
+                step=1,
+                key="custom_report_year_month",
+            )
+        with cm2:
+            custom_month_label = st.selectbox(
+                "Mes",
+                meses_es_report,
+                index=max(0, today_local.month - 1),
+                key="custom_report_month_label",
+            )
+        custom_month = meses_es_report.index(custom_month_label) + 1
+        fecha_inicio_custom = date(int(custom_year), custom_month, 1)
+        fecha_fin_custom = date(int(custom_year), custom_month, calendar.monthrange(int(custom_year), custom_month)[1])
+    elif custom_mode == "Rango de fechas":
+        rf1, rf2 = st.columns([1, 1])
+        with rf1:
+            fecha_inicio_custom = st.date_input("Fecha inicio", value=today_local.replace(day=1), key="custom_report_start_date")
+        with rf2:
+            fecha_fin_custom = st.date_input("Fecha fin", value=today_local, key="custom_report_end_date")
+    elif custom_mode == "Rango de meses":
+        rm1, rm2, rm3 = st.columns([1, 1, 1])
+        with rm1:
+            custom_year = st.number_input(
+                "Año",
+                min_value=2015,
+                max_value=today_local.year,
+                value=today_local.year,
+                step=1,
+                key="custom_report_year_range",
+            )
+        with rm2:
+            custom_month_start_label = st.selectbox(
+                "Mes inicio",
+                meses_es_report,
+                index=0,
+                key="custom_report_month_start",
+            )
+        with rm3:
+            custom_month_end_label = st.selectbox(
+                "Mes fin",
+                meses_es_report,
+                index=max(0, today_local.month - 1),
+                key="custom_report_month_end",
+            )
+        custom_month_start = meses_es_report.index(custom_month_start_label) + 1
+        custom_month_end = meses_es_report.index(custom_month_end_label) + 1
+        fecha_inicio_custom = date(int(custom_year), custom_month_start, 1)
+        fecha_fin_custom = date(int(custom_year), custom_month_end, calendar.monthrange(int(custom_year), custom_month_end)[1])
+    else:
+        custom_year = st.number_input(
+            "Año",
+            min_value=2015,
+            max_value=today_local.year,
+            value=today_local.year,
+            step=1,
+            key="custom_report_year_full",
+        )
+        fecha_inicio_custom = date(int(custom_year), 1, 1)
+        fecha_fin_custom = date(int(custom_year), 12, 31)
+
+    if st.button("Generar reporte por fechas", key="btn_generate_custom_report", use_container_width=True):
+        source_dir = Path(st.session_state.get("custom_report_base_dir") or "").expanduser()
+        if not source_dir.exists():
+            st.error("La carpeta fuente no existe. Selecciona una ruta válida.")
+        elif fecha_inicio_custom is None or fecha_fin_custom is None:
+            st.error("Debes definir un rango de fechas válido.")
+        elif fecha_inicio_custom > fecha_fin_custom:
+            st.error("La fecha inicio no puede ser mayor que la fecha fin.")
+        else:
+            resultado_custom = _build_custom_report_from_folder(
+                source_dir,
+                origen=custom_origen,
+                tipo=custom_tipo,
+                fecha_inicio=fecha_inicio_custom,
+                fecha_fin=fecha_fin_custom,
+                estado_emitidos=custom_estado_emitidos,
+            )
+            st.session_state["custom_report_result"] = resultado_custom
+
+    custom_report_result = st.session_state.get("custom_report_result")
+    if isinstance(custom_report_result, dict):
+        if custom_report_result.get("ok") and custom_report_result.get("path"):
+            output_path = Path(custom_report_result["path"])
+            st.success(
+                f"Reporte generado. Documentos incluidos: {custom_report_result.get('rows', 0)} "
+                f"(XML: {custom_report_result.get('xml_count', 0)} | PDF: {custom_report_result.get('pdf_count', 0)})."
+            )
+            if custom_report_result.get("errors"):
+                st.caption(f"PDF con advertencias omitidos: {len(custom_report_result.get('errors') or [])}")
+            if output_path.exists():
+                with open(output_path, "rb") as custom_file:
+                    st.download_button(
+                        "Descargar reporte por fechas",
+                        custom_file,
+                        file_name=output_path.name,
+                        use_container_width=True,
+                        key="btn_download_custom_report",
+                    )
+        elif custom_report_result.get("message"):
+            st.warning(custom_report_result.get("message"))
+
+    st.markdown("---")
     st.markdown('<h3 class="historial-title">Historial de ejecuciones recientes</h3>', unsafe_allow_html=True)
     historial = obtener_historial(DEVICE_FINGERPRINT)
     historial_raw = historial.copy()
