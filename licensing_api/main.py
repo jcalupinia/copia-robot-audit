@@ -508,7 +508,12 @@ def updates_download(request: Request):
     _require_update_token(request)
     file_path = os.getenv("UPDATE_FILE_PATH", "").strip()
     if file_path:
-        return FileResponse(file_path, filename="ROBOT_AUDIT_SRI.exe", media_type="application/octet-stream")
+        return FileResponse(
+            file_path,
+            filename="ROBOT_AUDIT_SRI.exe",
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="ROBOT_AUDIT_SRI.exe"'},
+        )
     client, bucket, object_key = _r2_download_source()
     if client and bucket and object_key:
         try:
@@ -826,12 +831,79 @@ def landing_page(request: Request):
     <aside class="download-card">
       <h2>Descarga ahora</h2>
       <p>Instala tu software de forma inmediata y empieza a usarlo hoy mismo.</p>
-      <a class="cta" href="{download_url}" download="ROBOT_AUDIT_SRI.exe">Descargar ROBOT_AUDIT_SRI.exe</a>
+      <button class="cta" id="download-btn" type="button">Descargar ROBOT_AUDIT_SRI.exe</button>
+      <a id="download-fallback" href="{download_url}" download="ROBOT_AUDIT_SRI.exe" style="display:none;">Descargar ROBOT_AUDIT_SRI.exe</a>
       <div class="version">Version actual: {version}</div>
       <p class="note">Haz clic en el boton y la descarga iniciara automaticamente.</p>
+      <p class="note" id="download-status" aria-live="polite"></p>
       <div class="trust">Solucion profesional para equipos que buscan orden, velocidad y confianza.</div>
     </aside>
   </div>
+  <script>
+    (function () {{
+      const btn = document.getElementById("download-btn");
+      const fallback = document.getElementById("download-fallback");
+      const status = document.getElementById("download-status");
+      const fileName = "ROBOT_AUDIT_SRI.exe";
+      const downloadUrl = fallback ? fallback.href : "";
+
+      function setStatus(msg) {{
+        if (status) status.textContent = msg || "";
+      }}
+
+      async function saveWithPicker() {{
+        const handle = await window.showSaveFilePicker({{
+          suggestedName: fileName,
+          types: [{{
+            description: "Ejecutable de Windows",
+            accept: {{
+              "application/octet-stream": [".exe"]
+            }}
+          }}]
+        }});
+
+        const response = await fetch(downloadUrl, {{ credentials: "same-origin" }});
+        if (!response.ok) {{
+          throw new Error("No se pudo iniciar la descarga.");
+        }}
+        const writable = await handle.createWritable();
+        if (response.body && response.body.pipeTo) {{
+          await response.body.pipeTo(writable);
+        }} else {{
+          const blob = await response.blob();
+          await writable.write(blob);
+          await writable.close();
+        }}
+      }}
+
+      btn.addEventListener("click", async function () {{
+        if (!downloadUrl) {{
+          setStatus("No se encontro el archivo de descarga.");
+          return;
+        }}
+        btn.disabled = true;
+        setStatus("Preparando descarga...");
+        try {{
+          if (window.isSecureContext && "showSaveFilePicker" in window) {{
+            await saveWithPicker();
+            setStatus("Descarga completada.");
+          }} else {{
+            setStatus("Tu navegador no permite elegir carpeta desde el boton. Se iniciara la descarga normal.");
+            fallback.click();
+          }}
+        }} catch (err) {{
+          if (err && err.name === "AbortError") {{
+            setStatus("Descarga cancelada.");
+          }} else {{
+            setStatus("No se pudo completar la descarga desde el boton. Se intentara descarga normal.");
+            fallback.click();
+          }}
+        }} finally {{
+          btn.disabled = false;
+        }}
+      }});
+    }})();
+  </script>
 </body>
 </html>
     """
