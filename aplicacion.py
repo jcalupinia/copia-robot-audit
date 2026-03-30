@@ -30,11 +30,27 @@ from robot.downloader import (
     MANUAL_CONSULTA_RECIBIDOS,
     _consolidar_reportes_excel,
     _extraer_datos_pdf_por_tipo_layout_first,
+    _extraer_datos_pdf_retencion_emitido,
+    _extraer_datos_pdf_nota_credito_emitido,
+    _extraer_datos_pdf_nota_debito_emitido,
+    _extraer_datos_pdf_factura_emitido,
+    _extraer_datos_pdf_liquidacion_compra_emitido,
+    _extraer_datos_xml_retencion_emitido,
+    _extraer_datos_xml_nota_credito_emitido,
+    _extraer_datos_xml_nota_debito_emitido,
+    _extraer_datos_xml_factura_emitido,
+    _extraer_datos_xml_liquidacion_compra_emitido,
     _guardar_reporte_pdf_excel,
     _guardar_reporte_pdf_retencion_excel,
+    _guardar_reporte_pdf_retencion_emitidos_excel,
+    _guardar_reporte_pdf_nota_credito_emitidos_excel,
+    _guardar_reporte_pdf_nota_debito_emitidos_excel,
+    _guardar_reporte_pdf_factura_emitidos_excel,
     _prefijo_tipo,
     _xml_files_por_tipo,
     _slug_tipo,
+    EMITIDOS_FACTURA_REPORT_COLUMNS,
+    EMITIDOS_RETENCION_REPORT_COLUMNS,
     PDF_REPORT_COLUMNS,
     RETENCION_REPORT_COLUMNS,
     TIPOS_MAP,
@@ -1910,13 +1926,25 @@ def _parse_report_date(value) -> date | None:
 def _report_row_key(row: dict) -> str:
     if not isinstance(row, dict):
         return ""
-    for key in ("claveAcceso", "CLAVE_ACCESO"):
+    for key in ("claveAcceso", "CLAVE_ACCESO", "Clave de Acceso", "Número de Autorización"):
         value = str(row.get(key) or "").strip()
         if value:
             return value
-    numero = str(row.get("numeroComprobante") or row.get("SERIE_COMPROBANTE") or "").strip()
-    fecha = str(row.get("fechaEmision") or row.get("FECHA_EMISION") or "").strip()
-    ruc = str(row.get("rucEmisor") or row.get("RUC_EMISOR") or "").strip()
+    numero = str(
+        row.get("numeroComprobante")
+        or row.get("SERIE_COMPROBANTE")
+        or row.get("Número de Documento de Sustento")
+        or row.get("Secuencial")
+        or ""
+    ).strip()
+    fecha = str(
+        row.get("fechaEmision")
+        or row.get("FECHA_EMISION")
+        or row.get("Fecha de Emisión")
+        or row.get("Fecha de Autorización")
+        or ""
+    ).strip()
+    ruc = str(row.get("rucEmisor") or row.get("RUC_EMISOR") or row.get("RUC Emisor") or "").strip()
     return "|".join(part for part in (numero, fecha, ruc) if part)
 
 
@@ -2020,6 +2048,8 @@ def _build_custom_report_from_folder(
     is_retencion = target_tipo == "retenciones"
     is_nota_credito = target_tipo == "notas_de_credito"
     is_nota_debito = target_tipo == "notas_de_debito"
+    is_factura_emitida = target_tipo == "factura" and origen == "Emitidos"
+    is_liquidacion_emitida = target_tipo == "liquidacion_de_compra" and origen == "Emitidos"
     rows: list[dict] = []
     seen_keys: set[str] = set()
     xml_count = 0
@@ -2031,6 +2061,61 @@ def _build_custom_report_from_folder(
         if path_origen != origen:
             continue
         if origen == "Emitidos" and estado_emitidos and path_estado and path_estado != estado_emitidos:
+            continue
+        if is_retencion and origen == "Emitidos":
+            row = _extraer_datos_xml_retencion_emitido(xml_path)
+            fecha_doc = _parse_report_date(row.get("Fecha de Emisión")) or _parse_report_date(row.get("Fecha de Autorización"))
+            if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
+                continue
+            key = _report_row_key(row)
+            if key:
+                seen_keys.add(key)
+            rows.append(row)
+            xml_count += 1
+            continue
+        if is_nota_credito and origen == "Emitidos":
+            row = _extraer_datos_xml_nota_credito_emitido(xml_path)
+            fecha_doc = _parse_report_date(row.get("Fecha de Emisión")) or _parse_report_date(row.get("Fecha de Autorización"))
+            if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
+                continue
+            key = _report_row_key(row)
+            if key:
+                seen_keys.add(key)
+            rows.append(row)
+            xml_count += 1
+            continue
+        if is_nota_debito and origen == "Emitidos":
+            row = _extraer_datos_xml_nota_debito_emitido(xml_path)
+            fecha_doc = _parse_report_date(row.get("Fecha de EmisiÃ³n")) or _parse_report_date(row.get("Fecha de AutorizaciÃ³n"))
+            if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
+                continue
+            key = _report_row_key(row)
+            if key:
+                seen_keys.add(key)
+            rows.append(row)
+            xml_count += 1
+            continue
+        if is_factura_emitida:
+            row = _extraer_datos_xml_factura_emitido(xml_path)
+            fecha_doc = _parse_report_date(row.get("Fecha de Emisión")) or _parse_report_date(row.get("Fecha de Autorización"))
+            if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
+                continue
+            key = _report_row_key(row)
+            if key:
+                seen_keys.add(key)
+            rows.append(row)
+            xml_count += 1
+            continue
+        if is_liquidacion_emitida:
+            row = _extraer_datos_xml_liquidacion_compra_emitido(xml_path)
+            fecha_doc = _parse_report_date(row.get("fechaEmision")) or _parse_report_date(row.get("fechaAutorizacion"))
+            if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
+                continue
+            key = _report_row_key(row)
+            if key:
+                seen_keys.add(key)
+            rows.append(row)
+            xml_count += 1
             continue
         cabecera, detalles, _, _, _, retenciones, error_entry, _ = _parse_recibido_xml(xml_path)
         if error_entry or not cabecera:
@@ -2054,21 +2139,48 @@ def _build_custom_report_from_folder(
         if origen == "Emitidos" and estado_emitidos and path_estado and path_estado != estado_emitidos:
             continue
         try:
-            row = _extraer_datos_pdf_por_tipo_layout_first(
-                pdf_path,
-                es_retencion=is_retencion,
-                es_nota_credito=is_nota_credito,
-                es_nota_debito=is_nota_debito,
-            )
+            if is_retencion and origen == "Emitidos":
+                row = _extraer_datos_pdf_retencion_emitido(pdf_path)
+            elif is_nota_credito and origen == "Emitidos":
+                row = _extraer_datos_pdf_nota_credito_emitido(pdf_path)
+            elif is_nota_debito and origen == "Emitidos":
+                row = _extraer_datos_pdf_nota_debito_emitido(pdf_path)
+            elif is_factura_emitida:
+                row = _extraer_datos_pdf_factura_emitido(pdf_path)
+            elif is_liquidacion_emitida:
+                row = _extraer_datos_pdf_liquidacion_compra_emitido(pdf_path)
+            else:
+                row = _extraer_datos_pdf_por_tipo_layout_first(
+                    pdf_path,
+                    es_retencion=is_retencion,
+                    es_nota_credito=is_nota_credito,
+                    es_nota_debito=is_nota_debito,
+                )
         except Exception as err:
             errores.append(f"{pdf_path.name}: {err}")
             continue
-        if _canonical_tipo(row.get("tipoDocumento")) != target_tipo:
+        tipo_row = row.get("tipoDocumento") if isinstance(row, dict) else ""
+        if is_retencion and origen == "Emitidos":
+            tipo_row = "retenciones"
+        elif is_nota_credito and origen == "Emitidos":
+            tipo_row = "notas_de_credito"
+        elif is_nota_debito and origen == "Emitidos":
+            tipo_row = "notas_de_debito"
+        elif is_factura_emitida:
+            tipo_row = "factura"
+        elif is_liquidacion_emitida:
+            tipo_row = "liquidacion_de_compra"
+        if _canonical_tipo(tipo_row) != target_tipo:
             continue
         key = _report_row_key(row)
         if key and key in seen_keys:
             continue
-        fecha_doc = _parse_report_date(row.get("fechaEmision")) or _parse_report_date(row.get("fechaAutorizacion"))
+        fecha_doc = (
+            _parse_report_date(row.get("fechaEmision"))
+            or _parse_report_date(row.get("fechaAutorizacion"))
+            or _parse_report_date(row.get("Fecha de Emisión"))
+            or _parse_report_date(row.get("Fecha de Autorización"))
+        )
         if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
             continue
         if key:
@@ -2096,7 +2208,15 @@ def _build_custom_report_from_folder(
         output_path = report_dir / f"reporte_personalizado_{origen_slug}_{tipo_slug}_{sufijo}_{timestamp}.xlsx"
 
     guardado = (
-        _guardar_reporte_pdf_retencion_excel(rows, output_path)
+        _guardar_reporte_pdf_retencion_emitidos_excel(rows, output_path)
+        if is_retencion and origen == "Emitidos"
+        else _guardar_reporte_pdf_nota_credito_emitidos_excel(rows, output_path)
+        if is_nota_credito and origen == "Emitidos"
+        else _guardar_reporte_pdf_nota_debito_emitidos_excel(rows, output_path)
+        if is_nota_debito and origen == "Emitidos"
+        else _guardar_reporte_pdf_factura_emitidos_excel(rows, output_path)
+        if is_factura_emitida
+        else _guardar_reporte_pdf_retencion_excel(rows, output_path)
         if is_retencion
         else _guardar_reporte_pdf_excel(rows, output_path)
     )

@@ -350,6 +350,909 @@ RETENCION_REPORT_COLUMNS = [
     "tipoDocumento",
 ]
 
+EMITIDOS_RETENCION_REPORT_COLUMNS = [
+    "Estado",
+    "Número de Autorización",
+    "Fecha de Autorización",
+    "Ambiente",
+    "Razón Social Emisor",
+    "Dir. Establecimiento",
+    "Obligado Contabilidad",
+    "Tipo Identificación Comprador",
+    "Identificación Comprador",
+    "Tipo Emisión",
+    "Nombre Comercial",
+    "Código del Documento",
+    "Establecimiento",
+    "Punto de Emisión",
+    "Secuencial",
+    "Dirección Matriz",
+    "Contribuyente RIMPE",
+    "RUC Emisor",
+    "Clave de Acceso",
+    "Fecha de Emisión",
+    "Razón Social Comprador",
+    "Dirección Comprador",
+    "Moneda",
+    "Plazo Pago",
+    "Unidad Tiempo Pago",
+    "Descripciones",
+    "Forma Pago",
+    "Total Sin Impuestos",
+    "Base Gravada",
+    "Base No Gravada",
+    "Tarifas IVA",
+    "Monto IVA",
+    "Total Descuento",
+    "Propina",
+    "Importe Total",
+    "Total Pago",
+    "Agente de Retención",
+    "Contribuyente Especial",
+    "Obligado a llevar Contabilidad",
+    "Razón Social Sujeto Retenido",
+    "Identificación Sujeto Retenido",
+    "Periodo Fiscal",
+    "Dirección del Establecimiento",
+    "Tipo Identificación Sujeto Retenido",
+    "Parte Relacionada",
+    "Código de Sustento",
+    "Código del Documento de Sustento",
+    "Número de Documento de Sustento",
+    "Fecha de Emisión del Documento de Sustento",
+    "Fecha de Registro Contable",
+    "Número de Autorización del Documento de Sustento",
+    "Pago Local o Externo",
+    "Código Impuesto Doc. Sustento",
+    "Código Porcentaje",
+    "Base Imponible Impuesto",
+    "Tarifa",
+    "Valor Impuesto",
+    "Campos Adicionales",
+    "RENTA - codigoRetencion",
+    "RENTA - baseImponible",
+    "RENTA - porcentajeRetener",
+    "RENTA - valorRetenido",
+    "Sustento Imp. 1 - Código",
+    "Sustento Imp. 1 - Cod. Porcentaje",
+    "Sustento Imp. 1 - Base Imponible",
+    "Sustento Imp. 1 - Tarifa",
+    "Sustento Imp. 1 - Valor",
+    "Factura Ret. 1 - Codigo",
+    "Factura Ret. 1 - Cod. Porcentaje",
+    "Factura Ret. 1 - Tarifa",
+    "Factura Ret. 1 - Valor",
+    "IVA - codigoRetencion",
+    "IVA - baseImponible",
+    "IVA - porcentajeRetener",
+    "IVA - valorRetenido",
+    "Factura Ret. 2 - Codigo",
+    "Factura Ret. 2 - Cod. Porcentaje",
+    "Factura Ret. 2 - Tarifa",
+    "Factura Ret. 2 - Valor",
+]
+
+EMITIDOS_RETENCION_FORMA_PAGO_LABEL = {
+    "01": "01 - SIN UTILIZACIÓN DEL SISTEMA FINANCIERO",
+    "15": "15 - COMPENSACIÓN DE DEUDAS",
+    "16": "16 - TARJETA DE DÉBITO",
+    "17": "17 - DINERO ELECTRÓNICO",
+    "18": "18 - TARJETA PREPAGO",
+    "19": "19 - TARJETA DE CRÉDITO",
+    "20": "20 - OTROS CON UTILIZACIÓN DEL SISTEMA FINANCIERO",
+    "21": "21 - ENDOSO DE TÍTULOS",
+}
+
+EMITIDOS_RETENCION_DOC_CODE_LABEL = {
+    "01": "01 - FACTURA",
+    "03": "03 - LIQUIDACIÓN DE COMPRA",
+    "04": "04 - NOTA DE CRÉDITO",
+    "05": "05 - NOTA DE DÉBITO",
+    "06": "06 - GUÍA DE REMISIÓN",
+    "07": "07 - COMPROBANTE DE RETENCIÓN",
+}
+
+EMITIDOS_RETENCION_AMBIENTE_LABEL = {
+    "1": "1 - Pruebas",
+    "2": "2 - Producción",
+}
+
+EMITIDOS_RETENCION_TIPO_EMISION_LABEL = {
+    "1": "1 - Emisión normal",
+    "2": "2 - Emisión por indisponibilidad del sistema",
+}
+
+EMITIDOS_RETENCION_TEXT_FORCE_COLUMNS = {
+    "Estado",
+    "Número de Autorización",
+    "Fecha de Autorización",
+    "Ambiente",
+    "Razón Social Emisor",
+    "Dir. Establecimiento",
+    "Obligado Contabilidad",
+    "Tipo Identificación Comprador",
+    "Identificación Comprador",
+    "Tipo Emisión",
+    "Nombre Comercial",
+    "Código del Documento",
+    "Establecimiento",
+    "Punto de Emisión",
+    "Secuencial",
+    "Dirección Matriz",
+    "Contribuyente RIMPE",
+    "RUC Emisor",
+    "Clave de Acceso",
+    "Fecha de Emisión",
+    "Razón Social Comprador",
+    "Dirección Comprador",
+    "Moneda",
+    "Plazo Pago",
+    "Unidad Tiempo Pago",
+    "Descripciones",
+    "Forma Pago",
+    "Agente de Retención",
+    "Contribuyente Especial",
+    "Obligado a llevar Contabilidad",
+    "Razón Social Sujeto Retenido",
+    "Identificación Sujeto Retenido",
+    "Periodo Fiscal",
+    "Dirección del Establecimiento",
+    "Tipo Identificación Sujeto Retenido",
+    "Parte Relacionada",
+    "Código de Sustento",
+    "Código del Documento de Sustento",
+    "Número de Documento de Sustento",
+    "Fecha de Emisión del Documento de Sustento",
+    "Fecha de Registro Contable",
+    "Número de Autorización del Documento de Sustento",
+    "Pago Local o Externo",
+    "Campos Adicionales",
+}
+
+EMITIDOS_RETENCION_NUMERIC_COLUMNS = {
+    "Total Sin Impuestos",
+    "Base Gravada",
+    "Base No Gravada",
+    "Monto IVA",
+    "Total Descuento",
+    "Propina",
+    "Importe Total",
+    "Total Pago",
+    "Base Imponible Impuesto",
+    "Tarifa",
+    "Valor Impuesto",
+    "RENTA - baseImponible",
+    "RENTA - porcentajeRetener",
+    "RENTA - valorRetenido",
+    "Sustento Imp. 1 - Base Imponible",
+    "Sustento Imp. 1 - Tarifa",
+    "Sustento Imp. 1 - Valor",
+    "Factura Ret. 1 - Tarifa",
+    "Factura Ret. 1 - Valor",
+    "IVA - baseImponible",
+    "IVA - porcentajeRetener",
+    "IVA - valorRetenido",
+    "Factura Ret. 2 - Tarifa",
+    "Factura Ret. 2 - Valor",
+}
+
+EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS = [
+    "Estado",
+    "Número de Autorización",
+    "Fecha de Autorización",
+    "Ambiente",
+    "Razón Social Emisor",
+    "Dir. Establecimiento",
+    "Obligado Contabilidad",
+    "Tipo Identificación Comprador",
+    "Identificación Comprador",
+    "Tipo Emisión",
+    "Nombre Comercial",
+    "Código del Documento",
+    "Establecimiento",
+    "Punto de Emisión",
+    "Secuencial",
+    "Dirección Matriz",
+    "Contribuyente RIMPE",
+    "RUC Emisor",
+    "Clave de Acceso",
+    "Fecha de Emisión",
+    "Razón Social Comprador",
+    "Dirección Comprador",
+    "Moneda",
+    "Plazo Pago",
+    "Unidad Tiempo Pago",
+    "Descripciones",
+    "Forma Pago",
+    "Total Sin Impuestos",
+    "Base Gravada",
+    "Base No Gravada",
+    "Tarifas IVA",
+    "Monto IVA",
+    "Total Descuento",
+    "Propina",
+    "Importe Total",
+    "Total Pago",
+    "Código Documento Modificado",
+    "Número Documento Modificado",
+    "Fecha Emisión Doc. Sustento",
+    "Motivo",
+    "Valor Modificación",
+    "Campos Adicionales",
+    "Base Gravada 15%",
+    "Monto IVA 15%",
+]
+
+EMITIDOS_NOTA_CREDITO_TEXT_FORCE_COLUMNS = {
+    "Estado",
+    "Número de Autorización",
+    "Fecha de Autorización",
+    "Ambiente",
+    "Razón Social Emisor",
+    "Dir. Establecimiento",
+    "Obligado Contabilidad",
+    "Tipo Identificación Comprador",
+    "Identificación Comprador",
+    "Tipo Emisión",
+    "Nombre Comercial",
+    "Código del Documento",
+    "Establecimiento",
+    "Punto de Emisión",
+    "Secuencial",
+    "Dirección Matriz",
+    "Contribuyente RIMPE",
+    "RUC Emisor",
+    "Clave de Acceso",
+    "Fecha de Emisión",
+    "Razón Social Comprador",
+    "Dirección Comprador",
+    "Moneda",
+    "Plazo Pago",
+    "Unidad Tiempo Pago",
+    "Descripciones",
+    "Forma Pago",
+    "Código Documento Modificado",
+    "Número Documento Modificado",
+    "Fecha Emisión Doc. Sustento",
+    "Motivo",
+    "Campos Adicionales",
+}
+
+EMITIDOS_NOTA_CREDITO_NUMERIC_COLUMNS = {
+    "Total Sin Impuestos",
+    "Base Gravada",
+    "Base No Gravada",
+    "Monto IVA",
+    "Total Descuento",
+    "Propina",
+    "Importe Total",
+    "Total Pago",
+    "Valor Modificación",
+    "Base Gravada 15%",
+    "Monto IVA 15%",
+}
+
+EMITIDOS_NOTA_DEBITO_REPORT_COLUMNS = EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS
+EMITIDOS_NOTA_DEBITO_TEXT_FORCE_COLUMNS = EMITIDOS_NOTA_CREDITO_TEXT_FORCE_COLUMNS
+EMITIDOS_NOTA_DEBITO_NUMERIC_COLUMNS = EMITIDOS_NOTA_CREDITO_NUMERIC_COLUMNS
+
+EMITIDOS_NOTA_CREDITO_TIPO_IDENT_LABEL = {
+    "04": "04 - RUC",
+    "05": "05 - CÉDULA",
+    "06": "06 - PASAPORTE",
+    "07": "07 - CONSUMIDOR FINAL",
+    "08": "08 - IDENTIFICACIÓN DEL EXTERIOR",
+    "09": "09 - PLACA",
+}
+
+EMITIDOS_FACTURA_REPORT_COLUMNS = [
+    "Estado",
+    "Número de Autorización",
+    "Fecha de Autorización",
+    "Ambiente",
+    "Razón Social Emisor",
+    "Dir. Establecimiento",
+    "Obligado Contabilidad",
+    "Tipo Identificación Comprador",
+    "Identificación Comprador",
+    "Tipo Emisión",
+    "Nombre Comercial",
+    "Código del Documento",
+    "Establecimiento",
+    "Punto de Emisión",
+    "Secuencial",
+    "Dirección Matriz",
+    "Contribuyente RIMPE",
+    "RUC Emisor",
+    "Clave de Acceso",
+    "Fecha de Emisión",
+    "Razón Social Comprador",
+    "Dirección Comprador",
+    "Moneda",
+    "Plazo Pago",
+    "Unidad Tiempo Pago",
+    "Descripciones",
+    "Forma Pago",
+    "Total Sin Impuestos",
+    "Base Gravada",
+    "Base No Gravada",
+    "Tarifas IVA",
+    "Monto IVA",
+    "Total Descuento",
+    "Propina",
+    "Importe Total",
+    "Total Pago",
+    "Campos Adicionales",
+    "Base No Gravada 0%",
+]
+
+EMITIDOS_FACTURA_TEXT_FORCE_COLUMNS = {
+    "Estado",
+    "Número de Autorización",
+    "Fecha de Autorización",
+    "Ambiente",
+    "Razón Social Emisor",
+    "Dir. Establecimiento",
+    "Obligado Contabilidad",
+    "Tipo Identificación Comprador",
+    "Identificación Comprador",
+    "Tipo Emisión",
+    "Nombre Comercial",
+    "Código del Documento",
+    "Establecimiento",
+    "Punto de Emisión",
+    "Secuencial",
+    "Dirección Matriz",
+    "Contribuyente RIMPE",
+    "RUC Emisor",
+    "Clave de Acceso",
+    "Fecha de Emisión",
+    "Razón Social Comprador",
+    "Dirección Comprador",
+    "Moneda",
+    "Plazo Pago",
+    "Unidad Tiempo Pago",
+    "Descripciones",
+    "Forma Pago",
+    "Campos Adicionales",
+    "Tarifas IVA",
+}
+
+EMITIDOS_FACTURA_NUMERIC_COLUMNS = {
+    "Total Sin Impuestos",
+    "Base Gravada",
+    "Base No Gravada",
+    "Monto IVA",
+    "Total Descuento",
+    "Propina",
+    "Importe Total",
+    "Total Pago",
+    "Base No Gravada 0%",
+}
+
+
+def _emitidos_retencion_default_row() -> dict:
+    row = {col: "" for col in EMITIDOS_RETENCION_REPORT_COLUMNS}
+    for col in (
+        "Tipo Identificación Comprador",
+        "Identificación Comprador",
+        "Contribuyente RIMPE",
+        "Razón Social Comprador",
+        "Dirección Comprador",
+        "Moneda",
+        "Plazo Pago",
+        "Unidad Tiempo Pago",
+        "Contribuyente Especial",
+        "Razón Social Sujeto Retenido",
+        "Identificación Sujeto Retenido",
+        "Periodo Fiscal",
+        "Dirección del Establecimiento",
+        "Tipo Identificación Sujeto Retenido",
+        "Parte Relacionada",
+        "Código de Sustento",
+        "Código del Documento de Sustento",
+        "Número de Documento de Sustento",
+        "Fecha de Emisión del Documento de Sustento",
+        "Fecha de Registro Contable",
+        "Número de Autorización del Documento de Sustento",
+        "Pago Local o Externo",
+        "Código Impuesto Doc. Sustento",
+        "Código Porcentaje",
+        "Forma Pago",
+        "Campos Adicionales",
+        "Agente de Retención",
+        "Dir. Establecimiento",
+        "Obligado Contabilidad",
+        "Obligado a llevar Contabilidad",
+    ):
+        row[col] = "No Disponible"
+    row["Tipo Identificación Comprador"] = "No Disponible - No Disponible"
+    for col in (
+        "Base Gravada",
+        "Base No Gravada",
+        "Monto IVA",
+        "Total Descuento",
+        "Propina",
+        "RENTA - codigoRetencion",
+        "RENTA - baseImponible",
+        "RENTA - porcentajeRetener",
+        "RENTA - valorRetenido",
+        "Sustento Imp. 1 - Código",
+        "Sustento Imp. 1 - Cod. Porcentaje",
+        "Sustento Imp. 1 - Base Imponible",
+        "Sustento Imp. 1 - Tarifa",
+        "Sustento Imp. 1 - Valor",
+        "Factura Ret. 1 - Codigo",
+        "Factura Ret. 1 - Cod. Porcentaje",
+        "Factura Ret. 1 - Tarifa",
+        "Factura Ret. 1 - Valor",
+        "IVA - codigoRetencion",
+        "IVA - baseImponible",
+        "IVA - porcentajeRetener",
+        "IVA - valorRetenido",
+        "Factura Ret. 2 - Codigo",
+        "Factura Ret. 2 - Cod. Porcentaje",
+        "Factura Ret. 2 - Tarifa",
+        "Factura Ret. 2 - Valor",
+    ):
+        row[col] = 0
+    row["Descripciones"] = ""
+    row["Tarifas IVA"] = ""
+    return row
+
+
+def _texto_emitidos_retencion(valor, default: str = "") -> str:
+    if valor is None:
+        return default
+    texto = re.sub(r"\s+", " ", str(valor).strip())
+    return texto or default
+
+
+def _texto_emitidos_retencion_na(valor) -> str:
+    return _texto_emitidos_retencion(valor, "No Disponible")
+
+
+def _numero_emitidos_retencion(valor, default=0):
+    if valor in ("", None):
+        return default
+    if isinstance(valor, (int, float)):
+        return valor
+    parsed = _parse_decimal(str(valor))
+    return parsed if parsed is not None else default
+
+
+def _nota_credito_emitidos_default_row() -> dict:
+    row = {col: "" for col in EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS}
+    for col in (
+        "Dir. Establecimiento",
+        "Obligado Contabilidad",
+        "Tipo Identificación Comprador",
+        "Identificación Comprador",
+        "Nombre Comercial",
+        "Contribuyente RIMPE",
+        "Razón Social Comprador",
+        "Dirección Comprador",
+        "Moneda",
+        "Plazo Pago",
+        "Unidad Tiempo Pago",
+        "Forma Pago",
+        "Código Documento Modificado",
+        "Número Documento Modificado",
+        "Fecha Emisión Doc. Sustento",
+        "Motivo",
+        "Campos Adicionales",
+    ):
+        row[col] = "No Disponible"
+    for col in (
+        "Total Sin Impuestos",
+        "Base Gravada",
+        "Base No Gravada",
+        "Monto IVA",
+        "Total Descuento",
+        "Propina",
+        "Importe Total",
+        "Total Pago",
+        "Valor Modificación",
+        "Base Gravada 15%",
+        "Monto IVA 15%",
+    ):
+        row[col] = 0
+    row["Tarifas IVA"] = ""
+    row["Descripciones"] = ""
+    return row
+
+
+def _factura_emitidos_default_row() -> dict:
+    row = {col: "" for col in EMITIDOS_FACTURA_REPORT_COLUMNS}
+    for col in (
+        "Estado",
+        "Número de Autorización",
+        "Fecha de Autorización",
+        "Ambiente",
+        "Razón Social Emisor",
+        "Dir. Establecimiento",
+        "Obligado Contabilidad",
+        "Tipo Identificación Comprador",
+        "Identificación Comprador",
+        "Tipo Emisión",
+        "Nombre Comercial",
+        "Código del Documento",
+        "Establecimiento",
+        "Punto de Emisión",
+        "Secuencial",
+        "Dirección Matriz",
+        "Contribuyente RIMPE",
+        "RUC Emisor",
+        "Clave de Acceso",
+        "Fecha de Emisión",
+        "Razón Social Comprador",
+        "Dirección Comprador",
+        "Moneda",
+        "Plazo Pago",
+        "Unidad Tiempo Pago",
+        "Forma Pago",
+        "Campos Adicionales",
+    ):
+        row[col] = "No Disponible"
+    row["Tarifas IVA"] = "0%"
+    for col in (
+        "Total Sin Impuestos",
+        "Base Gravada",
+        "Base No Gravada",
+        "Monto IVA",
+        "Total Descuento",
+        "Propina",
+        "Importe Total",
+        "Total Pago",
+        "Base No Gravada 0%",
+    ):
+        row[col] = 0
+    row["Descripciones"] = ""
+    return row
+
+
+def _nota_debito_emitidos_default_row() -> dict:
+    row = {col: "" for col in EMITIDOS_NOTA_DEBITO_REPORT_COLUMNS}
+    for col in (
+        "Dir. Establecimiento",
+        "Obligado Contabilidad",
+        "Tipo Identificación Comprador",
+        "Identificación Comprador",
+        "Nombre Comercial",
+        "Contribuyente RIMPE",
+        "Razón Social Comprador",
+        "Dirección Comprador",
+        "Moneda",
+        "Plazo Pago",
+        "Unidad Tiempo Pago",
+        "Forma Pago",
+        "Código Documento Modificado",
+        "Número Documento Modificado",
+        "Fecha Emisión Doc. Sustento",
+        "Motivo",
+        "Campos Adicionales",
+    ):
+        row[col] = "No Disponible"
+    for col in (
+        "Total Sin Impuestos",
+        "Base Gravada",
+        "Base No Gravada",
+        "Monto IVA",
+        "Total Descuento",
+        "Propina",
+        "Importe Total",
+        "Total Pago",
+        "Valor Modificación",
+        "Base Gravada 15%",
+        "Monto IVA 15%",
+    ):
+        row[col] = 0
+    row["Tarifas IVA"] = ""
+    row["Descripciones"] = ""
+    return row
+
+
+def _label_tipo_ident_emitidos_nota_credito(valor: str) -> str:
+    valor = _texto_emitidos_retencion(valor)
+    if valor in EMITIDOS_NOTA_CREDITO_TIPO_IDENT_LABEL:
+        return EMITIDOS_NOTA_CREDITO_TIPO_IDENT_LABEL[valor]
+    return valor or "No Disponible"
+
+
+def _label_ambiente_emitidos_retencion(valor: str) -> str:
+    valor = _texto_emitidos_retencion(valor)
+    if valor in EMITIDOS_RETENCION_AMBIENTE_LABEL:
+        return EMITIDOS_RETENCION_AMBIENTE_LABEL[valor]
+    valor_norm = unicodedata.normalize("NFKD", valor).encode("ascii", "ignore").decode("ascii").upper()
+    if "PRODUCCION" in valor_norm:
+        return EMITIDOS_RETENCION_AMBIENTE_LABEL["2"]
+    if "PRUEBA" in valor_norm:
+        return EMITIDOS_RETENCION_AMBIENTE_LABEL["1"]
+    return valor
+
+
+def _label_emision_emitidos_retencion(valor: str) -> str:
+    valor = _texto_emitidos_retencion(valor)
+    if valor in EMITIDOS_RETENCION_TIPO_EMISION_LABEL:
+        return EMITIDOS_RETENCION_TIPO_EMISION_LABEL[valor]
+    valor_norm = unicodedata.normalize("NFKD", valor).encode("ascii", "ignore").decode("ascii").upper()
+    if "NORMAL" in valor_norm:
+        return EMITIDOS_RETENCION_TIPO_EMISION_LABEL["1"]
+    if "INDISPONIBILIDAD" in valor_norm or "CONTINGENCIA" in valor_norm:
+        return EMITIDOS_RETENCION_TIPO_EMISION_LABEL["2"]
+    return valor
+
+
+def _label_forma_pago_emitidos_retencion(valor: str) -> str:
+    valor = _texto_emitidos_retencion(valor)
+    if not valor:
+        return "No Disponible"
+    if valor in EMITIDOS_RETENCION_FORMA_PAGO_LABEL:
+        return EMITIDOS_RETENCION_FORMA_PAGO_LABEL[valor]
+    return valor
+
+
+def _extraer_xml_emitidos_autorizacion(xml_path: Path) -> tuple[ET.Element | None, dict]:
+    try:
+        contenido = xml_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None, {}
+    if not contenido:
+        return None, {}
+    try:
+        root = ET.fromstring(contenido)
+    except ET.ParseError:
+        return None, {}
+    meta = {}
+    comprobante_xml = contenido
+    if root.tag.lower().endswith("autorizacion"):
+        meta = {
+            "estado": _texto_emitidos_retencion(root.findtext("estado")),
+            "numero_autorizacion": _texto_emitidos_retencion(root.findtext("numeroAutorizacion")),
+            "fecha_autorizacion": _texto_emitidos_retencion(root.findtext("fechaAutorizacion")),
+            "ambiente": _texto_emitidos_retencion(root.findtext("ambiente")),
+        }
+        comprobante_xml = root.findtext("comprobante") or ""
+    try:
+        comprobante_root = ET.fromstring(comprobante_xml)
+    except ET.ParseError:
+        return None, meta
+    _strip_xml_namespaces(comprobante_root)
+    return comprobante_root, meta
+
+
+def _extraer_datos_xml_nota_credito_emitido(xml_path: Path) -> dict:
+    row = _nota_credito_emitidos_default_row()
+    root, meta = _extraer_xml_emitidos_autorizacion(xml_path)
+    if root is None:
+        return row
+
+    info_trib = root.find("infoTributaria")
+    info_nc = root.find("infoNotaCredito")
+    detalles = root.findall(".//detalles/detalle")
+
+    row["Estado"] = _texto_emitidos_retencion(meta.get("estado"), "AUTORIZADO")
+    row["Número de Autorización"] = _texto_emitidos_retencion(meta.get("numero_autorizacion"))
+    row["Fecha de Autorización"] = _texto_emitidos_retencion(meta.get("fecha_autorizacion"))
+
+    if info_trib is not None:
+        cod_doc = _texto_emitidos_retencion(info_trib.findtext("codDoc"))
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(info_trib.findtext("ambiente") or meta.get("ambiente"))
+        row["Razón Social Emisor"] = _texto_emitidos_retencion(info_trib.findtext("razonSocial"))
+        row["Nombre Comercial"] = _texto_emitidos_retencion_na(info_trib.findtext("nombreComercial"))
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(info_trib.findtext("tipoEmision"))
+        row["Código del Documento"] = EMITIDOS_RETENCION_DOC_CODE_LABEL.get(cod_doc, cod_doc or "No Disponible")
+        row["Establecimiento"] = _texto_emitidos_retencion(info_trib.findtext("estab"))
+        row["Punto de Emisión"] = _texto_emitidos_retencion(info_trib.findtext("ptoEmi"))
+        row["Secuencial"] = _texto_emitidos_retencion(info_trib.findtext("secuencial"))
+        row["Dirección Matriz"] = _texto_emitidos_retencion(info_trib.findtext("dirMatriz"))
+        row["RUC Emisor"] = _texto_emitidos_retencion(info_trib.findtext("ruc"))
+        row["Clave de Acceso"] = _texto_emitidos_retencion(info_trib.findtext("claveAcceso"))
+
+    if info_nc is not None:
+        row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(info_nc.findtext("dirEstablecimiento"))
+        row["Obligado Contabilidad"] = _texto_emitidos_retencion_na(info_nc.findtext("obligadoContabilidad"))
+        row["Tipo Identificación Comprador"] = _label_tipo_ident_emitidos_nota_credito(
+            info_nc.findtext("tipoIdentificacionComprador")
+        )
+        row["Identificación Comprador"] = _texto_emitidos_retencion_na(info_nc.findtext("identificacionComprador"))
+        row["Fecha de Emisión"] = _texto_emitidos_retencion(info_nc.findtext("fechaEmision"))
+        row["Razón Social Comprador"] = _texto_emitidos_retencion_na(info_nc.findtext("razonSocialComprador"))
+        row["Moneda"] = _texto_emitidos_retencion_na(info_nc.findtext("moneda"))
+        row["Código Documento Modificado"] = _texto_emitidos_retencion_na(info_nc.findtext("codDocModificado"))
+        row["Número Documento Modificado"] = _texto_emitidos_retencion_na(info_nc.findtext("numDocModificado"))
+        row["Fecha Emisión Doc. Sustento"] = _texto_emitidos_retencion_na(info_nc.findtext("fechaEmisionDocSustento"))
+        row["Motivo"] = _texto_emitidos_retencion_na(info_nc.findtext("motivo"))
+        row["Valor Modificación"] = _numero_emitidos_retencion(info_nc.findtext("valorModificacion"))
+        row["Total Sin Impuestos"] = _numero_emitidos_retencion(info_nc.findtext("totalSinImpuestos"))
+
+    detalle_textos = []
+    base_gravada = 0
+    base_no_gravada = 0
+    monto_iva = 0
+    base_gravada_15 = 0
+    monto_iva_15 = 0
+    tarifas = []
+    for detalle in detalles:
+        codigo = _texto_emitidos_retencion(detalle.findtext("codigoInterno") or detalle.findtext("codigoPrincipal"))
+        descripcion = (detalle.findtext("descripcion") or "").strip()
+        cantidad = _texto_emitidos_retencion(detalle.findtext("cantidad"))
+        precio_unitario = _texto_emitidos_retencion(detalle.findtext("precioUnitario"))
+        partes = []
+        if codigo:
+            partes.append(f"Código: {codigo}")
+        if descripcion:
+            partes.append(f"Desc: {descripcion}")
+        if cantidad:
+            partes.append(f"Cant: {cantidad}")
+        if precio_unitario:
+            partes.append(f"P.Unit: {precio_unitario}")
+        if partes:
+            detalle_textos.append(", ".join(partes))
+
+        for imp in detalle.findall("./impuestos/impuesto"):
+            codigo = _texto_emitidos_retencion(imp.findtext("codigo"))
+            codigo_pct = _texto_emitidos_retencion(imp.findtext("codigoPorcentaje"))
+            tarifa = _numero_emitidos_retencion(imp.findtext("tarifa"))
+            base = _numero_emitidos_retencion(imp.findtext("baseImponible"))
+            valor = _numero_emitidos_retencion(imp.findtext("valor"))
+            if codigo == "2":
+                if codigo_pct == "0":
+                    base_no_gravada += base
+                else:
+                    base_gravada += base
+                    monto_iva += valor
+                    if codigo_pct == "4":
+                        base_gravada_15 += base
+                        monto_iva_15 += valor
+                if tarifa:
+                    etiqueta = f"{int(tarifa) if float(tarifa).is_integer() else tarifa}%"
+                    if etiqueta not in tarifas:
+                        tarifas.append(etiqueta)
+
+    row["Descripciones"] = " | ".join(detalle_textos)
+    row["Forma Pago"] = "No Disponible - No Disponible"
+    row["Total Sin Impuestos"] = row["Total Sin Impuestos"] or base_gravada or base_no_gravada
+    row["Base Gravada"] = base_gravada
+    row["Base No Gravada"] = base_no_gravada
+    row["Tarifas IVA"] = ", ".join(tarifas)
+    row["Monto IVA"] = monto_iva
+    row["Importe Total"] = row["Valor Modificación"] or (row["Total Sin Impuestos"] + row["Monto IVA"])
+    row["Total Pago"] = 0
+    row["Base Gravada 15%"] = base_gravada_15
+    row["Monto IVA 15%"] = monto_iva_15
+
+    adicionales = []
+    for campo in root.findall(".//infoAdicional/campoAdicional"):
+        nombre = _texto_emitidos_retencion(campo.attrib.get("nombre"))
+        valor = _texto_emitidos_retencion(campo.text)
+        if nombre or valor:
+            adicionales.append(f"{nombre}: {valor}".strip(": "))
+    if adicionales:
+        row["Campos Adicionales"] = "; ".join(adicionales)
+
+    return row
+
+
+def _extraer_datos_xml_nota_debito_emitido(xml_path: Path) -> dict:
+    row = _nota_debito_emitidos_default_row()
+    root, meta = _extraer_xml_emitidos_autorizacion(xml_path)
+    if root is None:
+        return row
+
+    info_trib = root.find("infoTributaria")
+    info_nd = root.find("infoNotaDebito")
+
+    row["Estado"] = _texto_emitidos_retencion(meta.get("estado"), "AUTORIZADO")
+    row["Número de Autorización"] = _texto_emitidos_retencion(meta.get("numero_autorizacion"))
+    row["Fecha de Autorización"] = _texto_emitidos_retencion(meta.get("fecha_autorizacion"))
+
+    if info_trib is not None:
+        cod_doc = _texto_emitidos_retencion(info_trib.findtext("codDoc"))
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(info_trib.findtext("ambiente") or meta.get("ambiente"))
+        row["Razón Social Emisor"] = _texto_emitidos_retencion(info_trib.findtext("razonSocial"))
+        row["Nombre Comercial"] = _texto_emitidos_retencion_na(
+            info_trib.findtext("nombreComercial") or info_trib.findtext("razonSocial")
+        )
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(info_trib.findtext("tipoEmision"))
+        row["Código del Documento"] = EMITIDOS_RETENCION_DOC_CODE_LABEL.get(cod_doc, "05 - NOTA DE DÉBITO")
+        row["Establecimiento"] = _texto_emitidos_retencion(info_trib.findtext("estab"))
+        row["Punto de Emisión"] = _texto_emitidos_retencion(info_trib.findtext("ptoEmi"))
+        row["Secuencial"] = _texto_emitidos_retencion(info_trib.findtext("secuencial"))
+        row["Dirección Matriz"] = _texto_emitidos_retencion_na(info_trib.findtext("dirMatriz"))
+        row["RUC Emisor"] = _texto_emitidos_retencion(info_trib.findtext("ruc"))
+        row["Clave de Acceso"] = _texto_emitidos_retencion(info_trib.findtext("claveAcceso"))
+
+    if info_nd is not None:
+        row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(
+            info_nd.findtext("dirEstablecimiento") or row["Dirección Matriz"]
+        )
+        obligado = _texto_emitidos_retencion(info_nd.findtext("obligadoContabilidad"))
+        row["Obligado Contabilidad"] = obligado if obligado in {"SI", "NO"} else "No Disponible"
+        row["Tipo Identificación Comprador"] = _label_tipo_ident_emitidos_nota_credito(
+            info_nd.findtext("tipoIdentificacionComprador")
+        )
+        row["Identificación Comprador"] = _texto_emitidos_retencion_na(info_nd.findtext("identificacionComprador"))
+        row["Fecha de Emisión"] = _texto_emitidos_retencion(info_nd.findtext("fechaEmision"))
+        row["Razón Social Comprador"] = _texto_emitidos_retencion_na(info_nd.findtext("razonSocialComprador"))
+        row["Moneda"] = _texto_emitidos_retencion_na(info_nd.findtext("moneda") or "DOLAR")
+        row["Código Documento Modificado"] = _texto_emitidos_retencion_na(info_nd.findtext("codDocModificado"))
+        row["Número Documento Modificado"] = _texto_emitidos_retencion_na(info_nd.findtext("numDocModificado"))
+        row["Fecha Emisión Doc. Sustento"] = _texto_emitidos_retencion_na(info_nd.findtext("fechaEmisionDocSustento"))
+        row["Total Sin Impuestos"] = _numero_emitidos_retencion(info_nd.findtext("totalSinImpuestos"))
+        row["Importe Total"] = _numero_emitidos_retencion(info_nd.findtext("valorTotal"))
+
+        pago = info_nd.find("./pagos/pago")
+        if pago is not None:
+            forma = _label_forma_pago_emitidos_retencion(pago.findtext("formaPago"))
+            row["Forma Pago"] = f"{forma} - {forma}" if forma != "No Disponible" else "No Disponible - No Disponible"
+            row["Total Pago"] = _numero_emitidos_retencion(
+                pago.findtext("total") or info_nd.findtext("valorTotal")
+            )
+            row["Plazo Pago"] = _texto_emitidos_retencion_na(pago.findtext("plazo"))
+            row["Unidad Tiempo Pago"] = _texto_emitidos_retencion_na(pago.findtext("unidadTiempo"))
+        else:
+            row["Forma Pago"] = "No Disponible - No Disponible"
+            row["Total Pago"] = row["Importe Total"]
+
+    base_gravada = 0
+    base_no_gravada = 0
+    monto_iva = 0
+    base_gravada_15 = 0
+    monto_iva_15 = 0
+    tarifas = []
+    for imp in root.findall(".//impuestos/impuesto"):
+        codigo = _texto_emitidos_retencion(imp.findtext("codigo"))
+        codigo_pct = _texto_emitidos_retencion(imp.findtext("codigoPorcentaje"))
+        tarifa = _numero_emitidos_retencion(imp.findtext("tarifa"))
+        base = _numero_emitidos_retencion(imp.findtext("baseImponible"))
+        valor = _numero_emitidos_retencion(imp.findtext("valor"))
+        if codigo == "2":
+            if codigo_pct == "0" or not tarifa:
+                base_no_gravada += base
+            else:
+                base_gravada += base
+                monto_iva += valor
+                if codigo_pct == "4" or abs(tarifa - 15) < 0.001:
+                    base_gravada_15 += base
+                    monto_iva_15 += valor
+            if tarifa:
+                etiqueta = f"{int(tarifa) if float(tarifa).is_integer() else tarifa}%"
+                if etiqueta not in tarifas:
+                    tarifas.append(etiqueta)
+
+    motivos = []
+    valor_modificacion = 0
+    for motivo in root.findall(".//motivos/motivo"):
+        razon = _texto_emitidos_retencion_na(motivo.findtext("razon"))
+        valor = _numero_emitidos_retencion(motivo.findtext("valor"))
+        if razon and razon != "No Disponible":
+            motivos.append(razon)
+        valor_modificacion += valor
+
+    row["Motivo"] = " | ".join(motivos) if motivos else row["Motivo"]
+    row["Descripciones"] = row["Motivo"] if row["Motivo"] != "No Disponible" else row["Descripciones"]
+    row["Valor Modificación"] = valor_modificacion or row["Importe Total"]
+    row["Base Gravada"] = base_gravada
+    row["Base No Gravada"] = base_no_gravada
+    row["Tarifas IVA"] = ", ".join(tarifas)
+    row["Monto IVA"] = monto_iva
+    row["Base Gravada 15%"] = base_gravada_15
+    row["Monto IVA 15%"] = monto_iva_15
+    if not row["Total Pago"]:
+        row["Total Pago"] = row["Importe Total"]
+
+    adicionales = []
+    for campo in root.findall(".//infoAdicional/campoAdicional"):
+        nombre = _texto_emitidos_retencion(campo.attrib.get("nombre"))
+        valor = _texto_emitidos_retencion(campo.text)
+        if nombre or valor:
+            adicionales.append(f"{nombre}: {valor}".strip(": "))
+    if adicionales:
+        row["Campos Adicionales"] = "; ".join(adicionales)
+
+    return row
+
 def _normalizar_texto_pdf(texto: str) -> str:
     return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
 
@@ -2135,6 +3038,1490 @@ def _extraer_datos_xml_retencion(xml_path: Path) -> dict:
     return datos
 
 
+def _extraer_datos_xml_retencion_emitido(xml_path: Path) -> dict:
+    row = _emitidos_retencion_default_row()
+    root, meta = _extraer_xml_emitidos_autorizacion(xml_path)
+    if root is None:
+        return row
+
+    info_trib = root.find("infoTributaria")
+    info_comp = root.find("infoCompRetencion")
+    doc_sustento = root.find(".//docsSustento/docSustento")
+
+    if info_trib is not None:
+        cod_doc = _texto_emitidos_retencion(info_trib.findtext("codDoc"))
+        row["Razón Social Emisor"] = _texto_emitidos_retencion(info_trib.findtext("razonSocial"))
+        row["Nombre Comercial"] = _texto_emitidos_retencion_na(info_trib.findtext("nombreComercial"))
+        row["Establecimiento"] = _texto_emitidos_retencion(info_trib.findtext("estab"))
+        row["Punto de Emisión"] = _texto_emitidos_retencion(info_trib.findtext("ptoEmi"))
+        row["Secuencial"] = _texto_emitidos_retencion(info_trib.findtext("secuencial"))
+        row["Dirección Matriz"] = _texto_emitidos_retencion(info_trib.findtext("dirMatriz"))
+        row["RUC Emisor"] = _texto_emitidos_retencion(info_trib.findtext("ruc"))
+        row["Clave de Acceso"] = _texto_emitidos_retencion(info_trib.findtext("claveAcceso"))
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(
+            info_trib.findtext("ambiente") or meta.get("ambiente")
+        )
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(info_trib.findtext("tipoEmision"))
+        row["Código del Documento"] = EMITIDOS_RETENCION_DOC_CODE_LABEL.get(cod_doc, cod_doc or "No Disponible")
+        row["Agente de Retención"] = _texto_emitidos_retencion_na(
+            info_trib.findtext("agenteRetencion") or root.findtext(".//agenteRetencion")
+        )
+
+    row["Estado"] = _texto_emitidos_retencion(meta.get("estado"), "AUTORIZADO")
+    row["Número de Autorización"] = _texto_emitidos_retencion(
+        meta.get("numero_autorizacion") or row.get("Clave de Acceso")
+    )
+    row["Fecha de Autorización"] = _texto_emitidos_retencion(meta.get("fecha_autorizacion"))
+
+    if info_comp is not None:
+        dir_est = _texto_emitidos_retencion_na(info_comp.findtext("dirEstablecimiento"))
+        obligado = _texto_emitidos_retencion_na(info_comp.findtext("obligadoContabilidad"))
+        row["Dir. Establecimiento"] = dir_est
+        row["Obligado Contabilidad"] = obligado
+        row["Fecha de Emisión"] = _texto_emitidos_retencion(info_comp.findtext("fechaEmision"))
+        row["Contribuyente Especial"] = _texto_emitidos_retencion_na(info_comp.findtext("contribuyenteEspecial"))
+        row["Obligado a llevar Contabilidad"] = obligado
+        row["Razón Social Sujeto Retenido"] = _texto_emitidos_retencion_na(
+            info_comp.findtext("razonSocialSujetoRetenido")
+        )
+        row["Identificación Sujeto Retenido"] = _texto_emitidos_retencion_na(
+            info_comp.findtext("identificacionSujetoRetenido")
+        )
+        row["Periodo Fiscal"] = _texto_emitidos_retencion_na(info_comp.findtext("periodoFiscal"))
+        row["Dirección del Establecimiento"] = dir_est
+        row["Tipo Identificación Sujeto Retenido"] = _texto_emitidos_retencion_na(
+            info_comp.findtext("tipoIdentificacionSujetoRetenido")
+        )
+        row["Parte Relacionada"] = _texto_emitidos_retencion_na(info_comp.findtext("parteRel"))
+
+    if doc_sustento is not None:
+        row["Código de Sustento"] = _texto_emitidos_retencion_na(doc_sustento.findtext("codSustento"))
+        row["Código del Documento de Sustento"] = _texto_emitidos_retencion_na(
+            doc_sustento.findtext("codDocSustento")
+        )
+        row["Número de Documento de Sustento"] = _texto_emitidos_retencion_na(
+            doc_sustento.findtext("numDocSustento")
+        )
+        row["Fecha de Emisión del Documento de Sustento"] = _texto_emitidos_retencion_na(
+            doc_sustento.findtext("fechaEmisionDocSustento")
+        )
+        row["Fecha de Registro Contable"] = _texto_emitidos_retencion_na(
+            doc_sustento.findtext("fechaRegistroContable")
+        )
+        row["Número de Autorización del Documento de Sustento"] = _texto_emitidos_retencion_na(
+            doc_sustento.findtext("numAutDocSustento")
+        )
+        row["Pago Local o Externo"] = _texto_emitidos_retencion_na(doc_sustento.findtext("pagoLocExt"))
+        row["Total Sin Impuestos"] = _numero_emitidos_retencion(doc_sustento.findtext("totalSinImpuestos"))
+        row["Importe Total"] = _numero_emitidos_retencion(doc_sustento.findtext("importeTotal"))
+
+        pago = doc_sustento.find("./pagos/pago")
+        if pago is not None:
+            row["Forma Pago"] = _label_forma_pago_emitidos_retencion(pago.findtext("formaPago"))
+            row["Total Pago"] = _numero_emitidos_retencion(
+                pago.findtext("total"),
+                row["Importe Total"],
+            )
+            row["Plazo Pago"] = _texto_emitidos_retencion_na(pago.findtext("plazo"))
+            row["Unidad Tiempo Pago"] = _texto_emitidos_retencion_na(pago.findtext("unidadTiempo"))
+        else:
+            row["Total Pago"] = row["Importe Total"]
+
+        impuesto_doc = doc_sustento.find("./impuestosDocSustento/impuestoDocSustento")
+        if impuesto_doc is not None:
+            row["Código Impuesto Doc. Sustento"] = _texto_emitidos_retencion_na(
+                impuesto_doc.findtext("codImpuestoDocSustento")
+            )
+            row["Código Porcentaje"] = _texto_emitidos_retencion_na(
+                impuesto_doc.findtext("codigoPorcentaje")
+            )
+            row["Base Imponible Impuesto"] = _numero_emitidos_retencion(impuesto_doc.findtext("baseImponible"))
+            row["Tarifa"] = _numero_emitidos_retencion(impuesto_doc.findtext("tarifa"))
+            row["Valor Impuesto"] = _numero_emitidos_retencion(impuesto_doc.findtext("valorImpuesto"))
+            row["Sustento Imp. 1 - Código"] = row["Código Impuesto Doc. Sustento"]
+            row["Sustento Imp. 1 - Cod. Porcentaje"] = row["Código Porcentaje"]
+            row["Sustento Imp. 1 - Base Imponible"] = row["Base Imponible Impuesto"]
+            row["Sustento Imp. 1 - Tarifa"] = row["Tarifa"]
+            row["Sustento Imp. 1 - Valor"] = row["Valor Impuesto"]
+
+        retenciones = doc_sustento.findall("./retenciones/retencion")
+    else:
+        row["Total Pago"] = row["Importe Total"]
+        retenciones = root.findall(".//impuestos/impuesto")
+
+    for idx, ret in enumerate(retenciones[:2], start=1):
+        codigo = _texto_emitidos_retencion(ret.findtext("codigo"))
+        row[f"Factura Ret. {idx} - Codigo"] = codigo or 0
+        row[f"Factura Ret. {idx} - Cod. Porcentaje"] = "N/A" if codigo else 0
+        row[f"Factura Ret. {idx} - Tarifa"] = 0
+        row[f"Factura Ret. {idx} - Valor"] = 0
+
+        if codigo == "1":
+            row["RENTA - codigoRetencion"] = _texto_emitidos_retencion(ret.findtext("codigoRetencion")) or 0
+            row["RENTA - baseImponible"] = _numero_emitidos_retencion(ret.findtext("baseImponible"))
+            row["RENTA - porcentajeRetener"] = _numero_emitidos_retencion(ret.findtext("porcentajeRetener"))
+            row["RENTA - valorRetenido"] = _numero_emitidos_retencion(ret.findtext("valorRetenido"))
+        elif codigo == "2":
+            row["IVA - codigoRetencion"] = _texto_emitidos_retencion(ret.findtext("codigoRetencion")) or 0
+            row["IVA - baseImponible"] = _numero_emitidos_retencion(ret.findtext("baseImponible"))
+            row["IVA - porcentajeRetener"] = _numero_emitidos_retencion(ret.findtext("porcentajeRetener"))
+            row["IVA - valorRetenido"] = _numero_emitidos_retencion(ret.findtext("valorRetenido"))
+
+    adicionales = []
+    for campo in root.findall(".//infoAdicional/campoAdicional"):
+        nombre = _texto_emitidos_retencion(campo.attrib.get("nombre"))
+        valor = _texto_emitidos_retencion(campo.text)
+        if nombre or valor:
+            adicionales.append(f"{nombre}: {valor}".strip(": "))
+    if adicionales:
+        row["Campos Adicionales"] = "; ".join(adicionales)
+    return row
+
+
+def _map_retencion_legada_a_emitidos_row(legacy: dict | None) -> dict:
+    row = _emitidos_retencion_default_row()
+    if not isinstance(legacy, dict):
+        return row
+    row["Razón Social Emisor"] = _texto_emitidos_retencion_na(legacy.get("razonSocialEmisor"))
+    row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(legacy.get("direccionSucursalEmisor"))
+    row["Obligado Contabilidad"] = _texto_emitidos_retencion_na(legacy.get("obligadoContabilidad"))
+    row["Nombre Comercial"] = _texto_emitidos_retencion_na(legacy.get("nombreComercial"))
+    row["Código del Documento"] = "07 - COMPROBANTE DE RETENCIÓN"
+    row["Establecimiento"] = _texto_emitidos_retencion(legacy.get("establecimiento"))
+    row["Punto de Emisión"] = _texto_emitidos_retencion(legacy.get("puntoEmision"))
+    row["Secuencial"] = _texto_emitidos_retencion(legacy.get("secuencial"))
+    row["Dirección Matriz"] = _texto_emitidos_retencion(legacy.get("direccionMatrizEmisor"))
+    row["RUC Emisor"] = _texto_emitidos_retencion(legacy.get("rucEmisor"))
+    row["Clave de Acceso"] = _texto_emitidos_retencion(legacy.get("claveAcceso"))
+    row["Fecha de Emisión"] = _texto_emitidos_retencion(legacy.get("fechaEmision"))
+    row["Fecha de Autorización"] = _texto_emitidos_retencion(legacy.get("fechaAutorizacion"))
+    row["Importe Total"] = _numero_emitidos_retencion(legacy.get("valorTotal"))
+    row["Total Sin Impuestos"] = _numero_emitidos_retencion(legacy.get("Base_Imponible_Ret_IR")) or _numero_emitidos_retencion(legacy.get("Base_Imponible_Ret_IVA"))
+    row["Total Pago"] = row["Importe Total"]
+    row["Agente de Retención"] = _texto_emitidos_retencion_na(legacy.get("numeroAgenteRetencion"))
+    row["Contribuyente Especial"] = _texto_emitidos_retencion_na(legacy.get("numeroContribuyenteEspecial"))
+    row["Obligado a llevar Contabilidad"] = row["Obligado Contabilidad"]
+    row["Razón Social Sujeto Retenido"] = _texto_emitidos_retencion_na(legacy.get("razonSocialSujetoRetenido"))
+    row["Identificación Sujeto Retenido"] = _texto_emitidos_retencion_na(legacy.get("identificacionSujetoRetenido"))
+    row["Periodo Fiscal"] = _texto_emitidos_retencion_na(legacy.get("Ejercicio_Fiscal"))
+    row["Dirección del Establecimiento"] = row["Dir. Establecimiento"]
+    row["Código del Documento de Sustento"] = _texto_emitidos_retencion_na(legacy.get("Comprobante_Sustento"))
+    row["Número de Documento de Sustento"] = _texto_emitidos_retencion_na(legacy.get("Numero_Sustento"))
+    row["Fecha de Emisión del Documento de Sustento"] = _texto_emitidos_retencion_na(legacy.get("Fecha_Emision_Sustento"))
+    row["Campos Adicionales"] = _texto_emitidos_retencion_na(legacy.get("informacionAdicional"))
+    row["RENTA - codigoRetencion"] = _texto_emitidos_retencion(legacy.get("Impuesto_Ret_IR")) or 0
+    row["RENTA - baseImponible"] = _numero_emitidos_retencion(legacy.get("Base_Imponible_Ret_IR"))
+    row["RENTA - porcentajeRetener"] = _numero_emitidos_retencion(legacy.get("Porcentaje_Ret_IR"))
+    row["RENTA - valorRetenido"] = _numero_emitidos_retencion(legacy.get("Valor_Retenido_IR"))
+    row["IVA - codigoRetencion"] = _texto_emitidos_retencion(legacy.get("Impuesto_Ret_IVA")) or 0
+    row["IVA - baseImponible"] = _numero_emitidos_retencion(legacy.get("Base_Imponible_Ret_IVA"))
+    row["IVA - porcentajeRetener"] = _numero_emitidos_retencion(legacy.get("Porcentaje_Ret_IVA"))
+    row["IVA - valorRetenido"] = _numero_emitidos_retencion(legacy.get("Valor_Retenido_IVA"))
+    if row["RENTA - codigoRetencion"]:
+        row["Factura Ret. 1 - Codigo"] = "1"
+        row["Factura Ret. 1 - Cod. Porcentaje"] = "N/A"
+    if row["IVA - codigoRetencion"]:
+        target = "1" if row["Factura Ret. 1 - Codigo"] == 0 else "2"
+        row[f"Factura Ret. {target} - Codigo"] = "2"
+        row[f"Factura Ret. {target} - Cod. Porcentaje"] = "N/A"
+    return row
+
+
+def _extraer_lineas_layout_pdf(pdf_path: Path, y_tolerance: float = 3.0) -> list[dict]:
+    if pdfplumber is None:
+        return []
+    try:
+        resultado = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_number, page in enumerate(pdf.pages, start=1):
+                words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
+                words = sorted(words, key=lambda item: (float(item.get("top", 0)), float(item.get("x0", 0))))
+                current_words = []
+                current_top = None
+                for word in words:
+                    word_top = float(word.get("top", 0.0))
+                    if current_top is None or abs(word_top - current_top) <= y_tolerance:
+                        current_words.append(word)
+                        current_top = word_top if current_top is None else current_top
+                        continue
+                    current_sorted = sorted(current_words, key=lambda item: float(item.get("x0", 0)))
+                    resultado.append({
+                        "page": page_number,
+                        "top": current_top,
+                        "text": " ".join((w.get("text", "") or "").strip() for w in current_sorted if (w.get("text", "") or "").strip()),
+                        "words": current_sorted,
+                    })
+                    current_words = [word]
+                    current_top = word_top
+                if current_words:
+                    current_sorted = sorted(current_words, key=lambda item: float(item.get("x0", 0)))
+                    resultado.append({
+                        "page": page_number,
+                        "top": current_top,
+                        "text": " ".join((w.get("text", "") or "").strip() for w in current_sorted if (w.get("text", "") or "").strip()),
+                        "words": current_sorted,
+                    })
+        return resultado
+    except Exception:
+        return []
+
+
+def _texto_linea_layout(linea: dict, min_x: float | None = None, max_x: float | None = None) -> str:
+    words = []
+    for word in linea.get("words", []):
+        x0 = float(word.get("x0", 0.0))
+        if min_x is not None and x0 < min_x:
+            continue
+        if max_x is not None and x0 > max_x:
+            continue
+        text = (word.get("text", "") or "").strip()
+        if text:
+            words.append(text)
+    return " ".join(words).strip()
+
+
+def _buscar_indice_linea_layout(lineas: list[dict], token: str, start: int = 0) -> int | None:
+    token_norm = _normalizar_label_simple(token)
+    for idx in range(start, len(lineas)):
+        texto = _normalizar_label_simple(lineas[idx].get("text", ""))
+        if token_norm in texto:
+            return idx
+    return None
+
+
+def _buscar_indice_linea_layout_exacta(lineas: list[dict], token: str, start: int = 0) -> int | None:
+    token_norm = _normalizar_label_simple(token)
+    for idx in range(start, len(lineas)):
+        texto = _normalizar_label_simple(lineas[idx].get("text", ""))
+        if texto == token_norm:
+            return idx
+    return None
+
+
+def _siguiente_linea_layout_no_vacia(lineas: list[dict], idx: int, min_x: float | None = None, max_x: float | None = None) -> str:
+    for pos in range(idx + 1, len(lineas)):
+        texto = _texto_linea_layout(lineas[pos], min_x=min_x, max_x=max_x)
+        if texto:
+            return texto
+    return ""
+
+
+def _fecha_hora_pdf_a_iso(valor: str) -> str:
+    valor = (valor or "").strip()
+    if not valor:
+        return ""
+    try:
+        dt = datetime.strptime(valor, "%d/%m/%Y %H:%M:%S")
+        return dt.strftime("%Y-%m-%dT%H:%M:%S-05:00")
+    except Exception:
+        return valor
+
+
+def _codigo_tipo_identificacion_desde_numero(identificacion: str, default: str = "No Disponible") -> str:
+    digits = re.sub(r"\D+", "", identificacion or "")
+    if len(digits) == 13:
+        return _label_tipo_ident_emitidos_nota_credito("04")
+    if len(digits) == 10:
+        return _label_tipo_ident_emitidos_nota_credito("05")
+    return default
+
+
+def _codigo_documento_sri(descripcion: str, default: str = "No Disponible") -> str:
+    texto_norm = _normalizar_label_simple(descripcion)
+    if "FACTURA" in texto_norm:
+        return "01"
+    if "LIQUIDACION" in texto_norm:
+        return "03"
+    if "CREDITO" in texto_norm:
+        return "04"
+    if "DEBITO" in texto_norm:
+        return "05"
+    if "GUIA" in texto_norm:
+        return "06"
+    if "RETENCION" in texto_norm:
+        return "07"
+    return default
+
+
+def _combinar_rows_emitidos_especificos(primary: dict, secondary: dict | None) -> dict:
+    if not isinstance(secondary, dict):
+        return primary
+    result = dict(primary)
+    for key, value in secondary.items():
+        current = result.get(key)
+        if current in ("", None) and value not in ("", None):
+            result[key] = value
+    return result
+
+
+def _extraer_campos_adicionales_por_layout(lineas: list[dict], top_min: float, left_max: float = 320.0) -> str:
+    adicionales = []
+    for linea in lineas:
+        if float(linea.get("top", 0.0)) <= top_min:
+            continue
+        texto = _texto_linea_layout(linea, max_x=left_max)
+        if not texto or ":" not in texto:
+            continue
+        etiqueta, valor = texto.split(":", 1)
+        etiqueta = etiqueta.strip()
+        valor = valor.strip()
+        if not etiqueta or not valor:
+            continue
+        if _normalizar_label_simple(etiqueta) == "INFORMACION ADICIONAL":
+            continue
+        adicionales.append(f"{etiqueta}: {valor}")
+    return "; ".join(adicionales)
+
+
+def _extraer_bloque_direccion_layout(
+    lineas: list[dict],
+    idx_inicio: int | None,
+    *,
+    max_x: float = 320.0,
+    stop_tokens: tuple[str, ...] = ("SUCURSAL", "CLAVE DE ACCESO", "CONTRIBUYENTE", "OBLIGADO"),
+) -> str:
+    if idx_inicio is None:
+        return ""
+    partes = []
+    for pos in range(idx_inicio + 1, min(idx_inicio + 6, len(lineas))):
+        texto = _texto_linea_layout(lineas[pos], max_x=max_x)
+        if not texto:
+            continue
+        normalizado = _normalizar_label_simple(texto)
+        if normalizado in {"MATRIZ", "DIRECCION", "DIRECCION MATRIZ"}:
+            continue
+        if any(token in normalizado for token in stop_tokens):
+            break
+        if "EMISION" in normalizado:
+            texto = re.split(r"(?i)\bEMISION\b", texto)[0].strip(" :-")
+        if texto:
+            partes.append(texto)
+    return " ".join(partes).strip()
+
+
+def _extraer_items_emitidos_layout(
+    lineas: list[dict],
+    *,
+    top_inicio: float,
+    top_fin: float,
+) -> list[dict]:
+    region = [ln for ln in lineas if top_inicio < float(ln.get("top", 0.0)) < top_fin]
+    items = []
+    idx = 0
+    while idx < len(region):
+        texto = region[idx].get("text", "") or ""
+        texto_norm = _normalizar_label_simple(texto)
+        if "SUBTOTAL" in texto_norm:
+            break
+        if any(token in texto_norm for token in ("PRINCIPAL AUXILIAR", "CANTIDAD DESCRIPCION", "COD COD", "PRECIO UNITARIO")):
+            idx += 1
+            continue
+        match = re.match(r"^([A-Z0-9.\-]+)\s+([A-Z0-9.\-]+)\s+(.+)$", texto.strip(), flags=re.IGNORECASE)
+        if not match:
+            idx += 1
+            continue
+        codigo_pref, codigo_aux_pref, descripcion = match.groups()
+        if not re.search(r"\d", codigo_pref):
+            idx += 1
+            continue
+        cantidad = ""
+        precio_unitario = ""
+        if idx + 1 < len(region):
+            numeros = re.findall(r"\d+(?:\.\d+)?", region[idx + 1].get("text", ""))
+            if numeros:
+                cantidad = numeros[0]
+            if len(numeros) > 1:
+                precio_unitario = numeros[1]
+        codigo = codigo_pref
+        descripcion_partes = [descripcion.strip()]
+        if idx + 2 < len(region):
+            cont = region[idx + 2].get("text", "") or ""
+            cont_match = re.match(r"^([A-Z0-9.\-]+)\s+([A-Z0-9.\-]+)\s+(.+)$", cont.strip(), flags=re.IGNORECASE)
+            if cont_match:
+                suf1, _suf2, desc_tail = cont_match.groups()
+                if codigo_pref.endswith("-") and re.fullmatch(r"[A-Z0-9]+", suf1):
+                    codigo = f"{codigo_pref}{suf1}"
+                if desc_tail:
+                    descripcion_partes.append(desc_tail.strip())
+                idx += 3
+            else:
+                idx += 2
+        else:
+            idx += 1
+        items.append(
+            {
+                "codigo": codigo.strip(),
+                "auxiliar": codigo_aux_pref.strip(),
+                "descripcion": " ".join(fragment for fragment in descripcion_partes if fragment).strip(),
+                "cantidad": cantidad.strip(),
+                "precio_unitario": precio_unitario.strip(),
+            }
+        )
+    return items
+
+
+def _formatear_descripciones_emitidos(items: list[dict], *, incluir_auxiliar: bool = False) -> str:
+    partes = []
+    for item in items:
+        codigo = (item.get("codigo") or "").strip()
+        descripcion = (item.get("descripcion") or "").strip()
+        cantidad = _formatear_cantidad_emitidos(item.get("cantidad") or "")
+        precio_unitario = _formatear_precio_emitidos(item.get("precio_unitario") or "")
+        fragmentos = [f"Código: {codigo}"]
+        if incluir_auxiliar:
+            fragmentos.append(f"Aux: {(item.get('auxiliar') or '').strip()}")
+        fragmentos.append(f"Desc: {descripcion}")
+        if cantidad:
+            fragmentos.append(f"Cant: {cantidad}")
+        if precio_unitario:
+            fragmentos.append(f"P.Unit: {precio_unitario}")
+        partes.append(", ".join(fragmentos))
+    return " ; ".join(partes)
+
+
+def _formatear_cantidad_emitidos(cantidad: str) -> str:
+    try:
+        valor = float(str(cantidad).replace(",", "."))
+    except Exception:
+        return (cantidad or "").strip()
+    if valor.is_integer():
+        return f"{valor:.4f}"
+    return (cantidad or "").strip()
+
+
+def _formatear_precio_emitidos(precio: str) -> str:
+    try:
+        valor = float(str(precio).replace(",", "."))
+    except Exception:
+        return (precio or "").strip()
+    return f"{valor:.5f}"
+
+
+def _extraer_campos_adicionales_emitidos_desde_texto(texto_pdf: str) -> str:
+    lineas = [ln.strip() for ln in (texto_pdf or "").splitlines() if ln.strip()]
+    inicio = None
+    for idx, linea in enumerate(lineas):
+        if "INFORMACION ADICIONAL" in _normalizar_label_simple(unicodedata.normalize("NFKD", linea).encode("ascii", "ignore").decode("ascii")):
+            inicio = idx + 1
+            break
+    if inicio is None:
+        return ""
+    adicionales = []
+    stop_tokens = (
+        "SUBTOTAL",
+        "TOTAL DESCUENTO",
+        "ICE",
+        "IRBPNR",
+        "PROPINA",
+        "VALOR TOTAL",
+        "FORMA DE PAGO VALOR",
+        "IVA 15",
+        "IVA 12",
+        "IVA 8",
+        "IVA 5",
+    )
+    for linea in lineas[inicio:]:
+        texto = linea
+        texto_norm = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+        normalized = _normalizar_label_simple(texto_norm)
+        for token in stop_tokens:
+            pos = normalized.find(token)
+            if pos != -1:
+                texto = texto[:pos].rstrip(" :-")
+                break
+        if not texto:
+            if any(token in normalized for token in stop_tokens):
+                break
+            continue
+        if ":" not in texto:
+            if any(token in normalized for token in stop_tokens):
+                break
+            if adicionales:
+                adicionales[-1] = f"{adicionales[-1]} {texto}".strip()
+            continue
+        etiqueta_norm = _normalizar_label_simple(texto.split(":", 1)[0])
+        if etiqueta_norm == "INFORMACION ADICIONAL":
+            continue
+        adicionales.append(texto)
+    return "; ".join(adicionales)
+
+
+def _extraer_datos_pdf_retencion_emitido(pdf_path: Path) -> dict:
+    lineas = _extraer_lineas_layout_pdf(pdf_path)
+    if not lineas:
+        return _map_retencion_legada_a_emitidos_row(_extraer_datos_pdf_retencion(pdf_path))
+
+    row = _emitidos_retencion_default_row()
+    row["Estado"] = "AUTORIZADO"
+    row["Código del Documento"] = "07 - COMPROBANTE DE RETENCIÓN"
+    row["Forma Pago"] = "20 - OTROS CON UTILIZACIÓN DEL SISTEMA FINANCIERO"
+    row["Pago Local o Externo"] = "01"
+    row["Código de Sustento"] = "06"
+    row["Moneda"] = "No Disponible"
+    row["Plazo Pago"] = "No Disponible"
+    row["Unidad Tiempo Pago"] = "No Disponible"
+    row["Tipo Identificación Comprador"] = "No Disponible - No Disponible"
+    row["Identificación Comprador"] = "No Disponible"
+    row["Razón Social Comprador"] = "No Disponible"
+    row["Dirección Comprador"] = "No Disponible"
+    row["Contribuyente RIMPE"] = "No Disponible"
+    row["Contribuyente Especial"] = "No Disponible"
+
+    texto = _leer_texto_pdf(pdf_path)
+    texto_norm = _normalizar_texto_pdf(texto)
+    auth = _extraer_regex(texto_norm, [r"(\d{49})"])
+    numero = _extraer_regex(texto_norm, [r"No\.\s*(\d{3}-\d{3}-\d{9})"])
+    ruc = _extraer_regex(texto_norm, [r"R\.U\.C\.\s*:?\s*(\d{13})"])
+    fecha_hora_auth = _extraer_regex(texto_norm, [r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})"])
+
+    row["Número de Autorización"] = auth or "No Disponible"
+    row["Clave de Acceso"] = auth or "No Disponible"
+    row["Fecha de Autorización"] = _fecha_hora_pdf_a_iso(fecha_hora_auth)
+    row["RUC Emisor"] = ruc or "No Disponible"
+    if numero:
+        row["Establecimiento"], row["Punto de Emisión"], row["Secuencial"] = numero.split("-")
+    if auth and len(auth) == 49:
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(auth[23])
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(auth[47])
+    else:
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(_extraer_regex(texto_norm, [r"AMBIENTE\s*:?\s*([A-ZÁÉÍÓÚÑ]+)"]))
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(_extraer_regex(texto_norm, [r"EMISI[ÓO]N\s*:?\s*([A-ZÁÉÍÓÚÑ]+)"]))
+
+    idx_num_aut = _buscar_indice_linea_layout(lineas, "NUMERO DE AUTORIZACION")
+    if idx_num_aut is not None:
+        row["Razón Social Emisor"] = _texto_emitidos_retencion_na(
+            _siguiente_linea_layout_no_vacia(lineas, idx_num_aut + 1, max_x=260)
+        )
+    idx_aut = _buscar_indice_linea_layout_exacta(lineas, "AUTORIZACION")
+    if idx_aut is not None:
+        for pos in range(idx_aut + 1, len(lineas)):
+            candidato = _texto_linea_layout(lineas[pos], max_x=260)
+            if candidato and candidato != row["Razón Social Emisor"]:
+                row["Nombre Comercial"] = _texto_emitidos_retencion_na(candidato)
+                break
+    idx_amb = _buscar_indice_linea_layout(lineas, "AMBIENTE")
+    if idx_amb is not None:
+        candidato = re.sub(r"(?i)\bAMBIENTE\s*:.*$", "", lineas[idx_amb].get("text", "")).strip()
+        if not candidato and idx_amb > 0:
+            candidato = _texto_linea_layout(lineas[idx_amb - 1], max_x=260)
+        if candidato and candidato != row["Razón Social Emisor"]:
+            row["Nombre Comercial"] = _texto_emitidos_retencion_na(candidato)
+
+    idx_matriz = _buscar_indice_linea_layout(lineas, "DIRECCION MATRIZ")
+    if idx_matriz is not None:
+        row["Dirección Matriz"] = _texto_emitidos_retencion_na(
+            _texto_linea_layout(lineas[idx_matriz], min_x=120, max_x=310)
+        )
+    idx_sucursal = _buscar_indice_linea_layout(lineas, "DIRECCION SUCURSAL")
+    if idx_sucursal is not None:
+        row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(
+            _texto_linea_layout(lineas[idx_sucursal], min_x=120, max_x=310)
+        )
+        row["Dirección del Establecimiento"] = row["Dir. Establecimiento"]
+
+    row["Obligado Contabilidad"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"OBLIGADO\s+A\s+LLEVAR\s+CONTABILIDAD\s*(SI|NO)"]))
+    row["Obligado a llevar Contabilidad"] = row["Obligado Contabilidad"]
+    row["Agente de Retención"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"AGENTE\s+DE\s+RETENCION\s+RESOLUCION\s+NO\.\s*([0-9]+)"]))
+
+    idx_razon = _buscar_indice_linea_layout(lineas, "RAZON SOCIAL / NOMBRES Y APELLIDOS")
+    if idx_razon is not None:
+        row["Razón Social Sujeto Retenido"] = _texto_emitidos_retencion_na(_texto_linea_layout(lineas[idx_razon], min_x=180))
+        row["Identificación Sujeto Retenido"] = _texto_emitidos_retencion_na(_siguiente_linea_layout_no_vacia(lineas, idx_razon, min_x=80, max_x=180))
+        row["Fecha de Emisión"] = _texto_emitidos_retencion_na(_siguiente_linea_layout_no_vacia(lineas, idx_razon + 1, min_x=80, max_x=180))
+
+    ident_sujeto = re.sub(r"\D+", "", row["Identificación Sujeto Retenido"])
+    tipo_id_sujeto = re.sub(r"\D+", "", row["Identificación Sujeto Retenido"])
+    if len(tipo_id_sujeto) == 13:
+        row["Tipo Identificación Sujeto Retenido"] = "04"
+    elif len(tipo_id_sujeto) == 10:
+        row["Tipo Identificación Sujeto Retenido"] = "05"
+
+    idx_info_adic = _buscar_indice_linea_layout(lineas, "INFORMACION ADICIONAL")
+    if idx_info_adic is not None:
+        row["Campos Adicionales"] = _texto_emitidos_retencion_na(_extraer_campos_adicionales_por_layout(lineas, float(lineas[idx_info_adic].get("top", 0.0))))
+
+    top_inicio_tabla = 0.0
+    idx_inicio_tabla = _buscar_indice_linea_layout(lineas, "COMPROBANTE NUMERO")
+    if idx_inicio_tabla is not None:
+        top_inicio_tabla = float(lineas[idx_inicio_tabla].get("top", 0.0))
+    top_fin_tabla = float(lineas[idx_info_adic].get("top", 9999.0)) if idx_info_adic is not None else 9999.0
+    lineas_tabla = [ln for ln in lineas if top_inicio_tabla < float(ln.get("top", 0.0)) < top_fin_tabla]
+
+    tipo_doc_sustento = ""
+    numero_doc_partes = []
+    fecha_doc_sustento = ""
+    periodo_fiscal = ""
+    iva_row = None
+    renta_row = None
+    renta_top = None
+
+    for linea in lineas_tabla:
+        texto_linea = linea.get("text", "")
+        texto_upper = _normalizar_label_simple(texto_linea)
+        izquierda = _texto_linea_layout(linea, max_x=75)
+        centro_num = [w.get("text", "") for w in linea.get("words", []) if 80 <= float(w.get("x0", 0.0)) <= 150 and re.fullmatch(r"\d+", (w.get("text", "") or ""))]
+        if izquierda and not tipo_doc_sustento and any(token in texto_upper for token in ("FACTURA", "LIQUIDACION", "NOTA", "GUIA")):
+            tipo_doc_sustento = izquierda
+        if centro_num:
+            numero_doc_partes.extend(centro_num)
+        if not fecha_doc_sustento:
+            fecha_match = re.search(r"\d{2}/\d{2}/\d{4}", texto_linea)
+            if fecha_match:
+                fecha_doc_sustento = fecha_match.group(0)
+        if not periodo_fiscal:
+            periodo_match = re.search(r"\d{2}/\d{4}", texto_linea)
+            if periodo_match:
+                periodo_fiscal = periodo_match.group(0)
+        if "IVA" in texto_upper:
+            nums = [w.get("text", "") for w in linea.get("words", []) if float(w.get("x0", 0.0)) >= 280 and re.fullmatch(r"\d+(?:\.\d+)?", (w.get("text", "") or ""))]
+            if len(nums) >= 3:
+                iva_row = tuple(nums[:3]) + (float(linea.get("top", 0.0)),)
+        if "RENTA" in texto_upper or "IMPUESTO A LA" in texto_upper:
+            renta_top = float(linea.get("top", 0.0))
+
+    base_candidates = []
+    for linea in lineas_tabla:
+        texto_upper = _normalizar_label_simple(linea.get("text", ""))
+        if "IVA" in texto_upper:
+            continue
+        nums = [w.get("text", "") for w in linea.get("words", []) if float(w.get("x0", 0.0)) >= 280 and re.fullmatch(r"\d+(?:\.\d+)?", (w.get("text", "") or ""))]
+        if len(nums) >= 3:
+            base_candidates.append((float(linea.get("top", 0.0)), nums[:3]))
+    if base_candidates:
+        if renta_top is not None:
+            base_candidates.sort(key=lambda item: abs(item[0] - renta_top))
+        renta_row = base_candidates[0]
+
+    numero_doc_sustento = "".join(numero_doc_partes)
+    row["Código del Documento de Sustento"] = _codigo_documento_sri(tipo_doc_sustento)
+    row["Número de Documento de Sustento"] = _texto_emitidos_retencion_na(numero_doc_sustento)
+    row["Fecha de Emisión del Documento de Sustento"] = _texto_emitidos_retencion_na(fecha_doc_sustento)
+    row["Fecha de Registro Contable"] = row["Fecha de Emisión"]
+    row["Periodo Fiscal"] = _texto_emitidos_retencion_na(periodo_fiscal)
+    row["Parte Relacionada"] = "No Disponible"
+    row["Número de Autorización del Documento de Sustento"] = "No Disponible"
+
+    renta_base = 0
+    if renta_row:
+        renta_base = _numero_emitidos_retencion(renta_row[1][0])
+        row["RENTA - baseImponible"] = renta_base
+        row["RENTA - porcentajeRetener"] = _numero_emitidos_retencion(renta_row[1][1])
+        row["RENTA - valorRetenido"] = _numero_emitidos_retencion(renta_row[1][2])
+        row["RENTA - codigoRetencion"] = 0
+
+    iva_top = None
+    if iva_row:
+        row["IVA - baseImponible"] = _numero_emitidos_retencion(iva_row[0])
+        row["IVA - porcentajeRetener"] = _numero_emitidos_retencion(iva_row[1])
+        row["IVA - valorRetenido"] = _numero_emitidos_retencion(iva_row[2])
+        row["IVA - codigoRetencion"] = 1
+        iva_top = iva_row[3]
+
+    total_sin_impuestos = renta_base or 0
+    row["Total Sin Impuestos"] = total_sin_impuestos
+    row["Base Gravada"] = 0
+    row["Base No Gravada"] = 0
+    row["Código Impuesto Doc. Sustento"] = "2" if total_sin_impuestos else "No Disponible"
+    row["Código Porcentaje"] = "4" if total_sin_impuestos else "No Disponible"
+    row["Base Imponible Impuesto"] = total_sin_impuestos if total_sin_impuestos else 0
+    row["Tarifa"] = 15 if total_sin_impuestos else 0
+    row["Valor Impuesto"] = round(total_sin_impuestos * 0.15, 2) if total_sin_impuestos else 0
+    row["Importe Total"] = round(total_sin_impuestos + row["Valor Impuesto"], 2) if total_sin_impuestos else 0
+    row["Total Pago"] = row["Importe Total"]
+    row["Sustento Imp. 1 - Código"] = row["Código Impuesto Doc. Sustento"]
+    row["Sustento Imp. 1 - Cod. Porcentaje"] = row["Código Porcentaje"]
+    row["Sustento Imp. 1 - Base Imponible"] = row["Base Imponible Impuesto"]
+    row["Sustento Imp. 1 - Tarifa"] = row["Tarifa"]
+    row["Sustento Imp. 1 - Valor"] = row["Valor Impuesto"]
+
+    conceptos = []
+    if iva_top is not None:
+        conceptos.append((iva_top, "2"))
+    if renta_row:
+        conceptos.append((renta_row[0], "1"))
+    conceptos.sort(key=lambda item: item[0])
+    for idx, (_, codigo) in enumerate(conceptos[:2], start=1):
+        row[f"Factura Ret. {idx} - Codigo"] = codigo
+        row[f"Factura Ret. {idx} - Cod. Porcentaje"] = "N/A"
+
+    legacy = _map_retencion_legada_a_emitidos_row(_extraer_datos_pdf_retencion(pdf_path))
+    return _combinar_rows_emitidos_especificos(row, legacy)
+
+
+def _map_nota_credito_legada_a_emitidos_row(legacy: dict | None) -> dict:
+    row = _nota_credito_emitidos_default_row()
+    if not isinstance(legacy, dict):
+        return row
+    row["Ambiente"] = _label_ambiente_emitidos_retencion(legacy.get("ambiente"))
+    row["Razón Social Emisor"] = _texto_emitidos_retencion_na(legacy.get("razonSocialEmisor"))
+    row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(legacy.get("direccionSucursalEmisor"))
+    row["Obligado Contabilidad"] = _texto_emitidos_retencion_na(legacy.get("obligadoContabilidad"))
+    row["Tipo Identificación Comprador"] = "No Disponible"
+    row["Identificación Comprador"] = _texto_emitidos_retencion_na(legacy.get("identificacionComprador"))
+    row["Tipo Emisión"] = _label_emision_emitidos_retencion(legacy.get("emision"))
+    row["Nombre Comercial"] = _texto_emitidos_retencion_na(legacy.get("nombreComercial"))
+    row["Código del Documento"] = "04 - NOTA DE CRÉDITO"
+    row["Establecimiento"] = _texto_emitidos_retencion(legacy.get("establecimiento"))
+    row["Punto de Emisión"] = _texto_emitidos_retencion(legacy.get("puntoEmision"))
+    row["Secuencial"] = _texto_emitidos_retencion(legacy.get("secuencial"))
+    row["Dirección Matriz"] = _texto_emitidos_retencion(legacy.get("direccionMatrizEmisor"))
+    row["Contribuyente RIMPE"] = _texto_emitidos_retencion_na(legacy.get("tipoContribuyenteRIMPE"))
+    row["RUC Emisor"] = _texto_emitidos_retencion(legacy.get("rucEmisor"))
+    row["Clave de Acceso"] = _texto_emitidos_retencion(legacy.get("claveAcceso"))
+    row["Fecha de Emisión"] = _texto_emitidos_retencion(legacy.get("fechaEmision"))
+    row["Fecha de Autorización"] = _texto_emitidos_retencion(legacy.get("fechaAutorizacion"))
+    row["Razón Social Comprador"] = _texto_emitidos_retencion_na(legacy.get("razonSocialComprador"))
+    row["Dirección Comprador"] = _texto_emitidos_retencion_na(legacy.get("direccionComprador"))
+    row["Moneda"] = "No Disponible"
+    row["Plazo Pago"] = "No Disponible"
+    row["Unidad Tiempo Pago"] = "No Disponible"
+    row["Descripciones"] = _texto_emitidos_retencion(legacy.get("descripcionesProductos"))
+    row["Forma Pago"] = "No Disponible - No Disponible"
+    row["Total Sin Impuestos"] = _numero_emitidos_retencion(legacy.get("subtotalSinImpuestos"))
+    row["Base Gravada"] = _numero_emitidos_retencion(legacy.get("subtotal15")) or _numero_emitidos_retencion(legacy.get("subtotal12")) or _numero_emitidos_retencion(legacy.get("subtotal8")) or _numero_emitidos_retencion(legacy.get("subtotal5"))
+    row["Base No Gravada"] = _numero_emitidos_retencion(legacy.get("subtotal0"))
+    if _numero_emitidos_retencion(legacy.get("iva15")):
+        row["Tarifas IVA"] = "15%"
+    elif _numero_emitidos_retencion(legacy.get("iva12")):
+        row["Tarifas IVA"] = "12%"
+    elif _numero_emitidos_retencion(legacy.get("iva8")):
+        row["Tarifas IVA"] = "8%"
+    elif _numero_emitidos_retencion(legacy.get("iva5")):
+        row["Tarifas IVA"] = "5%"
+    row["Monto IVA"] = _numero_emitidos_retencion(legacy.get("iva15")) or _numero_emitidos_retencion(legacy.get("iva12")) or _numero_emitidos_retencion(legacy.get("iva8")) or _numero_emitidos_retencion(legacy.get("iva5"))
+    row["Total Descuento"] = _numero_emitidos_retencion(legacy.get("totalDescuento"))
+    row["Propina"] = _numero_emitidos_retencion(legacy.get("propina"))
+    row["Importe Total"] = _numero_emitidos_retencion(legacy.get("valorTotal"))
+    row["Total Pago"] = 0
+    row["Código Documento Modificado"] = _texto_emitidos_retencion_na(legacy.get("comprobanteModificado"))
+    row["Número Documento Modificado"] = _texto_emitidos_retencion_na(legacy.get("comprobanteModificado"))
+    row["Fecha Emisión Doc. Sustento"] = _texto_emitidos_retencion_na(legacy.get("fechaEmisionModificado"))
+    row["Motivo"] = _texto_emitidos_retencion_na(legacy.get("razonModificacion"))
+    row["Valor Modificación"] = _numero_emitidos_retencion(legacy.get("valorModificacion"))
+    row["Campos Adicionales"] = _texto_emitidos_retencion_na(legacy.get("informacionAdicional"))
+    row["Base Gravada 15%"] = _numero_emitidos_retencion(legacy.get("subtotal15"))
+    row["Monto IVA 15%"] = _numero_emitidos_retencion(legacy.get("iva15"))
+    return row
+
+
+def _map_nota_debito_legada_a_emitidos_row(legacy: dict | None) -> dict:
+    row = _nota_debito_emitidos_default_row()
+    if not isinstance(legacy, dict):
+        return row
+    row["Ambiente"] = _label_ambiente_emitidos_retencion(legacy.get("ambiente"))
+    row["Razón Social Emisor"] = _texto_emitidos_retencion_na(legacy.get("razonSocialEmisor"))
+    row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(
+        legacy.get("direccionSucursalEmisor") or legacy.get("direccionMatrizEmisor")
+    )
+    obligado = _texto_emitidos_retencion(legacy.get("obligadoContabilidad"))
+    row["Obligado Contabilidad"] = obligado if obligado in {"SI", "NO"} else "No Disponible"
+    row["Tipo Identificación Comprador"] = _label_tipo_ident_emitidos_nota_credito(
+        _codigo_tipo_identificacion_desde_numero(legacy.get("identificacionComprador"))
+    )
+    row["Identificación Comprador"] = _texto_emitidos_retencion_na(legacy.get("identificacionComprador"))
+    row["Tipo Emisión"] = _label_emision_emitidos_retencion(legacy.get("emision"))
+    row["Nombre Comercial"] = _texto_emitidos_retencion_na(
+        legacy.get("nombreComercial") or legacy.get("razonSocialEmisor")
+    )
+    row["Código del Documento"] = "05 - NOTA DE DÉBITO"
+    row["Establecimiento"] = _texto_emitidos_retencion(legacy.get("establecimiento"))
+    row["Punto de Emisión"] = _texto_emitidos_retencion(legacy.get("puntoEmision"))
+    row["Secuencial"] = _texto_emitidos_retencion(legacy.get("secuencial"))
+    row["Dirección Matriz"] = _texto_emitidos_retencion_na(legacy.get("direccionMatrizEmisor"))
+    row["Contribuyente RIMPE"] = _texto_emitidos_retencion_na(legacy.get("tipoContribuyenteRIMPE"))
+    row["RUC Emisor"] = _texto_emitidos_retencion(legacy.get("rucEmisor"))
+    row["Clave de Acceso"] = _texto_emitidos_retencion(legacy.get("claveAcceso"))
+    row["Fecha de Emisión"] = _texto_emitidos_retencion(legacy.get("fechaEmision"))
+    row["Fecha de Autorización"] = _texto_emitidos_retencion(legacy.get("fechaAutorizacion"))
+    row["Razón Social Comprador"] = _texto_emitidos_retencion_na(legacy.get("razonSocialComprador"))
+    row["Dirección Comprador"] = _texto_emitidos_retencion_na(legacy.get("direccionComprador"))
+    row["Moneda"] = "No Disponible"
+    row["Plazo Pago"] = "No Disponible"
+    row["Unidad Tiempo Pago"] = "No Disponible"
+    row["Descripciones"] = _texto_emitidos_retencion(legacy.get("descripcionesProductos"))
+    row["Forma Pago"] = "No Disponible - No Disponible"
+    row["Total Sin Impuestos"] = _numero_emitidos_retencion(legacy.get("subtotalSinImpuestos"))
+    row["Base Gravada"] = (
+        _numero_emitidos_retencion(legacy.get("subtotal15"))
+        or _numero_emitidos_retencion(legacy.get("subtotal12"))
+        or _numero_emitidos_retencion(legacy.get("subtotal8"))
+        or _numero_emitidos_retencion(legacy.get("subtotal5"))
+    )
+    row["Base No Gravada"] = _numero_emitidos_retencion(legacy.get("subtotal0"))
+    if _numero_emitidos_retencion(legacy.get("iva15")):
+        row["Tarifas IVA"] = "15%"
+    elif _numero_emitidos_retencion(legacy.get("iva12")):
+        row["Tarifas IVA"] = "12%"
+    elif _numero_emitidos_retencion(legacy.get("iva8")):
+        row["Tarifas IVA"] = "8%"
+    elif _numero_emitidos_retencion(legacy.get("iva5")):
+        row["Tarifas IVA"] = "5%"
+    row["Monto IVA"] = (
+        _numero_emitidos_retencion(legacy.get("iva15"))
+        or _numero_emitidos_retencion(legacy.get("iva12"))
+        or _numero_emitidos_retencion(legacy.get("iva8"))
+        or _numero_emitidos_retencion(legacy.get("iva5"))
+    )
+    row["Total Descuento"] = _numero_emitidos_retencion(legacy.get("totalDescuento"))
+    row["Propina"] = _numero_emitidos_retencion(legacy.get("propina"))
+    row["Importe Total"] = _numero_emitidos_retencion(legacy.get("valorTotal"))
+    row["Total Pago"] = row["Importe Total"]
+    row["Código Documento Modificado"] = _codigo_documento_sri(legacy.get("comprobanteModificado"))
+    row["Número Documento Modificado"] = _texto_emitidos_retencion_na(
+        _extraer_regex(_texto_emitidos_retencion(legacy.get("comprobanteModificado")), [r"(\d{3}-\d{3}-\d{9})"])
+        or legacy.get("comprobanteModificado")
+    )
+    row["Fecha Emisión Doc. Sustento"] = _texto_emitidos_retencion_na(legacy.get("fechaEmisionModificado"))
+    row["Motivo"] = _texto_emitidos_retencion_na(legacy.get("razonModificacion"))
+    row["Valor Modificación"] = _numero_emitidos_retencion(legacy.get("valorModificacion")) or row["Importe Total"]
+    row["Campos Adicionales"] = _texto_emitidos_retencion_na(legacy.get("informacionAdicional"))
+    row["Base Gravada 15%"] = _numero_emitidos_retencion(legacy.get("subtotal15"))
+    row["Monto IVA 15%"] = _numero_emitidos_retencion(legacy.get("iva15"))
+    return row
+
+
+def _extraer_datos_pdf_nota_credito_emitido(pdf_path: Path) -> dict:
+    lineas = _extraer_lineas_layout_pdf(pdf_path)
+    if not lineas:
+        return _map_nota_credito_legada_a_emitidos_row(_extraer_datos_pdf_nota_credito(pdf_path))
+
+    row = _nota_credito_emitidos_default_row()
+    row["Estado"] = "AUTORIZADO"
+    row["Código del Documento"] = "04 - NOTA DE CRÉDITO"
+    row["Forma Pago"] = "No Disponible - No Disponible"
+    row["Moneda"] = "DOLAR"
+    row["Plazo Pago"] = "No Disponible"
+    row["Unidad Tiempo Pago"] = "No Disponible"
+    row["Contribuyente RIMPE"] = "No Disponible"
+
+    texto = _leer_texto_pdf(pdf_path)
+    texto_norm = _normalizar_texto_pdf(texto)
+    auth = _extraer_regex(texto_norm, [r"(\d{49})"])
+    numero = _extraer_regex(texto_norm, [r"No\.\s*(\d{3}-\d{3}-\d{9})"])
+    ruc = _extraer_regex(texto_norm, [r"R\.U\.C\.\s*:?\s*(\d{13})"])
+    fecha_hora_auth = _extraer_regex(texto_norm, [r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})"])
+    row["Número de Autorización"] = auth or "No Disponible"
+    row["Clave de Acceso"] = auth or "No Disponible"
+    row["Fecha de Autorización"] = _fecha_hora_pdf_a_iso(fecha_hora_auth)
+    row["RUC Emisor"] = ruc or "No Disponible"
+    if numero:
+        row["Establecimiento"], row["Punto de Emisión"], row["Secuencial"] = numero.split("-")
+    if auth and len(auth) == 49:
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(auth[23])
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(auth[47])
+    else:
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(_extraer_regex(texto_norm, [r"AMBIENTE\s*:?\s*([A-ZÁÉÍÓÚÑ]+)"]))
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(_extraer_regex(texto_norm, [r"EMISI[ÓO]N\s*:?\s*([A-ZÁÉÍÓÚÑ]+)"]))
+
+    idx_num_aut = _buscar_indice_linea_layout(lineas, "NUMERO DE AUTORIZACION")
+    if idx_num_aut is not None:
+        row["Razón Social Emisor"] = _texto_emitidos_retencion_na(
+            _siguiente_linea_layout_no_vacia(lineas, idx_num_aut + 1, max_x=260)
+        )
+    idx_aut = _buscar_indice_linea_layout_exacta(lineas, "AUTORIZACION")
+    if idx_aut is not None:
+        for pos in range(idx_aut + 1, len(lineas)):
+            candidato = _texto_linea_layout(lineas[pos], max_x=260)
+            if candidato and candidato != row["Razón Social Emisor"]:
+                row["Nombre Comercial"] = _texto_emitidos_retencion_na(candidato)
+                break
+
+    match_matriz = re.search(r"Direccion\s+(.+?)\s+EMISION\s*:\s*[A-ZÁÉÍÓÚÑ]+", texto_norm, flags=re.IGNORECASE)
+    if match_matriz:
+        row["Dirección Matriz"] = _texto_emitidos_retencion_na(match_matriz.group(1))
+    idx_matriz = _buscar_indice_linea_layout(lineas, "MATRIZ")
+    if idx_matriz is not None:
+        row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(_siguiente_linea_layout_no_vacia(lineas, idx_matriz))
+    row["Obligado Contabilidad"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"OBLIGADO\s+A\s+LLEVAR\s+CONTABILIDAD\s*(SI|NO)"]))
+
+    idx_razon = _buscar_indice_linea_layout(lineas, "RAZON SOCIAL / NOMBRES Y APELLIDOS")
+    if idx_razon is not None:
+        row["Razón Social Comprador"] = _texto_emitidos_retencion_na(_texto_linea_layout(lineas[idx_razon], min_x=180))
+    identificacion = _extraer_regex(texto_norm, [r"IDENTIFICACION\s*:?\s*(\d{10,13})"])
+    row["Identificación Comprador"] = _texto_emitidos_retencion_na(identificacion)
+    row["Tipo Identificación Comprador"] = _codigo_tipo_identificacion_desde_numero(identificacion, "No Disponible")
+    row["Fecha de Emisión"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"FECHA\s+EMISION\s*:?\s*(\d{2}/\d{2}/\d{4})"]))
+
+    modificado = _extraer_regex(texto_norm, [r"COMPROBANTE\s+QUE\s+SE\s+MODIFICA\s*:?\s*([^\n]+)"])
+    row["Número Documento Modificado"] = _texto_emitidos_retencion_na(_extraer_regex(modificado, [r"(\d{3}-\d{3}-\d{9})"]))
+    row["Código Documento Modificado"] = _codigo_documento_sri(modificado)
+    row["Fecha Emisión Doc. Sustento"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"FECHA\s+EMISION\s+\(COMPROBANTE\s+A\s+MODIFICAR\)\s*:?\s*(\d{2}/\d{2}/\d{4})"]))
+    row["Motivo"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"RAZON\s+DE\s+MODIFICACION\s*:?\s*([^\n]+)"]))
+
+    idx_info_adic = _buscar_indice_linea_layout(lineas, "INFORMACION ADICIONAL")
+    top_info = float(lineas[idx_info_adic].get("top", 0.0)) if idx_info_adic is not None else 9999.0
+    row["Campos Adicionales"] = _texto_emitidos_retencion_na(_extraer_campos_adicionales_por_layout(lineas, top_info))
+
+    top_start_detalle = 0.0
+    idx_detalle = _buscar_indice_linea_layout(lineas, "CODIGO DESCRIPCION")
+    if idx_detalle is not None:
+        top_start_detalle = float(lineas[idx_detalle].get("top", 0.0))
+    top_end_detalle = top_info if idx_info_adic is not None else 9999.0
+    region_detalle = [ln for ln in lineas if top_start_detalle < float(ln.get("top", 0.0)) < top_end_detalle]
+    items = []
+    current_item = None
+    for linea in region_detalle:
+        left_digits = [w.get("text", "") for w in linea.get("words", []) if float(w.get("x0", 0.0)) < 70 and re.fullmatch(r"\d+", (w.get("text", "") or ""))]
+        if left_digits:
+            chunk = "".join(left_digits)
+            if current_item is None or len(chunk) >= 8:
+                if current_item:
+                    items.append(current_item)
+                current_item = {"code": chunk, "desc_lines": [], "qty": "", "unit": ""}
+            elif current_item is not None:
+                current_item["code"] += chunk
+        if current_item is None:
+            continue
+        desc_part = _texto_linea_layout(linea, min_x=140, max_x=360)
+        if desc_part:
+            current_item["desc_lines"].append(desc_part)
+        qty_tokens = [w.get("text", "") for w in linea.get("words", []) if 100 <= float(w.get("x0", 0.0)) < 140 and re.fullmatch(r"\d+(?:\.\d+)?", (w.get("text", "") or ""))]
+        if qty_tokens and not current_item["qty"]:
+            current_item["qty"] = qty_tokens[0]
+        unit_tokens = [w.get("text", "") for w in linea.get("words", []) if 480 <= float(w.get("x0", 0.0)) < 530 and re.fullmatch(r"\d+(?:\.\d+)?", (w.get("text", "") or ""))]
+        if unit_tokens and not current_item["unit"]:
+            current_item["unit"] = unit_tokens[0]
+    if current_item:
+        items.append(current_item)
+    detalles = []
+    for item in items:
+        desc_lines = [fragment for fragment in item["desc_lines"] if fragment]
+        desc = "  ".join(desc_lines).strip()
+        qty_num = _numero_emitidos_retencion(item.get("qty"), 0)
+        unit_num = _numero_emitidos_retencion(item.get("unit"), 0)
+        detalles.append(f"Código: {item.get('code')}, Desc: {desc}, Cant: {qty_num:.6f}, P.Unit: {unit_num:.6f}")
+    if detalles:
+        row["Descripciones"] = " | ".join(detalles)
+
+    row["Total Sin Impuestos"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"SUBTOTAL\s+SIN\s+IMPUESTOS\s*([0-9.,]+)"]))
+    row["Base Gravada 15%"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"SUBTOTAL\s+15%\s*([0-9.,]+)"]))
+    row["Base Gravada"] = row["Base Gravada 15%"]
+    row["Base No Gravada"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"SUBTOTAL\s+NO\s+OBJETO\s+DE\s+IVA\s*([0-9.,]+)"]))
+    row["Monto IVA 15%"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+15%\s*([0-9.,]+)"]))
+    row["Monto IVA"] = row["Monto IVA 15%"]
+    if row["Monto IVA 15%"]:
+        row["Tarifas IVA"] = "15%"
+    row["Importe Total"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"VALOR\s+TOTAL\s*([0-9.,]+)"]))
+    row["Valor Modificación"] = row["Importe Total"]
+
+    legacy = _map_nota_credito_legada_a_emitidos_row(_extraer_datos_pdf_nota_credito(pdf_path))
+    return _combinar_rows_emitidos_especificos(row, legacy)
+
+
+def _extraer_datos_pdf_nota_debito_emitido(pdf_path: Path) -> dict:
+    lineas = _extraer_lineas_layout_pdf(pdf_path)
+    if not lineas:
+        return _map_nota_debito_legada_a_emitidos_row(_extraer_datos_pdf_nota_debito(pdf_path))
+
+    row = _nota_debito_emitidos_default_row()
+    row["Estado"] = "AUTORIZADO"
+    row["Código del Documento"] = "05 - NOTA DE DÉBITO"
+    row["Forma Pago"] = "No Disponible - No Disponible"
+    row["Moneda"] = "DOLAR"
+    row["Plazo Pago"] = "No Disponible"
+    row["Unidad Tiempo Pago"] = "No Disponible"
+    row["Contribuyente RIMPE"] = "No Disponible"
+
+    texto = _leer_texto_pdf(pdf_path)
+    texto_norm = _normalizar_texto_pdf(texto)
+    lineas_raw = [ln.strip() for ln in texto.splitlines() if ln.strip()]
+    auth = _extraer_regex(texto_norm, [r"(\d{49})"])
+    numero = _extraer_regex(texto_norm, [r"No\.\s*(\d{3}-\d{3}-\d{9})"])
+    ruc = _extraer_regex(texto_norm, [r"R\.U\.C\.\s*:?\s*(\d{13})"])
+    fecha_hora_auth = _extraer_regex(texto_norm, [r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})"])
+    row["Número de Autorización"] = auth or "No Disponible"
+    row["Clave de Acceso"] = auth or "No Disponible"
+    row["Fecha de Autorización"] = _fecha_hora_pdf_a_iso(fecha_hora_auth)
+    row["RUC Emisor"] = ruc or "No Disponible"
+    if numero:
+        row["Establecimiento"], row["Punto de Emisión"], row["Secuencial"] = numero.split("-")
+    if auth and len(auth) == 49:
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(auth[23])
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(auth[47])
+    else:
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(
+            _extraer_regex(texto_norm, [r"AMBIENTE\s*:?\s*([A-ZÁÉÍÓÚÑ]+)"])
+        )
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(
+            _extraer_regex(texto_norm, [r"EMISI[ÓO]N\s*:?\s*([A-ZÁÉÍÓÚÑ]+)"])
+        )
+
+    idx_num_aut = _buscar_indice_linea_layout(lineas, "NUMERO DE AUTORIZACION")
+    if idx_num_aut is not None:
+        row["Razón Social Emisor"] = _texto_emitidos_retencion_na(
+            _siguiente_linea_layout_no_vacia(lineas, idx_num_aut + 1, max_x=260)
+        )
+    idx_aut = _buscar_indice_linea_layout_exacta(lineas, "AUTORIZACION")
+    if idx_aut is not None:
+        for pos in range(idx_aut + 1, len(lineas)):
+            candidato = _texto_linea_layout(lineas[pos], max_x=260)
+            if candidato and candidato != row["Razón Social Emisor"]:
+                row["Nombre Comercial"] = _texto_emitidos_retencion_na(candidato)
+                break
+
+    match_matriz = re.search(r"Direccion\s+(.+?)\s+EMISION\s*:\s*[A-ZÁÉÍÓÚÑ]+", texto_norm, flags=re.IGNORECASE)
+    if match_matriz:
+        row["Dirección Matriz"] = _texto_emitidos_retencion_na(match_matriz.group(1))
+    idx_matriz = _buscar_indice_linea_layout(lineas, "MATRIZ")
+    if idx_matriz is not None:
+        row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(_siguiente_linea_layout_no_vacia(lineas, idx_matriz))
+    row["Obligado Contabilidad"] = _texto_emitidos_retencion_na(
+        _extraer_regex(texto_norm, [r"OBLIGADO\s+A\s+LLEVAR\s+CONTABILIDAD\s*(SI|NO)"])
+    )
+
+    idx_razon = _buscar_indice_linea_layout(lineas, "RAZON SOCIAL / NOMBRES Y APELLIDOS")
+    if idx_razon is not None:
+        row["Razón Social Comprador"] = _texto_emitidos_retencion_na(_texto_linea_layout(lineas[idx_razon], min_x=180))
+    identificacion = _extraer_regex(texto_norm, [r"RUC/CI/\.?/PASAPORTE\s*:?\s*(\d{10,13})", r"IDENTIFICACION\s*:?\s*(\d{10,13})"])
+    row["Identificación Comprador"] = _texto_emitidos_retencion_na(identificacion)
+    row["Tipo Identificación Comprador"] = _codigo_tipo_identificacion_desde_numero(identificacion, "No Disponible")
+    row["Fecha de Emisión"] = _texto_emitidos_retencion_na(
+        _extraer_regex(texto_norm, [r"FECHA\s+EMISION\s*:?\s*(\d{2}/\d{2}/\d{4})"])
+    )
+
+    modificado = _extraer_regex(texto_norm, [r"COMPROBANTE\s+QUE\s+SE\s+MODIFICA\s*:?\s*([^\n]+)"])
+    row["Número Documento Modificado"] = _texto_emitidos_retencion_na(
+        _extraer_regex(modificado, [r"(\d{3}-\d{3}-\d{9})"])
+    )
+    row["Código Documento Modificado"] = _codigo_documento_sri(modificado)
+    row["Fecha Emisión Doc. Sustento"] = _texto_emitidos_retencion_na(
+        _extraer_regex(
+            texto_norm,
+            [
+                r"FECHA\s+EMISION\s+\(COMPROBANTE\s+A\s+MODIFICAR\)\s*:?\s*(\d{2}/\d{2}/\d{4})",
+                r"COMPROBANTE\s+QUE\s+SE\s+MODIFICA.+?FECHA\s+EMISION\s*:?\s*(\d{2}/\d{2}/\d{4})",
+            ],
+        )
+    )
+    row["Motivo"] = _texto_emitidos_retencion_na(
+        _extraer_regex(texto_norm, [r"RAZON\s+DE\s+(?:LA\s+)?MODIFICACION\s*:?\s*([^\n]+)"])
+    )
+
+    valor_mod = _numero_emitidos_retencion(
+        _extraer_regex(texto_norm, [r"VALOR\s+DE\s+LA\s+MODIFICACION\s*([0-9.,]+)"])
+    )
+    total_sin_imp = _numero_emitidos_retencion(
+        _extraer_regex(texto_norm, [r"SUBTOTAL\s+SIN\s+IMPUESTOS\s*([0-9.,]+)"])
+    )
+    if not total_sin_imp:
+        total_sin_imp = valor_mod
+    row["Total Sin Impuestos"] = total_sin_imp
+    row["Base Gravada 15%"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"SUBTOTAL\s+15%\s*([0-9.,]+)"]))
+    row["Base Gravada"] = (
+        row["Base Gravada 15%"]
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"SUBTOTAL\s+12%\s*([0-9.,]+)"]))
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"SUBTOTAL\s+8%\s*([0-9.,]+)"]))
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"SUBTOTAL\s+5%\s*([0-9.,]+)"]))
+    )
+    row["Base No Gravada"] = (
+        _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"SUBTOTAL\s+0%\s*([0-9.,]+)"]))
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"SUBTOTAL\s+NO\s+OBJETO\s+DE\s+IVA\s*([0-9.,]+)"]))
+    )
+    row["Monto IVA 15%"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+15%\s*([0-9.,]+)"]))
+    row["Monto IVA"] = (
+        row["Monto IVA 15%"]
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+12%\s*([0-9.,]+)"]))
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+8%\s*([0-9.,]+)"]))
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+5%\s*([0-9.,]+)"]))
+    )
+    if row["Monto IVA 15%"]:
+        row["Tarifas IVA"] = "15%"
+    elif row["Monto IVA"]:
+        row["Tarifas IVA"] = "IVA"
+    row["Importe Total"] = _numero_emitidos_retencion(
+        _extraer_regex(
+            texto_norm,
+            [r"VALOR\s+A\s+PAGAR\s*([0-9.,]+)", r"VALOR\s+TOTAL\s*([0-9.,]+)"],
+        )
+    )
+    row["Valor Modificación"] = valor_mod or row["Importe Total"]
+    row["Total Pago"] = row["Importe Total"]
+
+    forma_pago, monto_pago = _extraer_forma_pago(lineas_raw)
+    if forma_pago:
+        row["Forma Pago"] = f"{forma_pago} - {forma_pago}"
+    if monto_pago:
+        row["Total Pago"] = _numero_emitidos_retencion(monto_pago)
+
+    idx_info_adic = _buscar_indice_linea_layout(lineas, "INFORMACION ADICIONAL")
+    top_info = float(lineas[idx_info_adic].get("top", 0.0)) if idx_info_adic is not None else 9999.0
+    row["Campos Adicionales"] = _texto_emitidos_retencion_na(_extraer_campos_adicionales_por_layout(lineas, top_info))
+    if row["Motivo"] != "No Disponible":
+        row["Descripciones"] = row["Motivo"]
+
+    legacy = _map_nota_debito_legada_a_emitidos_row(_extraer_datos_pdf_nota_debito(pdf_path))
+    return _combinar_rows_emitidos_especificos(row, legacy)
+
+
+def _map_factura_legada_a_emitidos_row(legacy: dict | None) -> dict:
+    row = _factura_emitidos_default_row()
+    if not isinstance(legacy, dict):
+        return row
+    row["Ambiente"] = _label_ambiente_emitidos_retencion(legacy.get("ambiente"))
+    row["Razón Social Emisor"] = _texto_emitidos_retencion_na(legacy.get("razonSocialEmisor"))
+    row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(
+        legacy.get("direccionSucursalEmisor") or legacy.get("direccionMatrizEmisor")
+    )
+    obligado = _texto_emitidos_retencion(legacy.get("obligadoContabilidad"))
+    row["Obligado Contabilidad"] = obligado if obligado in {"SI", "NO"} else "No Disponible"
+    row["Tipo Identificación Comprador"] = _label_tipo_ident_emitidos_nota_credito(
+        _codigo_tipo_identificacion_desde_numero(legacy.get("identificacionComprador"))
+    )
+    row["Identificación Comprador"] = _texto_emitidos_retencion_na(legacy.get("identificacionComprador"))
+    row["Tipo Emisión"] = _label_emision_emitidos_retencion(legacy.get("emision"))
+    row["Nombre Comercial"] = _texto_emitidos_retencion_na(
+        legacy.get("nombreComercial") or legacy.get("razonSocialEmisor")
+    )
+    row["Código del Documento"] = "01 - FACTURA"
+    row["Establecimiento"] = _texto_emitidos_retencion(legacy.get("establecimiento"))
+    row["Punto de Emisión"] = _texto_emitidos_retencion(legacy.get("puntoEmision"))
+    row["Secuencial"] = _texto_emitidos_retencion(legacy.get("secuencial"))
+    row["Dirección Matriz"] = _texto_emitidos_retencion_na(legacy.get("direccionMatrizEmisor"))
+    row["Contribuyente RIMPE"] = "No Disponible"
+    row["RUC Emisor"] = _texto_emitidos_retencion(legacy.get("rucEmisor"))
+    row["Clave de Acceso"] = _texto_emitidos_retencion(legacy.get("claveAcceso"))
+    fecha_emision = _texto_emitidos_retencion(legacy.get("fechaEmision"))
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", fecha_emision):
+        fecha_emision = datetime.strptime(fecha_emision, "%Y-%m-%d").strftime("%d/%m/%Y")
+    row["Fecha de Emisión"] = fecha_emision or "No Disponible"
+    row["Razón Social Comprador"] = _texto_emitidos_retencion_na(legacy.get("razonSocialComprador"))
+    row["Dirección Comprador"] = _texto_emitidos_retencion_na(legacy.get("direccionComprador"))
+    row["Moneda"] = _texto_emitidos_retencion_na(legacy.get("moneda") or "DOLAR")
+    row["Plazo Pago"] = "No Disponible"
+    row["Unidad Tiempo Pago"] = "No Disponible"
+    row["Descripciones"] = _texto_emitidos_retencion(legacy.get("descripcionesProductos"))
+    row["Forma Pago"] = "No Disponible - No Disponible"
+    total_sin_imp = _numero_emitidos_retencion(legacy.get("subtotalSinImpuestos"))
+    row["Total Sin Impuestos"] = total_sin_imp
+    row["Base Gravada"] = 0
+    row["Base No Gravada"] = total_sin_imp
+    row["Tarifas IVA"] = "0%"
+    row["Monto IVA"] = (
+        _numero_emitidos_retencion(legacy.get("iva15"))
+        or _numero_emitidos_retencion(legacy.get("iva12"))
+        or _numero_emitidos_retencion(legacy.get("iva8"))
+        or _numero_emitidos_retencion(legacy.get("iva5"))
+    )
+    row["Total Descuento"] = _numero_emitidos_retencion(legacy.get("totalDescuento"))
+    row["Propina"] = _numero_emitidos_retencion(legacy.get("propina"))
+    row["Importe Total"] = _numero_emitidos_retencion(legacy.get("valorTotal"))
+    row["Total Pago"] = 0
+    row["Campos Adicionales"] = _texto_emitidos_retencion_na(legacy.get("informacionAdicional"))
+    row["Base No Gravada 0%"] = total_sin_imp
+    return row
+
+
+def _extraer_datos_xml_factura_emitido(xml_path: Path) -> dict:
+    row = _factura_emitidos_default_row()
+    root, meta = _extraer_xml_emitidos_autorizacion(xml_path)
+    if root is None:
+        return row
+
+    info_trib = root.find("infoTributaria")
+    info_fact = root.find("infoFactura")
+    detalles = root.findall(".//detalles/detalle")
+
+    row["Estado"] = _texto_emitidos_retencion(meta.get("estado"), "AUTORIZADO")
+    row["Número de Autorización"] = _texto_emitidos_retencion(meta.get("numero_autorizacion"))
+    row["Fecha de Autorización"] = _texto_emitidos_retencion(meta.get("fecha_autorizacion"))
+
+    if info_trib is not None:
+        cod_doc = _texto_emitidos_retencion(info_trib.findtext("codDoc"))
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(info_trib.findtext("ambiente") or meta.get("ambiente"))
+        row["Razón Social Emisor"] = _texto_emitidos_retencion(info_trib.findtext("razonSocial"))
+        row["Nombre Comercial"] = _texto_emitidos_retencion_na(
+            info_trib.findtext("nombreComercial") or info_trib.findtext("razonSocial")
+        )
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(info_trib.findtext("tipoEmision"))
+        row["Código del Documento"] = EMITIDOS_RETENCION_DOC_CODE_LABEL.get(cod_doc, "01 - FACTURA")
+        row["Establecimiento"] = _texto_emitidos_retencion(info_trib.findtext("estab"))
+        row["Punto de Emisión"] = _texto_emitidos_retencion(info_trib.findtext("ptoEmi"))
+        row["Secuencial"] = _texto_emitidos_retencion(info_trib.findtext("secuencial"))
+        row["Dirección Matriz"] = _texto_emitidos_retencion_na(info_trib.findtext("dirMatriz"))
+        row["RUC Emisor"] = _texto_emitidos_retencion(info_trib.findtext("ruc"))
+        row["Clave de Acceso"] = _texto_emitidos_retencion(info_trib.findtext("claveAcceso"))
+
+    if info_fact is not None:
+        row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(
+            info_fact.findtext("dirEstablecimiento") or row["Dirección Matriz"]
+        )
+        obligado = _texto_emitidos_retencion(info_fact.findtext("obligadoContabilidad"))
+        row["Obligado Contabilidad"] = obligado if obligado in {"SI", "NO"} else "No Disponible"
+        row["Tipo Identificación Comprador"] = _label_tipo_ident_emitidos_nota_credito(
+            info_fact.findtext("tipoIdentificacionComprador")
+        )
+        row["Identificación Comprador"] = _texto_emitidos_retencion_na(info_fact.findtext("identificacionComprador"))
+        row["Fecha de Emisión"] = _texto_emitidos_retencion(info_fact.findtext("fechaEmision"))
+        row["Razón Social Comprador"] = _texto_emitidos_retencion_na(info_fact.findtext("razonSocialComprador"))
+        row["Dirección Comprador"] = _texto_emitidos_retencion_na(info_fact.findtext("direccionComprador"))
+        row["Moneda"] = _texto_emitidos_retencion_na(info_fact.findtext("moneda") or "DOLAR")
+        row["Total Sin Impuestos"] = _numero_emitidos_retencion(info_fact.findtext("totalSinImpuestos"))
+        row["Total Descuento"] = _numero_emitidos_retencion(info_fact.findtext("totalDescuento"))
+        row["Propina"] = _numero_emitidos_retencion(info_fact.findtext("propina"))
+        row["Importe Total"] = _numero_emitidos_retencion(info_fact.findtext("importeTotal"))
+
+        pago = info_fact.find("./pagos/pago")
+        if pago is not None:
+            forma = _label_forma_pago_emitidos_retencion(pago.findtext("formaPago"))
+            row["Forma Pago"] = f"{forma} - {forma}" if forma != "No Disponible" else "No Disponible - No Disponible"
+            row["Total Pago"] = _numero_emitidos_retencion(pago.findtext("total"))
+            row["Plazo Pago"] = _texto_emitidos_retencion_na(pago.findtext("plazo"))
+            row["Unidad Tiempo Pago"] = _texto_emitidos_retencion_na(pago.findtext("unidadTiempo"))
+        else:
+            row["Forma Pago"] = "No Disponible - No Disponible"
+
+    monto_iva = 0
+    for imp in root.findall(".//infoFactura/totalConImpuestos/totalImpuesto"):
+        valor = _numero_emitidos_retencion(imp.findtext("valor"))
+        if valor:
+            monto_iva += valor
+    row["Base Gravada"] = 0
+    row["Base No Gravada"] = row["Total Sin Impuestos"]
+    row["Base No Gravada 0%"] = row["Total Sin Impuestos"]
+    row["Tarifas IVA"] = "0%"
+    row["Monto IVA"] = monto_iva
+
+    detalle_textos = []
+    for detalle in detalles:
+        codigo = _texto_emitidos_retencion(detalle.findtext("codigoPrincipal") or detalle.findtext("codigoInterno"))
+        descripcion = (detalle.findtext("descripcion") or "").strip()
+        cantidad = _texto_emitidos_retencion(detalle.findtext("cantidad"))
+        precio_unitario = _texto_emitidos_retencion(detalle.findtext("precioUnitario"))
+        partes = [f"Código: {codigo}", f"Desc: {descripcion}"]
+        if cantidad:
+            partes.append(f"Cant: {cantidad}")
+        if precio_unitario:
+            partes.append(f"P.Unit: {precio_unitario}")
+        detalle_textos.append(", ".join(partes))
+    row["Descripciones"] = " ; ".join(detalle_textos)
+
+    adicionales = []
+    for campo in root.findall(".//infoAdicional/campoAdicional"):
+        nombre = _texto_emitidos_retencion(campo.attrib.get("nombre"))
+        valor = _texto_emitidos_retencion(campo.text)
+        if nombre or valor:
+            adicionales.append(f"{nombre}: {valor}".strip(": "))
+    if adicionales:
+        row["Campos Adicionales"] = "; ".join(adicionales)
+    return row
+
+
+def _extraer_datos_pdf_factura_emitido(pdf_path: Path) -> dict:
+    lineas = _extraer_lineas_layout_pdf(pdf_path)
+    legacy = _map_factura_legada_a_emitidos_row(_extraer_datos_pdf_por_tipo_layout_first(pdf_path))
+    if not lineas:
+        return legacy
+
+    row = _factura_emitidos_default_row()
+    row["Estado"] = "AUTORIZADO"
+    row["Código del Documento"] = "01 - FACTURA"
+    row["Contribuyente RIMPE"] = "No Disponible"
+    row["Moneda"] = "DOLAR"
+    row["Plazo Pago"] = "No Disponible"
+    row["Unidad Tiempo Pago"] = "No Disponible"
+    row["Forma Pago"] = "No Disponible - No Disponible"
+
+    texto = _leer_texto_pdf(pdf_path)
+    texto_norm = _normalizar_texto_pdf(texto)
+    auth = _extraer_regex(texto_norm, [r"(\d{49})"])
+    numero = _extraer_regex(texto_norm, [r"No\.\s*(\d{3}-\d{3}-\d{9})"])
+    ruc = _extraer_regex(texto_norm, [r"R\.U\.C\.\s*:?\s*(\d{13})"])
+    fecha_hora_auth = _extraer_regex(texto_norm, [r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})"])
+    row["Número de Autorización"] = auth or "No Disponible"
+    row["Clave de Acceso"] = auth or "No Disponible"
+    row["Fecha de Autorización"] = _fecha_hora_pdf_a_iso(fecha_hora_auth)
+    row["RUC Emisor"] = ruc or "No Disponible"
+    if numero:
+        row["Establecimiento"], row["Punto de Emisión"], row["Secuencial"] = numero.split("-")
+    if auth and len(auth) == 49:
+        row["Ambiente"] = _label_ambiente_emitidos_retencion(auth[23])
+        row["Tipo Emisión"] = _label_emision_emitidos_retencion(auth[47])
+
+    idx_num_aut = _buscar_indice_linea_layout(lineas, "NUMERO DE AUTORIZACION")
+    if idx_num_aut is not None:
+        row["Razón Social Emisor"] = _texto_emitidos_retencion_na(
+            _siguiente_linea_layout_no_vacia(lineas, idx_num_aut + 1, max_x=260)
+        )
+    row["Nombre Comercial"] = row["Razón Social Emisor"]
+
+    idx_matriz = _buscar_indice_linea_layout(lineas, "MATRIZ")
+    direccion = _extraer_bloque_direccion_layout(lineas, idx_matriz)
+    if direccion:
+        row["Dirección Matriz"] = _texto_emitidos_retencion_na(direccion)
+        row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(direccion)
+    obligado = _extraer_regex(texto_norm, [r"OBLIGADO\s+A\s+LLEVAR\s+CONTABILIDAD\s*(SI|NO)"])
+    row["Obligado Contabilidad"] = obligado or "No Disponible"
+
+    idx_razon = _buscar_indice_linea_layout(lineas, "RAZON SOCIAL / NOMBRES Y APELLIDOS")
+    if idx_razon is not None:
+        row["Razón Social Comprador"] = _texto_emitidos_retencion_na(_texto_linea_layout(lineas[idx_razon], min_x=180))
+    identificacion = _extraer_regex(texto_norm, [r"IDENTIFICACION\s*:?\s*(\d{10,13})"])
+    row["Identificación Comprador"] = _texto_emitidos_retencion_na(identificacion)
+    row["Tipo Identificación Comprador"] = _label_tipo_ident_emitidos_nota_credito(
+        _codigo_tipo_identificacion_desde_numero(identificacion)
+    )
+    row["Fecha de Emisión"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"FECHA\s+(\d{2}/\d{2}/\d{4})"]))
+    idx_direccion_comprador = _buscar_indice_linea_layout(lineas, "DIRECCION:", start=(idx_razon or 0))
+    if idx_direccion_comprador is not None:
+        row["Dirección Comprador"] = _texto_emitidos_retencion_na(
+            _texto_linea_layout(lineas[idx_direccion_comprador], min_x=80)
+        )
+
+    idx_info = _buscar_indice_linea_layout(lineas, "INFORMACION ADICIONAL")
+    top_info = float(lineas[idx_info].get("top", 0.0)) if idx_info is not None else 9999.0
+    idx_detalle = _buscar_indice_linea_layout(lineas, "CANTIDAD DESCRIPCION")
+    top_inicio = float(lineas[idx_detalle].get("top", 0.0)) if idx_detalle is not None else 450.0
+    items = _extraer_items_emitidos_layout(lineas, top_inicio=top_inicio, top_fin=top_info)
+    if items:
+        row["Descripciones"] = _formatear_descripciones_emitidos(items)
+    row["Campos Adicionales"] = _texto_emitidos_retencion_na(_extraer_campos_adicionales_emitidos_desde_texto(texto))
+
+    row["Total Sin Impuestos"] = _numero_emitidos_retencion(
+        _extraer_regex(texto_norm, [r"SUBTOTAL\s+SIN\s+IMPUESTOS\s*([0-9.,]+)"])
+    )
+    row["Base Gravada"] = 0
+    row["Base No Gravada"] = row["Total Sin Impuestos"]
+    row["Base No Gravada 0%"] = row["Total Sin Impuestos"]
+    row["Tarifas IVA"] = "0%"
+    row["Monto IVA"] = (
+        _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+15%\s*([0-9.,]+)"]))
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+12%\s*([0-9.,]+)"]))
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+8%\s*([0-9.,]+)"]))
+        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+5%\s*([0-9.,]+)"]))
+    )
+    row["Total Descuento"] = _numero_emitidos_retencion(
+        _extraer_regex(texto_norm, [r"TOTAL\s+DESCUENTO\s*([0-9.,]+)"])
+    )
+    row["Propina"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"PROPINA\s*([0-9.,]+)"]))
+    row["Importe Total"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"VALOR\s+TOTAL\s*([0-9.,]+)"]))
+    row["Total Pago"] = 0
+
+    return _combinar_rows_emitidos_especificos(row, legacy)
+
+
+def _extraer_datos_xml_liquidacion_compra_emitido(xml_path: Path) -> dict:
+    datos = _extraer_datos_xml_pdf_report(xml_path)
+    datos["tipoDocumento"] = "Liquidación de Compra"
+    if not _valor_reporte_presente(datos.get("nombreComercial")):
+        datos["nombreComercial"] = datos.get("razonSocialEmisor") or "No Disponible"
+    datos["direccionSucursalEmisor"] = datos.get("direccionSucursalEmisor") or "No Disponible"
+    if _texto_emitidos_retencion(datos.get("agenteRetencion")):
+        datos["agenteRetencion"] = str(datos["agenteRetencion"]).replace("Resolucion", "Resolución")
+    obligado = _texto_emitidos_retencion(datos.get("obligadoContabilidad"))
+    datos["obligadoContabilidad"] = obligado if obligado in {"SI", "NO"} else "No Disponible"
+    datos["tipoContribuyenteRIMPE"] = datos.get("tipoContribuyenteRIMPE") or "No Disponible"
+    datos["razonSocialComprador"] = "No Disponible"
+    if not _valor_reporte_presente(datos.get("direccionComprador")):
+        datos["direccionComprador"] = ""
+    if not _valor_reporte_presente(datos.get("informacionAdicional")):
+        datos["informacionAdicional"] = "No Disponible"
+    return datos
+
+
+def _extraer_datos_pdf_liquidacion_compra_emitido(pdf_path: Path) -> dict:
+    lineas = _extraer_lineas_layout_pdf(pdf_path)
+    legacy = _extraer_datos_pdf_por_tipo_layout_first(pdf_path)
+    if not lineas:
+        return legacy
+
+    datos = dict(legacy or {})
+    texto = _leer_texto_pdf(pdf_path)
+    texto_norm = _normalizar_texto_pdf(texto)
+    datos["tipoDocumento"] = "Liquidación de Compra"
+    datos["contribuyenteEspecial"] = "No Disponible"
+    ruc = _extraer_regex(texto_norm, [r"R\.U\.C\.\s*:?\s*(\d{13})"])
+    if ruc:
+        datos["rucEmisor"] = ruc
+    auth = _extraer_regex(texto_norm, [r"(\d{49})"])
+    if auth:
+        datos["claveAcceso"] = auth
+    idx_aut = _buscar_indice_linea_layout_exacta(lineas, "AUTORIZACION")
+    if idx_aut is not None:
+        emisor = _siguiente_linea_layout_no_vacia(lineas, idx_aut, max_x=320)
+        if emisor:
+            datos["razonSocialEmisor"] = emisor
+            datos["nombreComercial"] = emisor
+    direccion_matriz = _extraer_regex(texto_norm, [r"DIRECCION\s+(.+?)\s+EMISION\s*:"])
+    idx_matriz = _buscar_indice_linea_layout(lineas, "MATRIZ")
+    if not direccion_matriz:
+        direccion_matriz = _extraer_bloque_direccion_layout(
+            lineas,
+            idx_matriz,
+            stop_tokens=("CLAVE", "SUCURSAL", "OBLIGADO", "AGENTE"),
+        )
+    if direccion_matriz:
+        datos["direccionMatrizEmisor"] = direccion_matriz
+    datos["direccionSucursalEmisor"] = "No Disponible"
+    agente = _extraer_regex(texto_norm, [r"AGENTE\s+DE\s+RETENCION\s+([^\n]+)"])
+    datos["agenteRetencion"] = agente.replace("Resolucion", "Resolución") if agente else "No Disponible"
+    obligado = _extraer_regex(texto_norm, [r"OBLIGADO\s+A\s+LLEVAR\s+CONTABILIDAD\s*(SI|NO)\b"])
+    datos["obligadoContabilidad"] = obligado if obligado in {"SI", "NO"} else "No Disponible"
+    datos["tipoContribuyenteRIMPE"] = "No Disponible"
+    datos["razonSocialComprador"] = "No Disponible"
+    identificacion = _extraer_regex(texto_norm, [r"IDENTIFICACION\s*:?\s*(\d{6,13})"])
+    if identificacion:
+        datos["identificacionComprador"] = identificacion
+    datos["direccionComprador"] = ""
+    datos["placa"] = "No Disponible"
+    datos["guia"] = "No Disponible"
+    datos["comprobanteModificado"] = "No Disponible"
+    datos["fechaEmisionModificado"] = "No Disponible"
+    datos["razonModificacion"] = "No Disponible"
+    datos["valorModificacion"] = "No Disponible"
+    fecha_auth = _extraer_regex(texto_norm, [r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})"])
+    if fecha_auth:
+        datos["fechaAutorizacion"] = fecha_auth
+    fecha_emision = _extraer_regex(texto_norm, [r"FECHA\s+(\d{2}/\d{2}/\d{4})"])
+    if fecha_emision:
+        datos["fechaEmision"] = fecha_emision
+    numero = _extraer_regex(texto_norm, [r"No\.\s*(\d{3}-\d{3}-\d{9})"])
+    if numero:
+        datos["numeroComprobante"] = numero
+        estab, pto, sec = numero.split("-")
+        datos["establecimiento"] = estab
+        datos["puntoEmision"] = pto
+        datos["secuencial"] = sec
+
+    idx_inicio_detalle = _buscar_indice_linea_layout(lineas, "PRINCIPAL AUXILIAR")
+    idx_code = idx_inicio_detalle + 1 if idx_inicio_detalle is not None and idx_inicio_detalle + 2 < len(lineas) else None
+    if idx_code is not None and idx_code + 2 < len(lineas):
+        codigo = (lineas[idx_code].get("text", "") or "").strip()
+        valores = re.findall(r"\d+(?:\.\d+)?", lineas[idx_code + 1].get("text", ""))
+        extra = (lineas[idx_code + 2].get("text", "") or "").strip()
+        cantidad = valores[0] if len(valores) >= 1 else ""
+        descripcion_linea = lineas[idx_code + 1].get("text", "")
+        descripcion = re.sub(r"^\d+(?:\.\d+)?\s*", "", descripcion_linea).strip()
+        if len(valores) > 1 and valores[1] in descripcion:
+            descripcion = descripcion.split(valores[1], 1)[0].strip()
+        codigo_final = f"{codigo} {extra}".strip()
+        subsidio = valores[2] if len(valores) > 2 else "0.00"
+        precio_sin_sub = valores[3] if len(valores) > 3 else "0.00"
+        descuento = valores[4] if len(valores) > 4 else "0.00"
+        total = valores[5] if len(valores) > 5 else ""
+        datos["descripcionesProductos"] = (
+            f"Código: {codigo_final}, Aux: , Cant: {cantidad}, Desc: {descripcion}, "
+            f"P.Unit: {valores[1] if len(valores) > 1 else ''}, Subsidio: {subsidio}, "
+            f"P. s/Sub: {precio_sin_sub}, Descuento: {descuento}, P.Total: {total}"
+        ).strip()
+
+    forma_match = re.search(
+        r"(20\s*-\s*OTROS\s+CON\s+UTILIZACION\s+DEL\s+SISTEMA(?:\s+FINANCIERO)?)\s+([0-9.,]+)",
+        texto_norm,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if forma_match:
+        datos["formaPago"] = re.sub(r"\s+", " ", forma_match.group(1)).strip()
+        datos["formaPagoMonto"] = _parse_decimal(forma_match.group(2))
+    info_adicional = _extraer_campos_adicionales_emitidos_desde_texto(texto)
+    if info_adicional:
+        datos["informacionAdicional"] = info_adicional.replace("; ", "\n")
+
+    if auth and len(auth) == 49:
+        datos["ambiente"] = "PRODUCCIÓN" if auth[23] == "2" else "PRUEBAS"
+        datos["emision"] = "NORMAL" if auth[47] == "1" else datos.get("emision") or "NORMAL"
+    return datos
+
+
 def _extraer_datos_xml_pdf_report(xml_path: Path) -> dict:
     datos = {col: "" for col in PDF_REPORT_COLUMNS}
     try:
@@ -2559,6 +4946,228 @@ def _guardar_reporte_pdf_retencion_excel(rows: list[dict], excel_path: Path) -> 
         return False
     return True
 
+
+def _guardar_reporte_pdf_retencion_emitidos_excel(rows: list[dict], excel_path: Path) -> bool:
+    if not rows:
+        return False
+    df = pd.DataFrame(rows)
+    for col in EMITIDOS_RETENCION_REPORT_COLUMNS:
+        if col not in df.columns:
+            df[col] = _emitidos_retencion_default_row().get(col, "")
+    df = df[EMITIDOS_RETENCION_REPORT_COLUMNS].copy()
+
+    def _to_text(val):
+        if val is None:
+            return ""
+        if isinstance(val, float) and pd.isna(val):
+            return ""
+        return str(val).strip()
+
+    def _to_number(val):
+        if val is None:
+            return 0
+        if isinstance(val, float):
+            if pd.isna(val):
+                return 0
+            return val
+        if isinstance(val, int):
+            return val
+        parsed = _parse_decimal(str(val))
+        return parsed if parsed is not None else 0
+
+    for col in df.columns:
+        if col in EMITIDOS_RETENCION_NUMERIC_COLUMNS:
+            df[col] = df[col].map(_to_number)
+        else:
+            df[col] = df[col].map(_to_text)
+
+    try:
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="07")
+            ws = writer.sheets["07"]
+            for idx, column in enumerate(EMITIDOS_RETENCION_REPORT_COLUMNS, start=1):
+                if column in EMITIDOS_RETENCION_TEXT_FORCE_COLUMNS:
+                    for row_idx in range(2, ws.max_row + 1):
+                        ws.cell(row=row_idx, column=idx).number_format = "@"
+                else:
+                    for row_idx in range(2, ws.max_row + 1):
+                        cell = ws.cell(row=row_idx, column=idx)
+                        if cell.value == "0":
+                            cell.value = 0
+                max_len = len(column)
+                for row_idx in range(1, ws.max_row + 1):
+                    value = ws.cell(row=row_idx, column=idx).value
+                    if value is None:
+                        continue
+                    max_len = max(max_len, len(str(value)))
+                ws.column_dimensions[get_column_letter(idx)].width = min(max(max_len + 2, 12), 52)
+        return True
+    except Exception:
+        return False
+
+
+def _guardar_reporte_pdf_nota_credito_emitidos_excel(rows: list[dict], excel_path: Path) -> bool:
+    if not rows:
+        return False
+    df = pd.DataFrame(rows)
+    for col in EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS:
+        if col not in df.columns:
+            df[col] = _nota_credito_emitidos_default_row().get(col, "")
+    df = df[EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS].copy()
+
+    def _to_text(val):
+        if val is None:
+            return ""
+        if isinstance(val, float) and pd.isna(val):
+            return ""
+        return str(val).strip()
+
+    def _to_number(val):
+        if val is None:
+            return 0
+        if isinstance(val, float):
+            if pd.isna(val):
+                return 0
+            return val
+        if isinstance(val, int):
+            return val
+        parsed = _parse_decimal(str(val))
+        return parsed if parsed is not None else 0
+
+    for col in df.columns:
+        if col in EMITIDOS_NOTA_CREDITO_NUMERIC_COLUMNS:
+            df[col] = df[col].map(_to_number)
+        else:
+            df[col] = df[col].map(_to_text)
+
+    try:
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="04")
+            ws = writer.sheets["04"]
+            for idx, column in enumerate(EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS, start=1):
+                if column in EMITIDOS_NOTA_CREDITO_TEXT_FORCE_COLUMNS:
+                    for row_idx in range(2, ws.max_row + 1):
+                        ws.cell(row=row_idx, column=idx).number_format = "@"
+                max_len = len(column)
+                for row_idx in range(1, ws.max_row + 1):
+                    value = ws.cell(row=row_idx, column=idx).value
+                    if value is None:
+                        continue
+                    max_len = max(max_len, len(str(value)))
+                ws.column_dimensions[get_column_letter(idx)].width = min(max(max_len + 2, 12), 52)
+        return True
+    except Exception:
+        return False
+
+
+def _guardar_reporte_pdf_nota_debito_emitidos_excel(rows: list[dict], excel_path: Path) -> bool:
+    if not rows:
+        return False
+    df = pd.DataFrame(rows)
+    for col in EMITIDOS_NOTA_DEBITO_REPORT_COLUMNS:
+        if col not in df.columns:
+            df[col] = _nota_debito_emitidos_default_row().get(col, "")
+    df = df[EMITIDOS_NOTA_DEBITO_REPORT_COLUMNS].copy()
+
+    def _to_text(val):
+        if val is None:
+            return ""
+        if isinstance(val, float) and pd.isna(val):
+            return ""
+        return str(val).strip()
+
+    def _to_number(val):
+        if val is None:
+            return 0
+        if isinstance(val, float):
+            if pd.isna(val):
+                return 0
+            return val
+        if isinstance(val, int):
+            return val
+        parsed = _parse_decimal(str(val))
+        return parsed if parsed is not None else 0
+
+    for col in df.columns:
+        if col in EMITIDOS_NOTA_DEBITO_NUMERIC_COLUMNS:
+            df[col] = df[col].map(_to_number)
+        else:
+            df[col] = df[col].map(_to_text)
+
+    try:
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="05")
+            ws = writer.sheets["05"]
+            for idx, column in enumerate(EMITIDOS_NOTA_DEBITO_REPORT_COLUMNS, start=1):
+                if column in EMITIDOS_NOTA_DEBITO_TEXT_FORCE_COLUMNS:
+                    for row_idx in range(2, ws.max_row + 1):
+                        ws.cell(row=row_idx, column=idx).number_format = "@"
+                max_len = len(column)
+                for row_idx in range(1, ws.max_row + 1):
+                    value = ws.cell(row=row_idx, column=idx).value
+                    if value is None:
+                        continue
+                    max_len = max(max_len, len(str(value)))
+                ws.column_dimensions[get_column_letter(idx)].width = min(max(max_len + 2, 12), 52)
+        return True
+    except Exception:
+        return False
+
+
+def _guardar_reporte_pdf_factura_emitidos_excel(rows: list[dict], excel_path: Path) -> bool:
+    if not rows:
+        return False
+    df = pd.DataFrame(rows)
+    for col in EMITIDOS_FACTURA_REPORT_COLUMNS:
+        if col not in df.columns:
+            df[col] = _factura_emitidos_default_row().get(col, "")
+    df = df[EMITIDOS_FACTURA_REPORT_COLUMNS].copy()
+
+    def _to_text(val):
+        if val is None:
+            return ""
+        if isinstance(val, float) and pd.isna(val):
+            return ""
+        return str(val).strip()
+
+    def _to_number(val):
+        if val is None:
+            return 0
+        if isinstance(val, float):
+            if pd.isna(val):
+                return 0
+            return val
+        if isinstance(val, int):
+            return val
+        parsed = _parse_decimal(str(val))
+        return parsed if parsed is not None else 0
+
+    for col in df.columns:
+        if col in EMITIDOS_FACTURA_NUMERIC_COLUMNS:
+            df[col] = df[col].map(_to_number)
+        else:
+            df[col] = df[col].map(_to_text)
+
+    try:
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="01")
+            ws = writer.sheets["01"]
+            for idx, column in enumerate(EMITIDOS_FACTURA_REPORT_COLUMNS, start=1):
+                if column in EMITIDOS_FACTURA_TEXT_FORCE_COLUMNS:
+                    for row_idx in range(2, ws.max_row + 1):
+                        ws.cell(row=row_idx, column=idx).number_format = "@"
+                max_len = len(column)
+                for row_idx in range(1, ws.max_row + 1):
+                    value = ws.cell(row=row_idx, column=idx).value
+                    if value is None:
+                        continue
+                    max_len = max(max_len, len(str(value)))
+                ws.column_dimensions[get_column_letter(idx)].width = min(max(max_len + 2, 12), 52)
+        return True
+    except Exception:
+        return False
+
+
 def _guardar_reporte_pdf_excel(rows: list[dict], excel_path: Path) -> bool:
     if not rows:
         return False
@@ -2736,6 +5345,14 @@ def _collect_existing_reports(base_dir: Path, prefix: str, tipo_slug: str, suffi
             encontrados[str(ruta.resolve())] = ruta
     return [str(ruta) for ruta in sorted(encontrados.values())]
 
+
+def _delete_report_files(reportes: list[str]) -> None:
+    for ruta in reportes or []:
+        try:
+            Path(ruta).unlink(missing_ok=True)
+        except Exception as err:
+            print(f"[WARN] No se pudo eliminar reporte intermedio '{ruta}': {err}")
+
 EMITIDOS_FECHA_SELECTORS = [
     "input[id$='fecha_input']",
     "input[name$='fecha_input']",
@@ -2891,6 +5508,19 @@ def _es_tipo_nota_debito(tipo: str) -> bool:
     }
 
 
+def _es_tipo_factura(tipo: str) -> bool:
+    slug = _slug_tipo(tipo or "")
+    return slug in {"factura", "facturas"}
+
+
+def _es_tipo_liquidacion_compra(tipo: str) -> bool:
+    slug = _slug_tipo(tipo or "")
+    return slug in {
+        "liquidacion_de_compra",
+        "liquidacion_de_compra_de_bienes_y_prestacion_de_servicios",
+    }
+
+
 TIPO_LABEL_MAP = {
     "factura": (1, "Factura"),
     "facturas": (1, "Factura"),
@@ -2928,6 +5558,23 @@ def _formatear_label(texto: str) -> str:
     return "_".join(partes) if partes else (texto or "Documentos")
 
 
+def _nombre_carpeta_tipo_visible(tipo_texto: str) -> str:
+    clave = _normalizar_tipo_clave(tipo_texto)
+    if clave in {"retencion", "retenciones", "comprobante_de_retencion", "comprobantes_de_retencion", "comprobante_de_retencion_venta"}:
+        return "Comprobante de Retencion"
+    if clave in {"factura", "facturas"}:
+        return "Factura"
+    if clave in {"liquidacion_de_compra", "liquidacion_de_compra_de_bienes_y_prestacion_de_servicios"}:
+        return "Liquidacion de Compra"
+    if clave in {"nota_de_credito", "notas_de_credito", "nota_credito", "notas_credito"}:
+        return "Nota de Credito"
+    if clave in {"nota_de_debito", "notas_de_debito", "nota_debito", "notas_debito"}:
+        return "Nota de Debito"
+    if clave in {"guia_de_remision", "guias_de_remision", "guia_remision"}:
+        return "Guia de Remision"
+    return _formatear_label(_nombre_carpeta_tipo(tipo_texto)).replace("_", " ")
+
+
 def _resolver_tipo_label(tipo_texto: str) -> tuple[int, str]:
     clave = _normalizar_tipo_clave(tipo_texto)
     if clave in TIPO_LABEL_MAP:
@@ -2939,6 +5586,16 @@ def _resolver_tipo_label(tipo_texto: str) -> tuple[int, str]:
     label_sanitizado = _nombre_carpeta_tipo(tipo_texto)
     label = _formatear_label(label_sanitizado)
     return 99, label
+
+
+def _coincide_tipo_documental(tipo_esperado: str, tipo_detectado: str) -> bool:
+    if not tipo_esperado or not tipo_detectado:
+        return True
+    orden_esperado, _ = _resolver_tipo_label(tipo_esperado)
+    orden_detectado, _ = _resolver_tipo_label(tipo_detectado)
+    if orden_esperado == 99 or orden_detectado == 99:
+        return _slug_tipo(tipo_esperado) == _slug_tipo(tipo_detectado)
+    return orden_esperado == orden_detectado
 
 
 def _prefijo_tipo(tipo_texto: str) -> tuple[int, str, str]:
@@ -5999,6 +8656,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         raise RuntimeError(f"No se logro confirmar el dia '{objetivo}' en el SRI.")
 
     _orden_tipo, _label_tipo, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
+    tipo_dir_nombre = _nombre_carpeta_tipo_visible(tipo_visible or tipo)
     tipo_slug = _slug_tipo(tipo_visible or tipo)
     es_retencion = _es_tipo_retencion(tipo_visible or tipo)
     es_nota_credito = _es_tipo_nota_credito(tipo_visible or tipo)
@@ -6019,7 +8677,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
     dia_dir = "Todos" if dia_int in (None, 0) else f"{dia_int:02d}"
     fecha_token_doc = f"{anio:04d}{mes:02d}{(dia_int or 0):02d}"
 
-    carpeta_mes = destino / anio_dir / mes_dir
+    carpeta_mes = destino / tipo_dir_nombre / anio_dir / mes_dir
     carpeta_mes.mkdir(parents=True, exist_ok=True)
     carpeta_tipo = carpeta_mes
     txt_dir = carpeta_mes / "TXT"
@@ -6734,14 +9392,15 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         fecha_slug = f"{anio:04d}{mes:02d}"
         if dia_dir != "Todos":
             fecha_slug = f"{fecha_slug}{dia_dir}"
-        pdf_report_path = carpeta_mes / f"recibidos_reporte_pdf_{tipo_slug}_{fecha_slug}.xlsx"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        pdf_report_path = pdf_dir / f"recibidos_reporte_pdf_{tipo_slug}_{fecha_slug}.xlsx"
         if pdf_report_path.exists():
             try:
                 pdf_report_path.unlink()
             except PermissionError:
                 sufijo_pdf = 1
                 while True:
-                    candidato = carpeta_mes / f"recibidos_reporte_pdf_{tipo_slug}_{fecha_slug}_{sufijo_pdf}.xlsx"
+                    candidato = pdf_dir / f"recibidos_reporte_pdf_{tipo_slug}_{fecha_slug}_{sufijo_pdf}.xlsx"
                     if not candidato.exists():
                         pdf_report_path = candidato
                         break
@@ -6919,6 +9578,11 @@ def _flujo_emitidos(
     selecciono_xml = descargar_xml
 
     tipo_visible = TIPOS_MAP.get(tipo, tipo)
+    es_retencion = _es_tipo_retencion(tipo_visible or tipo)
+    es_nota_credito = _es_tipo_nota_credito(tipo_visible or tipo)
+    es_nota_debito = _es_tipo_nota_debito(tipo_visible or tipo)
+    es_factura_emitida = _es_tipo_factura(tipo_visible or tipo)
+    es_liquidacion_compra = _es_tipo_liquidacion_compra(tipo_visible or tipo)
     try:
         page.wait_for_load_state("domcontentloaded", timeout=1000)
     except Exception:
@@ -7054,9 +9718,10 @@ def _flujo_emitidos(
     fecha_token_doc = f"{fecha_dt.year:04d}{fecha_dt.month:02d}{fecha_dt.day:02d}"
 
     _orden_tipo, _label_tipo, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
+    tipo_dir_nombre = _nombre_carpeta_tipo_visible(tipo_visible or tipo)
     tipo_slug = _slug_tipo(tipo_visible or tipo)
 
-    carpeta_estado = destino / estado_slug / anio_dir / mes_dir
+    carpeta_estado = destino / estado_slug / tipo_dir_nombre / anio_dir / mes_dir
     carpeta_estado.mkdir(parents=True, exist_ok=True)
     carpeta_tipo = carpeta_estado
     xml_dir = carpeta_tipo / "XML"
@@ -7111,6 +9776,9 @@ def _flujo_emitidos(
                 continue
             fecha_emision_col = textos[0]
             comprobante_raw = textos[1]
+            tipo_detectado = _extraer_tipo_documento(comprobante_raw)
+            if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
+                continue
             partes_tipo = comprobante_raw.split()
             comprobante = partes_tipo[0] if partes_tipo else ""
             serie = " ".join(partes_tipo[1:]) if len(partes_tipo) > 1 else ""
@@ -7148,6 +9816,9 @@ def _flujo_emitidos(
                 tipo_serie_texto = celdas.nth(1).inner_text().strip()
             except Exception:
                 tipo_serie_texto = ""
+            tipo_detectado = _extraer_tipo_documento(tipo_serie_texto)
+            if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
+                continue
             try:
                 clave_texto = celdas.nth(2).inner_text().strip()
             except Exception:
@@ -7273,6 +9944,12 @@ def _flujo_emitidos(
                     tipo_serie_texto = celdas.nth(1).inner_text().strip()
                 except Exception:
                     tipo_serie_texto = ""
+                tipo_detectado = _extraer_tipo_documento(tipo_serie_texto)
+                if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
+                    print(
+                        f"[WARN] Se omitio una fila de Emitidos porque corresponde a '{tipo_detectado}' y no a '{tipo_visible or tipo}'."
+                    )
+                    continue
                 clave_texto = _extraer_clave_fila(celdas)
                 try:
                     razon_texto = celdas.nth(4).inner_text().strip() if total_celdas > 4 else ""
@@ -7298,8 +9975,9 @@ def _flujo_emitidos(
                 tipo_serie_completo = " ".join(
                     fragment for fragment in [tipo_serie_texto, clave_texto] if fragment
                 ).strip()
+                tipo_slug_archivo = _slug_tipo(tipo_detectado or tipo_visible or tipo) or tipo_slug
                 nombre_base_pdf = _nombre_documento_mes(
-                    tipo_slug,
+                    tipo_slug_archivo,
                     fecha_token_doc,
                     tipo_serie_completo or razon_texto or f"emitido_{pagina}_{idx+1}",
                 )
@@ -7370,28 +10048,55 @@ def _flujo_emitidos(
                                         if xml_path_report:
                                             try:
                                                 if es_retencion:
-                                                    datos_xml = _extraer_datos_xml_retencion(xml_path_report)
+                                                    datos_xml = _extraer_datos_xml_retencion_emitido(xml_path_report)
+                                                elif es_nota_credito:
+                                                    datos_xml = _extraer_datos_xml_nota_credito_emitido(xml_path_report)
+                                                elif es_nota_debito:
+                                                    datos_xml = _extraer_datos_xml_nota_debito_emitido(xml_path_report)
+                                                elif es_factura_emitida:
+                                                    datos_xml = _extraer_datos_xml_factura_emitido(xml_path_report)
+                                                elif es_liquidacion_compra:
+                                                    datos_xml = _extraer_datos_xml_liquidacion_compra_emitido(xml_path_report)
                                                 else:
                                                     datos_xml = _extraer_datos_xml_pdf_report(xml_path_report)
                                                 datos_pdf = datos_xml
                                             except Exception as err:
                                                 print(f"[WARN] No se pudo usar XML para el reporte PDF: {err}")
                                         if datos_pdf is None:
-                                            datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
-                                                resultado_pdf,
-                                                es_retencion=es_retencion,
-                                                es_nota_credito=es_nota_credito,
-                                                es_nota_debito=es_nota_debito,
-                                            )
+                                            if es_retencion:
+                                                datos_pdf = _extraer_datos_pdf_retencion_emitido(resultado_pdf)
+                                            elif es_nota_credito:
+                                                datos_pdf = _extraer_datos_pdf_nota_credito_emitido(resultado_pdf)
+                                            elif es_nota_debito:
+                                                datos_pdf = _extraer_datos_pdf_nota_debito_emitido(resultado_pdf)
+                                            elif es_factura_emitida:
+                                                datos_pdf = _extraer_datos_pdf_factura_emitido(resultado_pdf)
+                                            elif es_liquidacion_compra:
+                                                datos_pdf = _extraer_datos_pdf_liquidacion_compra_emitido(resultado_pdf)
+                                            else:
+                                                datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
+                                                    resultado_pdf,
+                                                    es_retencion=es_retencion,
+                                                    es_nota_credito=es_nota_credito,
+                                                    es_nota_debito=es_nota_debito,
+                                                )
                                         if datos_pdf:
-                                            if clave_texto and not datos_pdf.get("claveAcceso"):
-                                                datos_pdf["claveAcceso"] = clave_texto
-                                            if not datos_pdf.get("numeroComprobante"):
-                                                match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
-                                                if match:
-                                                    datos_pdf["numeroComprobante"] = match.group(0)
-                                            if fecha_emision and not datos_pdf.get("fechaEmision"):
-                                                datos_pdf["fechaEmision"] = fecha_emision
+                                            if es_retencion or es_nota_credito or es_nota_debito or es_factura_emitida:
+                                                if clave_texto and not datos_pdf.get("Clave de Acceso"):
+                                                    datos_pdf["Clave de Acceso"] = clave_texto
+                                                if not datos_pdf.get("Número de Autorización") and clave_texto:
+                                                    datos_pdf["Número de Autorización"] = clave_texto
+                                                if fecha_emision and not datos_pdf.get("Fecha de Emisión"):
+                                                    datos_pdf["Fecha de Emisión"] = fecha_emision
+                                            else:
+                                                if clave_texto and not datos_pdf.get("claveAcceso"):
+                                                    datos_pdf["claveAcceso"] = clave_texto
+                                                if not datos_pdf.get("numeroComprobante"):
+                                                    match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
+                                                    if match:
+                                                        datos_pdf["numeroComprobante"] = match.group(0)
+                                                if fecha_emision and not datos_pdf.get("fechaEmision"):
+                                                    datos_pdf["fechaEmision"] = fecha_emision
                                             pdf_report_rows.append(datos_pdf)
                             else:
                                 print(
@@ -7459,63 +10164,110 @@ def _flujo_emitidos(
                             if xml_path_report:
                                 try:
                                     if es_retencion:
-                                        datos_xml = _extraer_datos_xml_retencion(xml_path_report)
+                                        datos_xml = _extraer_datos_xml_retencion_emitido(xml_path_report)
+                                    elif es_nota_credito:
+                                        datos_xml = _extraer_datos_xml_nota_credito_emitido(xml_path_report)
+                                    elif es_nota_debito:
+                                        datos_xml = _extraer_datos_xml_nota_debito_emitido(xml_path_report)
+                                    elif es_factura_emitida:
+                                        datos_xml = _extraer_datos_xml_factura_emitido(xml_path_report)
+                                    elif es_liquidacion_compra:
+                                        datos_xml = _extraer_datos_xml_liquidacion_compra_emitido(xml_path_report)
                                     else:
                                         datos_xml = _extraer_datos_xml_pdf_report(xml_path_report)
                                     datos_pdf = datos_xml
                                 except Exception as err:
                                     print(f"[WARN] No se pudo usar XML para el reporte PDF: {err}")
                             if datos_pdf is None:
-                                datos_dom = _extraer_datos_emitidos_dom(
-                                    tipo_visible,
-                                    tipo_serie_texto,
-                                    clave_texto,
-                                    fecha_emision,
-                                    fecha_aut_texto,
-                                    razon_texto,
-                                    valor_sin_imp_texto,
-                                    iva_texto,
-                                    importe_total_texto,
-                                    ruc_emisor=ruc_emisor,
-                                )
-                                detalle_data = None
-                                source_id_detalle = _obtener_source_detalle_emitido(page, idx)
-                                if source_id_detalle:
-                                    detalle_data = _obtener_detalle_emitido_xhr(
-                                        page,
-                                        request_context,
-                                        source_id_detalle,
-                                        payload_base,
-                                        view_state or _obtener_view_state(page),
+                                if es_retencion:
+                                    try:
+                                        datos_pdf = _extraer_datos_pdf_retencion_emitido(resultado_pdf)
+                                    except Exception as err:
+                                        print(f"[WARN] No se pudo leer el PDF de retención para completar el reporte: {err}")
+                                        datos_pdf = None
+                                elif es_nota_credito:
+                                    try:
+                                        datos_pdf = _extraer_datos_pdf_nota_credito_emitido(resultado_pdf)
+                                    except Exception as err:
+                                        print(f"[WARN] No se pudo leer el PDF de nota de crédito para completar el reporte: {err}")
+                                        datos_pdf = None
+                                elif es_nota_debito:
+                                    try:
+                                        datos_pdf = _extraer_datos_pdf_nota_debito_emitido(resultado_pdf)
+                                    except Exception as err:
+                                        print(f"[WARN] No se pudo leer el PDF de nota de débito para completar el reporte: {err}")
+                                        datos_pdf = None
+                                elif es_factura_emitida:
+                                    try:
+                                        datos_pdf = _extraer_datos_pdf_factura_emitido(resultado_pdf)
+                                    except Exception as err:
+                                        print(f"[WARN] No se pudo leer el PDF de factura para completar el reporte: {err}")
+                                        datos_pdf = None
+                                elif es_liquidacion_compra:
+                                    try:
+                                        datos_pdf = _extraer_datos_pdf_liquidacion_compra_emitido(resultado_pdf)
+                                    except Exception as err:
+                                        print(f"[WARN] No se pudo leer el PDF de liquidación de compra para completar el reporte: {err}")
+                                        datos_pdf = None
+                                else:
+                                    datos_dom = _extraer_datos_emitidos_dom(
                                         tipo_visible,
                                         tipo_serie_texto,
                                         clave_texto,
+                                        fecha_emision,
+                                        fecha_aut_texto,
+                                        razon_texto,
+                                        valor_sin_imp_texto,
+                                        iva_texto,
+                                        importe_total_texto,
                                         ruc_emisor=ruc_emisor,
                                     )
-                                datos_pdf_archivo = None
-                                try:
-                                    datos_pdf_archivo = _extraer_datos_pdf_emitido_por_tipo(
-                                        resultado_pdf,
-                                        es_retencion=es_retencion,
-                                        es_nota_credito=es_nota_credito,
-                                        es_nota_debito=es_nota_debito,
+                                    detalle_data = None
+                                    source_id_detalle = _obtener_source_detalle_emitido(page, idx)
+                                    if source_id_detalle:
+                                        detalle_data = _obtener_detalle_emitido_xhr(
+                                            page,
+                                            request_context,
+                                            source_id_detalle,
+                                            payload_base,
+                                            view_state or _obtener_view_state(page),
+                                            tipo_visible,
+                                            tipo_serie_texto,
+                                            clave_texto,
+                                            ruc_emisor=ruc_emisor,
+                                        )
+                                    datos_pdf_archivo = None
+                                    try:
+                                        datos_pdf_archivo = _extraer_datos_pdf_por_tipo_layout_first(
+                                            resultado_pdf,
+                                            es_retencion=es_retencion,
+                                            es_nota_credito=es_nota_credito,
+                                            es_nota_debito=es_nota_debito,
+                                        )
+                                    except Exception as err:
+                                        print(f"[WARN] No se pudo leer el PDF para completar el reporte: {err}")
+                                    datos_pdf = _combinar_datos_reporte_emitidos(
+                                        datos_dom,
+                                        detalle_data,
+                                        datos_pdf_archivo,
                                     )
-                                except Exception as err:
-                                    print(f"[WARN] No se pudo leer el PDF para completar el reporte: {err}")
-                                datos_pdf = _combinar_datos_reporte_emitidos(
-                                    datos_dom,
-                                    detalle_data,
-                                    datos_pdf_archivo,
-                                )
                             if datos_pdf:
-                                if clave_texto and not datos_pdf.get("claveAcceso"):
-                                    datos_pdf["claveAcceso"] = clave_texto
-                                if not datos_pdf.get("numeroComprobante"):
-                                    match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
-                                    if match:
-                                        datos_pdf["numeroComprobante"] = match.group(0)
-                                if fecha_emision and not datos_pdf.get("fechaEmision"):
-                                    datos_pdf["fechaEmision"] = fecha_emision
+                                if es_retencion or es_nota_credito or es_nota_debito or es_factura_emitida:
+                                    if clave_texto and not datos_pdf.get("Clave de Acceso"):
+                                        datos_pdf["Clave de Acceso"] = clave_texto
+                                    if not datos_pdf.get("Número de Autorización") and clave_texto:
+                                        datos_pdf["Número de Autorización"] = clave_texto
+                                    if fecha_emision and not datos_pdf.get("Fecha de Emisión"):
+                                        datos_pdf["Fecha de Emisión"] = fecha_emision
+                                else:
+                                    if clave_texto and not datos_pdf.get("claveAcceso"):
+                                        datos_pdf["claveAcceso"] = clave_texto
+                                    if not datos_pdf.get("numeroComprobante"):
+                                        match = re.search(r"\d{3}-\d{3}-\d{9}", tipo_serie_texto)
+                                        if match:
+                                            datos_pdf["numeroComprobante"] = match.group(0)
+                                    if fecha_emision and not datos_pdf.get("fechaEmision"):
+                                        datos_pdf["fechaEmision"] = fecha_emision
                                 pdf_report_rows.append(datos_pdf)
                     else:
                         print(f"[WARN] No se pudo descargar PDF para '{nombre_base_pdf}': no se obtuvo archivo.")
@@ -7552,14 +10304,15 @@ def _flujo_emitidos(
 
         fecha_slug = re.sub(r"[^0-9]+", "", fecha_emision) or "consulta"
         if descargar_xml and n_xml > 0:
-            xml_report_path = carpeta_estado / f"emitidos_reporte_xml_{tipo_slug}_{fecha_slug}.xlsx"
+            xml_dir.mkdir(parents=True, exist_ok=True)
+            xml_report_path = xml_dir / f"emitidos_reporte_xml_{tipo_slug}_{fecha_slug}.xlsx"
             if xml_report_path.exists():
                 try:
                     xml_report_path.unlink()
                 except PermissionError:
                     sufijo_xml = 1
                     while True:
-                        candidato = carpeta_estado / f"emitidos_reporte_xml_{tipo_slug}_{fecha_slug}_{sufijo_xml}.xlsx"
+                        candidato = xml_dir / f"emitidos_reporte_xml_{tipo_slug}_{fecha_slug}_{sufijo_xml}.xlsx"
                         if not candidato.exists():
                             xml_report_path = candidato
                             break
@@ -7575,20 +10328,30 @@ def _flujo_emitidos(
     df = pd.DataFrame(data)
     fecha_slug = re.sub(r"[^0-9]+", "", fecha_emision) or "consulta"
     if descargar_pdf and n_pdf > 0 and pdf_report_rows:
-        pdf_report_path = carpeta_estado / f"emitidos_reporte_pdf_{tipo_slug}_{fecha_slug}.xlsx"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        pdf_report_path = pdf_dir / f"emitidos_reporte_pdf_{tipo_slug}_{fecha_slug}.xlsx"
         if pdf_report_path.exists():
             try:
                 pdf_report_path.unlink()
             except PermissionError:
                 sufijo_pdf = 1
                 while True:
-                    candidato = carpeta_estado / f"emitidos_reporte_pdf_{tipo_slug}_{fecha_slug}_{sufijo_pdf}.xlsx"
+                    candidato = pdf_dir / f"emitidos_reporte_pdf_{tipo_slug}_{fecha_slug}_{sufijo_pdf}.xlsx"
                     if not candidato.exists():
                         pdf_report_path = candidato
                         break
                     sufijo_pdf += 1
         if es_retencion:
-            if _guardar_reporte_pdf_retencion_excel(pdf_report_rows, pdf_report_path):
+            if _guardar_reporte_pdf_retencion_emitidos_excel(pdf_report_rows, pdf_report_path):
+                info_base["reporte_pdf"] = str(pdf_report_path)
+        elif es_nota_credito:
+            if _guardar_reporte_pdf_nota_credito_emitidos_excel(pdf_report_rows, pdf_report_path):
+                info_base["reporte_pdf"] = str(pdf_report_path)
+        elif es_nota_debito:
+            if _guardar_reporte_pdf_nota_debito_emitidos_excel(pdf_report_rows, pdf_report_path):
+                info_base["reporte_pdf"] = str(pdf_report_path)
+        elif es_factura_emitida:
+            if _guardar_reporte_pdf_factura_emitidos_excel(pdf_report_rows, pdf_report_path):
                 info_base["reporte_pdf"] = str(pdf_report_path)
         elif _guardar_reporte_pdf_excel(pdf_report_rows, pdf_report_path):
             info_base["reporte_pdf"] = str(pdf_report_path)
@@ -7767,10 +10530,14 @@ def descargar_sri(
                         )
 
                 if dia_actual in (0, None):
-                    dia_inicio = 1
-                    if resume_download and mes_actual == resume_month and resume_day not in (0, None):
-                        dia_inicio = max(1, min(int(resume_day), limite_dia))
-                    dias_consultar = list(range(dia_inicio, limite_dia + 1))
+                    resultado_mes = _consultar_recibidos_dia(mes_actual, 0)
+                    if resultado_mes is None:
+                        return {"estado": "sin_resultados", "n_xml": 0, "n_pdf": 0}
+                    resultado_mes = dict(resultado_mes)
+                    resultado_mes["fecha_filtro"] = f"01/{mes_actual:02d}/{anio} - {limite_dia:02d}/{mes_actual:02d}/{anio}"
+                    resultado_mes["mensaje"] = "Consulta mensual realizada en modo Todos"
+                    resultado_mes["detalles_dias"] = []
+                    return resultado_mes
                 else:
                     dia_int = int(dia_actual)
                     if dia_int > limite_dia:
@@ -7830,12 +10597,15 @@ def descargar_sri(
                 tipo_visible = TIPOS_MAP.get(tipo, tipo)
                 tipo_slug = resultado_mes.get("tipo_slug", _slug_tipo(tipo_visible or tipo))
                 _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
-                base_mes = destino_objetivo / f"{anio:04d}" / _mes_a_texto(mes_actual)
+                tipo_dir_nombre = _nombre_carpeta_tipo_visible(tipo_visible or tipo)
+                base_mes = destino_objetivo / tipo_dir_nombre / f"{anio:04d}" / _mes_a_texto(mes_actual)
 
                 if "XML" in formatos_norm and total_xml > 0 and base_mes.exists():
                     xml_files = _xml_files_por_tipo(base_mes, tipo_prefijo)
                     if xml_files:
-                        destino_xml_mes = base_mes / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
+                        xml_dir_mes = base_mes / "XML"
+                        xml_dir_mes.mkdir(parents=True, exist_ok=True)
+                        destino_xml_mes = xml_dir_mes / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
                         try:
                             construir_reporte(base_mes, destino_xml_mes, None, xml_files=xml_files)
                         except Exception as err:
@@ -7847,13 +10617,15 @@ def descargar_sri(
                 if "PDF" in formatos_norm:
                     sufijos_dia = [f"{anio:04d}{mes_actual:02d}{int(d):02d}" for d in dias_consultar]
                     reportes_pdf_dia = _collect_existing_reports(
-                        base_mes,
+                        base_mes / "PDF",
                         "recibidos_reporte_pdf",
                         tipo_slug,
                         sufijos_dia,
                     )
                     if reportes_pdf_dia:
-                        destino_pdf_mes = base_mes / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
+                        pdf_dir_mes = base_mes / "PDF"
+                        pdf_dir_mes.mkdir(parents=True, exist_ok=True)
+                        destino_pdf_mes = pdf_dir_mes / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
                         try:
                             pdf_mes = _consolidar_reportes_excel(reportes_pdf_dia, destino_pdf_mes)
                         except Exception as err:
@@ -7953,13 +10725,15 @@ def descargar_sri(
                 fecha_fin = f"{dia_fin:02d}/{mes_fin_val:02d}/{anio}"
                 resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
                 resultado["reportes_xml"] = reportes_xml
+                tipo_visible = TIPOS_MAP.get(tipo, tipo)
+                tipo_dir_nombre = _nombre_carpeta_tipo_visible(tipo_visible or tipo)
                 tipo_slug = resultado.get(
                     "tipo_slug",
-                    _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
+                    _slug_tipo(tipo_visible or tipo),
                 )
                 if "PDF" in formatos_norm:
                     sufijos_mes = [f"{anio:04d}{m:02d}" for m in range(mes_inicio, mes_fin_val + 1)]
-                    carpeta_rango = destino_objetivo / f"{anio:04d}"
+                    carpeta_rango = destino_objetivo / tipo_dir_nombre / f"{anio:04d}" / "PDF"
                     reportes_pdf = _collect_existing_reports(
                         carpeta_rango,
                         "recibidos_reporte_pdf",
@@ -7969,13 +10743,14 @@ def descargar_sri(
                 resultado["reportes_pdf"] = reportes_pdf
                 if mes_inicio == 1 and mes_fin_val == 12:
                     if "XML" in formatos_norm:
-                        base_anual = destino_objetivo / f"{anio:04d}"
+                        base_anual = destino_objetivo / tipo_dir_nombre / f"{anio:04d}"
                         if base_anual.exists():
-                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
                             _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
                             xml_files = _xml_files_por_tipo(base_anual, tipo_prefijo)
                             if xml_files:
-                                destino_anual_xml = base_anual / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                                xml_dir_anual = base_anual / "XML"
+                                xml_dir_anual.mkdir(parents=True, exist_ok=True)
+                                destino_anual_xml = xml_dir_anual / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
                                 try:
                                     construir_reporte(base_anual, destino_anual_xml, None, xml_files=xml_files)
                                 except Exception as err:
@@ -7983,27 +10758,32 @@ def descargar_sri(
                                 if destino_anual_xml.exists():
                                     resultado["reporte_xml_anual"] = str(destino_anual_xml)
                             elif reportes_xml:
-                                destino_anual_xml = base_anual / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                                xml_dir_anual = base_anual / "XML"
+                                xml_dir_anual.mkdir(parents=True, exist_ok=True)
+                                destino_anual_xml = xml_dir_anual / f"recibidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
                                 anual_xml = _consolidar_reportes_excel(reportes_xml, destino_anual_xml)
                                 if anual_xml:
                                     resultado["reporte_xml_anual"] = str(anual_xml)
                     if reportes_pdf:
-                        destino_anual_pdf = destino_objetivo / f"{anio:04d}" / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}.xlsx"
+                        pdf_dir_anual = destino_objetivo / tipo_dir_nombre / f"{anio:04d}" / "PDF"
+                        pdf_dir_anual.mkdir(parents=True, exist_ok=True)
+                        destino_anual_pdf = pdf_dir_anual / f"recibidos_reporte_pdf_{tipo_slug}_{anio:04d}.xlsx"
                         anual_pdf = _consolidar_reportes_excel(reportes_pdf, destino_anual_pdf)
                         if anual_pdf:
                             resultado["reporte_pdf_anual"] = str(anual_pdf)
                     resultado["anual"] = True
                 else:
                     if "XML" in formatos_norm:
-                        base_rango = destino_objetivo / f"{anio:04d}"
+                        base_rango = destino_objetivo / tipo_dir_nombre / f"{anio:04d}"
                         if base_rango.exists():
-                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
                             _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
                             meses_rango = range(mes_inicio, mes_fin_val + 1)
                             xml_files = _xml_files_por_meses(base_rango, tipo_prefijo, meses_rango)
                             if xml_files:
                                 sufijo_rango = f"{anio:04d}{mes_inicio:02d}{mes_fin_val:02d}"
-                                destino_rango_xml = base_rango / f"recibidos_reporte_xml_{tipo_slug}_{sufijo_rango}.xlsx"
+                                xml_dir_rango = base_rango / "XML"
+                                xml_dir_rango.mkdir(parents=True, exist_ok=True)
+                                destino_rango_xml = xml_dir_rango / f"recibidos_reporte_xml_{tipo_slug}_{sufijo_rango}.xlsx"
                                 try:
                                     construir_reporte(base_rango, destino_rango_xml, None, xml_files=xml_files)
                                 except Exception as err:
@@ -8012,7 +10792,7 @@ def descargar_sri(
                                     resultado["reporte_xml_rango"] = str(destino_rango_xml)
                 resultado.pop("reporte_pdf", None)
                 resultado.pop("reporte_xml", None)
-                carpeta_rango = destino_objetivo / f"{anio:04d}"
+                carpeta_rango = destino_objetivo / tipo_dir_nombre / f"{anio:04d}"
                 resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_objetivo)
             else:
                 mes_objetivo = int(resume_month if resume_download else mes)
@@ -8136,19 +10916,35 @@ def descargar_sri(
                     estado_default_reporte = estado_nombre if "no autoriz" in estado_norm else None
                     tipo_visible = TIPOS_MAP.get(tipo, tipo)
                     tipo_slug = _slug_tipo(tipo_visible or tipo)
+                    tipo_dir_nombre = _nombre_carpeta_tipo_visible(tipo_visible or tipo)
                     anio_dir = f"{anio:04d}"
                     mes_dir = _mes_a_texto(mes_actual)
-                    carpeta_mes = destino_emitidos / estado_slug / anio_dir / mes_dir
+                    carpeta_mes = destino_emitidos / estado_slug / tipo_dir_nombre / anio_dir / mes_dir
+                    sufijos_dia = [f"{anio:04d}{mes_actual:02d}{int(d):02d}" for d in dias_consultar]
+                    reportes_xml_dia = _collect_existing_reports(
+                        carpeta_mes / "XML",
+                        "emitidos_reporte_xml",
+                        tipo_slug,
+                        sufijos_dia,
+                    )
+                    reportes_pdf_dia = _collect_existing_reports(
+                        carpeta_mes / "PDF",
+                        "emitidos_reporte_pdf",
+                        tipo_slug,
+                        sufijos_dia,
+                    )
                     if "XML" in formatos_norm and total_xml > 0:
                         if carpeta_mes.exists():
-                            xml_report_path = carpeta_mes / f"emitidos_reporte_xml_{tipo_slug}_{anio_dir}{mes_actual:02d}.xlsx"
+                            xml_dir_mes = carpeta_mes / "XML"
+                            xml_dir_mes.mkdir(parents=True, exist_ok=True)
+                            xml_report_path = xml_dir_mes / f"emitidos_reporte_xml_{tipo_slug}_{anio_dir}{mes_actual:02d}.xlsx"
                             if xml_report_path.exists():
                                 try:
                                     xml_report_path.unlink()
                                 except PermissionError:
                                     sufijo_xml = 1
                                     while True:
-                                        candidato = carpeta_mes / f"emitidos_reporte_xml_{tipo_slug}_{anio_dir}{mes_actual:02d}_{sufijo_xml}.xlsx"
+                                        candidato = xml_dir_mes / f"emitidos_reporte_xml_{tipo_slug}_{anio_dir}{mes_actual:02d}_{sufijo_xml}.xlsx"
                                         if not candidato.exists():
                                             xml_report_path = candidato
                                             break
@@ -8157,16 +10953,11 @@ def descargar_sri(
                                 xml_files_mes = _xml_files_por_tipo(carpeta_mes, _prefijo_tipo(tipo_visible or tipo)[2])
                                 construir_reporte(carpeta_mes, xml_report_path, estado_default_reporte, xml_files=xml_files_mes)
                                 resultado_mes["reporte_xml"] = str(xml_report_path)
+                                _delete_report_files(reportes_xml_dia)
                             except Exception as err:
                                 print(f"[WARN] No se pudo construir el reporte XML mensual de emitidos: {err}")
                     if descargar_pdf_mes:
-                        sufijos_dia = [f"{anio:04d}{mes_actual:02d}{int(d):02d}" for d in dias_consultar]
-                        reportes_dia = _collect_existing_reports(
-                            carpeta_mes,
-                            "emitidos_reporte_pdf",
-                            tipo_slug,
-                            sufijos_dia,
-                        )
+                        reportes_dia = list(reportes_pdf_dia)
                     if descargar_pdf_mes and reportes_dia:
                         frames = []
                         for ruta_excel in reportes_dia:
@@ -8180,24 +10971,37 @@ def descargar_sri(
                         if frames:
                             df_mes = pd.concat(frames, ignore_index=True)
                             carpeta_mes.mkdir(parents=True, exist_ok=True)
-                            pdf_report_path = carpeta_mes / f"emitidos_reporte_pdf_{tipo_slug}_{anio_dir}{mes_actual:02d}.xlsx"
+                            pdf_dir_mes = carpeta_mes / "PDF"
+                            pdf_dir_mes.mkdir(parents=True, exist_ok=True)
+                            pdf_report_path = pdf_dir_mes / f"emitidos_reporte_pdf_{tipo_slug}_{anio_dir}{mes_actual:02d}.xlsx"
                             if pdf_report_path.exists():
                                 try:
                                     pdf_report_path.unlink()
                                 except PermissionError:
                                     sufijo_pdf = 1
                                     while True:
-                                        candidato = carpeta_mes / f"emitidos_reporte_pdf_{tipo_slug}_{anio_dir}{mes_actual:02d}_{sufijo_pdf}.xlsx"
+                                        candidato = pdf_dir_mes / f"emitidos_reporte_pdf_{tipo_slug}_{anio_dir}{mes_actual:02d}_{sufijo_pdf}.xlsx"
                                         if not candidato.exists():
                                             pdf_report_path = candidato
                                             break
                                         sufijo_pdf += 1
                             filas_pdf = df_mes.to_dict(orient="records")
                             if _es_tipo_retencion(tipo_visible or tipo):
-                                if _guardar_reporte_pdf_retencion_excel(filas_pdf, pdf_report_path):
+                                if _guardar_reporte_pdf_retencion_emitidos_excel(filas_pdf, pdf_report_path):
+                                    resultado_mes["reporte_pdf"] = str(pdf_report_path)
+                            elif _es_tipo_nota_credito(tipo_visible or tipo):
+                                if _guardar_reporte_pdf_nota_credito_emitidos_excel(filas_pdf, pdf_report_path):
+                                    resultado_mes["reporte_pdf"] = str(pdf_report_path)
+                            elif _es_tipo_nota_debito(tipo_visible or tipo):
+                                if _guardar_reporte_pdf_nota_debito_emitidos_excel(filas_pdf, pdf_report_path):
+                                    resultado_mes["reporte_pdf"] = str(pdf_report_path)
+                            elif _es_tipo_factura(tipo_visible or tipo):
+                                if _guardar_reporte_pdf_factura_emitidos_excel(filas_pdf, pdf_report_path):
                                     resultado_mes["reporte_pdf"] = str(pdf_report_path)
                             elif _guardar_reporte_pdf_excel(filas_pdf, pdf_report_path):
                                 resultado_mes["reporte_pdf"] = str(pdf_report_path)
+                            if resultado_mes.get("reporte_pdf"):
+                                _delete_report_files(reportes_dia)
                 return resultado_mes
 
             mes_fin_val = None
@@ -8268,13 +11072,15 @@ def descargar_sri(
                 estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
                 estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
                 estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
+                tipo_visible = TIPOS_MAP.get(tipo, tipo)
+                tipo_dir_nombre = _nombre_carpeta_tipo_visible(tipo_visible or tipo)
                 tipo_slug = resultado.get(
                     "tipo_slug",
-                    _slug_tipo(TIPOS_MAP.get(tipo, tipo) or tipo),
+                    _slug_tipo(tipo_visible or tipo),
                 )
                 if "PDF" in formatos_norm:
                     sufijos_mes = [f"{anio:04d}{m:02d}" for m in range(mes_inicio, mes_fin_val + 1)]
-                    carpeta_rango_pdf = destino_emitidos / estado_slug / f"{anio:04d}"
+                    carpeta_rango_pdf = destino_emitidos / estado_slug / tipo_dir_nombre / f"{anio:04d}" / "PDF"
                     reportes_pdf = _collect_existing_reports(
                         carpeta_rango_pdf,
                         "emitidos_reporte_pdf",
@@ -8284,15 +11090,16 @@ def descargar_sri(
                 resultado["reportes_pdf"] = reportes_pdf
                 if mes_inicio == 1 and mes_fin_val == 12:
                     if "XML" in formatos_norm:
-                        base_anual = destino_emitidos / estado_slug / f"{anio:04d}"
+                        base_anual = destino_emitidos / estado_slug / tipo_dir_nombre / f"{anio:04d}"
                         if base_anual.exists():
-                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
                             _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
                             xml_files = _xml_files_por_tipo(base_anual, tipo_prefijo)
                             estado_norm = estado_nombre.lower()
                             estado_default_reporte = estado_nombre if "no autoriz" in estado_norm else None
                             if xml_files:
-                                destino_anual_xml = base_anual / f"emitidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                                xml_dir_anual = base_anual / "XML"
+                                xml_dir_anual.mkdir(parents=True, exist_ok=True)
+                                destino_anual_xml = xml_dir_anual / f"emitidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
                                 try:
                                     construir_reporte(base_anual, destino_anual_xml, estado_default_reporte, xml_files=xml_files)
                                 except Exception as err:
@@ -8300,21 +11107,24 @@ def descargar_sri(
                                 if destino_anual_xml.exists():
                                     resultado["reporte_xml_anual"] = str(destino_anual_xml)
                             elif reportes_xml:
-                                destino_anual_xml = base_anual / f"emitidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
+                                xml_dir_anual = base_anual / "XML"
+                                xml_dir_anual.mkdir(parents=True, exist_ok=True)
+                                destino_anual_xml = xml_dir_anual / f"emitidos_reporte_xml_{tipo_slug}_{anio:04d}.xlsx"
                                 anual_xml = _consolidar_reportes_excel(reportes_xml, destino_anual_xml)
                                 if anual_xml:
                                     resultado["reporte_xml_anual"] = str(anual_xml)
                     if reportes_pdf:
-                        destino_anual_pdf = destino_emitidos / estado_slug / f"{anio:04d}" / f"emitidos_reporte_pdf_{tipo_slug}_{anio:04d}.xlsx"
+                        pdf_dir_anual = destino_emitidos / estado_slug / tipo_dir_nombre / f"{anio:04d}" / "PDF"
+                        pdf_dir_anual.mkdir(parents=True, exist_ok=True)
+                        destino_anual_pdf = pdf_dir_anual / f"emitidos_reporte_pdf_{tipo_slug}_{anio:04d}.xlsx"
                         anual_pdf = _consolidar_reportes_excel(reportes_pdf, destino_anual_pdf)
                         if anual_pdf:
                             resultado["reporte_pdf_anual"] = str(anual_pdf)
                     resultado["anual"] = True
                 else:
                     if "XML" in formatos_norm:
-                        base_rango = destino_emitidos / estado_slug / f"{anio:04d}"
+                        base_rango = destino_emitidos / estado_slug / tipo_dir_nombre / f"{anio:04d}"
                         if base_rango.exists():
-                            tipo_visible = TIPOS_MAP.get(tipo, tipo)
                             _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo)
                             meses_rango = range(mes_inicio, mes_fin_val + 1)
                             xml_files = _xml_files_por_meses(base_rango, tipo_prefijo, meses_rango)
@@ -8322,7 +11132,9 @@ def descargar_sri(
                             estado_default_reporte = estado_nombre if "no autoriz" in estado_norm else None
                             if xml_files:
                                 sufijo_rango = f"{anio:04d}{mes_inicio:02d}{mes_fin_val:02d}"
-                                destino_rango_xml = base_rango / f"emitidos_reporte_xml_{tipo_slug}_{sufijo_rango}.xlsx"
+                                xml_dir_rango = base_rango / "XML"
+                                xml_dir_rango.mkdir(parents=True, exist_ok=True)
+                                destino_rango_xml = xml_dir_rango / f"emitidos_reporte_xml_{tipo_slug}_{sufijo_rango}.xlsx"
                                 try:
                                     construir_reporte(base_rango, destino_rango_xml, estado_default_reporte, xml_files=xml_files)
                                 except Exception as err:
@@ -8331,7 +11143,7 @@ def descargar_sri(
                                     resultado["reporte_xml_rango"] = str(destino_rango_xml)
                 resultado.pop("reporte_pdf", None)
                 resultado.pop("reporte_xml", None)
-                carpeta_rango = destino_emitidos / estado_slug / f"{anio:04d}"
+                carpeta_rango = destino_emitidos / estado_slug / tipo_dir_nombre / f"{anio:04d}"
                 resultado["carpeta_tipo"] = str(carpeta_rango if carpeta_rango.exists() else destino_emitidos)
             else:
                 mes_objetivo = int(resume_month if resume_download else mes)
