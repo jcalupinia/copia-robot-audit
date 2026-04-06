@@ -759,6 +759,27 @@ def landing_page(request: Request):
       transform: translateY(-1px);
       filter: brightness(1.04);
     }}
+    .cta-secondary {{
+      margin-top: 10px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      padding: 13px 14px;
+      border-radius: 14px;
+      background: rgba(122, 177, 255, 0.12);
+      color: #d6e9ff;
+      font-weight: 700;
+      font-size: 14px;
+      border: 1px solid rgba(122, 177, 255, 0.26);
+      transition: transform 0.18s ease, filter 0.18s ease, background 0.18s ease;
+    }}
+    .cta-secondary:hover {{
+      transform: translateY(-1px);
+      filter: brightness(1.04);
+      background: rgba(122, 177, 255, 0.18);
+    }}
     .version {{
       margin-top: 14px;
       padding: 11px 12px;
@@ -831,21 +852,21 @@ def landing_page(request: Request):
     <aside class="download-card">
       <h2>Descarga ahora</h2>
       <p>Instala tu software de forma inmediata y empieza a usarlo hoy mismo.</p>
-      <button class="cta" id="download-btn" type="button">Descargar ROBOT_AUDIT_SRI.exe</button>
-      <a id="download-fallback" href="{download_url}" download="ROBOT_AUDIT_SRI.exe" style="display:none;">Descargar ROBOT_AUDIT_SRI.exe</a>
+      <a class="cta" id="download-direct" href="{download_url}" download="ROBOT_AUDIT_SRI.exe">Descargar ROBOT_AUDIT_SRI.exe</a>
+      <button class="cta-secondary" id="save-btn" type="button">Elegir donde guardar</button>
       <div class="version">Version actual: {version}</div>
-      <p class="note">Haz clic en el boton y la descarga iniciara automaticamente.</p>
+      <p class="note">Usa el boton principal para descargar normalmente. Si tu navegador lo permite, tambien puedes elegir la ubicacion de guardado.</p>
       <p class="note" id="download-status" aria-live="polite"></p>
       <div class="trust">Solucion profesional para equipos que buscan orden, velocidad y confianza.</div>
     </aside>
   </div>
   <script>
     (function () {{
-      const btn = document.getElementById("download-btn");
-      const fallback = document.getElementById("download-fallback");
+      const saveBtn = document.getElementById("save-btn");
+      const directLink = document.getElementById("download-direct");
       const status = document.getElementById("download-status");
       const fileName = "ROBOT_AUDIT_SRI.exe";
-      const downloadUrl = fallback ? fallback.href : "";
+      const downloadUrl = directLink ? directLink.href : "";
 
       function setStatus(msg) {{
         if (status) status.textContent = msg || "";
@@ -866,40 +887,60 @@ def landing_page(request: Request):
         if (!response.ok) {{
           throw new Error("No se pudo iniciar la descarga.");
         }}
+        if (!response.body) {{
+          throw new Error("El navegador no devolvio el flujo del archivo.");
+        }}
         const writable = await handle.createWritable();
-        if (response.body && response.body.pipeTo) {{
-          await response.body.pipeTo(writable);
-        }} else {{
-          const blob = await response.blob();
-          await writable.write(blob);
+        let closed = false;
+        try {{
+          const reader = response.body.getReader();
+          while (true) {{
+            const {{ done, value }} = await reader.read();
+            if (done) break;
+            if (value) {{
+              await writable.write(value);
+            }}
+          }}
           await writable.close();
+          closed = true;
+        }} catch (err) {{
+          if (!closed) {{
+            try {{
+              await writable.abort();
+            }} catch (_abortErr) {{
+              // Ignorado a proposito.
+            }}
+          }}
+          throw err;
         }}
       }}
 
-      btn.addEventListener("click", async function () {{
+      if (!saveBtn) {{
+        return;
+      }}
+
+      saveBtn.addEventListener("click", async function () {{
         if (!downloadUrl) {{
           setStatus("No se encontro el archivo de descarga.");
           return;
         }}
-        btn.disabled = true;
+        saveBtn.disabled = true;
         setStatus("Preparando descarga...");
         try {{
-          if (window.isSecureContext && "showSaveFilePicker" in window) {{
-            await saveWithPicker();
-            setStatus("Descarga completada.");
-          }} else {{
-            setStatus("Tu navegador no permite elegir carpeta desde el boton. Se iniciara la descarga normal.");
-            fallback.click();
+          if (!(window.isSecureContext && "showSaveFilePicker" in window)) {{
+            setStatus("Tu navegador no permite elegir ubicacion desde este boton. Usa la descarga principal.");
+            return;
           }}
+          await saveWithPicker();
+          setStatus("Descarga completada.");
         }} catch (err) {{
           if (err && err.name === "AbortError") {{
             setStatus("Descarga cancelada.");
           }} else {{
-            setStatus("No se pudo completar la descarga desde el boton. Se intentara descarga normal.");
-            fallback.click();
+            setStatus("No se pudo completar la descarga desde este boton. Usa la descarga principal.");
           }}
         }} finally {{
-          btn.disabled = false;
+          saveBtn.disabled = false;
         }}
       }});
     }})();
