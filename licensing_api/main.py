@@ -106,7 +106,7 @@ def _r2_presigned_url() -> str | None:
                 "Bucket": bucket,
                 "Key": object_key,
                 "ResponseContentDisposition": f'attachment; filename="{object_key}"',
-                "ResponseContentType": "application/octet-stream",
+                "ResponseContentType": "application/x-msdownload",
             },
             ExpiresIn=expires_in,
         )
@@ -511,7 +511,7 @@ def updates_download(request: Request):
         return FileResponse(
             file_path,
             filename="ROBOT_AUDIT_SRI.exe",
-            media_type="application/octet-stream",
+            media_type="application/x-msdownload",
             headers={"Content-Disposition": 'attachment; filename="ROBOT_AUDIT_SRI.exe"'},
         )
     client, bucket, object_key = _r2_download_source()
@@ -525,7 +525,7 @@ def updates_download(request: Request):
         if body is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se pudo leer el archivo de actualizacion en R2.")
         filename = Path(object_key).name or "ROBOT_AUDIT_SRI.exe"
-        media_type = r2_obj.get("ContentType") or "application/octet-stream"
+        media_type = r2_obj.get("ContentType") or "application/x-msdownload"
         headers = {
             "Content-Disposition": f'attachment; filename="{filename}"',
         }
@@ -875,10 +875,11 @@ def landing_page(request: Request):
       async function saveWithPicker() {{
         const handle = await window.showSaveFilePicker({{
           suggestedName: fileName,
+          excludeAcceptAllOption: true,
           types: [{{
-            description: "Ejecutable de Windows",
+            description: "Application",
             accept: {{
-              "application/octet-stream": [".exe"]
+              "application/x-msdownload": [".exe"]
             }}
           }}]
         }});
