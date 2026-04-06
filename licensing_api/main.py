@@ -10,13 +10,10 @@ from pathlib import Path
 import secrets
 import smtplib
 import ssl
-import tempfile
-import zipfile
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
-from starlette.background import BackgroundTask
 
 import boto3
 from botocore.config import Config
@@ -117,16 +114,6 @@ def _r2_presigned_url() -> str | None:
         return None
 
 
-def _public_package_key() -> str:
-    package_key = os.getenv("R2_PUBLIC_PACKAGE_KEY", "").strip()
-    if package_key:
-        return package_key
-    object_key = os.getenv("R2_OBJECT_KEY", "").strip() or os.getenv("UPDATE_OBJECT_KEY", "").strip()
-    if not object_key:
-        object_key = "ROBOT_AUDIT_SRI.exe"
-    return str(Path(object_key).with_suffix(".zip"))
-
-
 def _r2_download_source() -> tuple[object, str, str] | tuple[None, None, None]:
     bucket = os.getenv("R2_BUCKET", "").strip()
     object_key = os.getenv("R2_OBJECT_KEY", "").strip() or os.getenv("UPDATE_OBJECT_KEY", "").strip()
@@ -150,37 +137,6 @@ def _iter_r2_body(stream_body, chunk_size: int = 1024 * 512):
             stream_body.close()
         except Exception:
             pass
-
-
-def _cleanup_paths(*paths: str) -> None:
-    for raw in paths:
-        if not raw:
-            continue
-        try:
-            Path(raw).unlink(missing_ok=True)
-        except Exception:
-            pass
-
-
-def _build_temp_zip_from_file(source_path: Path, output_name: str | None = None) -> Path:
-    if not source_path.exists():
-        raise FileNotFoundError(str(source_path))
-    fd, temp_zip = tempfile.mkstemp(prefix="robot_audit_pkg_", suffix=".zip")
-    os.close(fd)
-    target = Path(temp_zip)
-    arcname = output_name or source_path.name
-    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_STORED) as zf:
-        zf.write(source_path, arcname=arcname)
-    return target
-
-
-def _download_r2_object_to_temp(client, bucket: str, object_key: str) -> Path:
-    suffix = Path(object_key).suffix or ".bin"
-    fd, temp_path = tempfile.mkstemp(prefix="robot_audit_dl_", suffix=suffix)
-    os.close(fd)
-    target = Path(temp_path)
-    client.download_file(bucket, object_key, str(target))
-    return target
 
 
 def _password_reset_hash(token: str) -> str:
@@ -584,74 +540,6 @@ def updates_download(request: Request):
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archivo de actualizacion no configurado.")
 
 
-@app.get("/downloads/package")
-def public_package_download(request: Request):
-    _require_update_token(request)
-    package_path = os.getenv("PUBLIC_DOWNLOAD_FILE_PATH", "").strip()
-    if package_path:
-        package_file = Path(package_path)
-        if package_file.exists():
-            return FileResponse(
-                str(package_file),
-                filename=package_file.name or "ROBOT_AUDIT_SRI.zip",
-                media_type="application/zip",
-                headers={"Content-Disposition": f'attachment; filename="{package_file.name or "ROBOT_AUDIT_SRI.zip"}"'},
-            )
-
-    client, bucket, exe_object_key = _r2_download_source()
-    package_key = _public_package_key()
-    if client and bucket and package_key:
-        try:
-            package_obj = client.get_object(Bucket=bucket, Key=package_key)
-        except Exception:
-            package_obj = None
-        if package_obj is not None:
-            body = package_obj.get("Body")
-            if body is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se pudo leer el paquete de descarga.")
-            headers = {
-                "Content-Disposition": f'attachment; filename="{Path(package_key).name or "ROBOT_AUDIT_SRI.zip"}"',
-            }
-            content_length = package_obj.get("ContentLength")
-            if content_length is not None:
-                headers["Content-Length"] = str(content_length)
-            return StreamingResponse(
-                _iter_r2_body(body),
-                media_type="application/zip",
-                headers=headers,
-            )
-
-    file_path = os.getenv("UPDATE_FILE_PATH", "").strip()
-    if file_path:
-        exe_path = Path(file_path)
-        if exe_path.exists():
-            zip_path = _build_temp_zip_from_file(exe_path, output_name="ROBOT_AUDIT_SRI.exe")
-            return FileResponse(
-                str(zip_path),
-                filename="ROBOT_AUDIT_SRI.zip",
-                media_type="application/zip",
-                headers={"Content-Disposition": 'attachment; filename="ROBOT_AUDIT_SRI.zip"'},
-                background=BackgroundTask(_cleanup_paths, str(zip_path)),
-            )
-
-    if client and bucket and exe_object_key:
-        exe_temp = _download_r2_object_to_temp(client, bucket, exe_object_key)
-        try:
-            zip_temp = _build_temp_zip_from_file(exe_temp, output_name="ROBOT_AUDIT_SRI.exe")
-        except Exception:
-            _cleanup_paths(str(exe_temp))
-            raise
-        return FileResponse(
-            str(zip_temp),
-            filename="ROBOT_AUDIT_SRI.zip",
-            media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="ROBOT_AUDIT_SRI.zip"'},
-            background=BackgroundTask(_cleanup_paths, str(exe_temp), str(zip_temp)),
-        )
-
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paquete de descarga no configurado.")
-
-
 def _landing_logo_data_uri() -> str:
     logo_env = os.getenv("LANDING_LOGO_PATH", "").strip()
     candidates = []
@@ -693,7 +581,7 @@ def landing_page(request: Request):
     if not version:
         version = "desconocida"
     base_url = str(request.base_url).rstrip("/")
-    download_url = f"{base_url}/downloads/package"
+    download_url = f"{base_url}/updates/download"
     token = os.getenv("UPDATE_TOKEN", "").strip()
     if token:
         download_url = f"{download_url}?token={token}"
@@ -964,10 +852,10 @@ def landing_page(request: Request):
     <aside class="download-card">
       <h2>Descarga ahora</h2>
       <p>Instala tu software de forma inmediata y empieza a usarlo hoy mismo.</p>
-      <a class="cta" id="download-direct" href="{download_url}" download="ROBOT_AUDIT_SRI.zip">Descargar paquete ZIP</a>
+      <a class="cta" id="download-direct" href="{download_url}" download="ROBOT_AUDIT_SRI.exe">Descargar ROBOT_AUDIT_SRI.exe</a>
       <button class="cta-secondary" id="save-btn" type="button">Elegir donde guardar</button>
       <div class="version">Version actual: {version}</div>
-      <p class="note">La descarga publica se entrega en formato ZIP para evitar bloqueos del navegador. Si tu navegador lo permite, tambien puedes elegir la ubicacion de guardado.</p>
+      <p class="note">Usa el boton principal para descargar normalmente. Si tu navegador lo permite, tambien puedes elegir la ubicacion de guardado.</p>
       <p class="note" id="download-status" aria-live="polite"></p>
       <div class="trust">Solucion profesional para equipos que buscan orden, velocidad y confianza.</div>
     </aside>
@@ -977,7 +865,7 @@ def landing_page(request: Request):
       const saveBtn = document.getElementById("save-btn");
       const directLink = document.getElementById("download-direct");
       const status = document.getElementById("download-status");
-      const fileName = "ROBOT_AUDIT_SRI.zip";
+      const fileName = "ROBOT_AUDIT_SRI.exe";
       const downloadUrl = directLink ? directLink.href : "";
 
       function setStatus(msg) {{
@@ -989,9 +877,9 @@ def landing_page(request: Request):
           suggestedName: fileName,
           excludeAcceptAllOption: true,
           types: [{{
-            description: "ZIP",
+            description: "Application",
             accept: {{
-              "application/zip": [".zip"]
+              "application/x-msdownload": [".exe"]
             }}
           }}]
         }});

@@ -4,8 +4,6 @@ import argparse
 import hashlib
 import os
 from pathlib import Path
-import tempfile
-import zipfile
 
 import boto3
 import requests
@@ -51,21 +49,11 @@ def _upload_to_r2(exe_path: Path, object_key: str) -> None:
     client = _r2_client()
     if client is None:
         raise RuntimeError("Faltan credenciales R2.")
-    content_type = "application/zip" if exe_path.suffix.lower() == ".zip" else "application/x-msdownload"
-    extra = {"ContentType": content_type}
+    extra = {"ContentType": "application/octet-stream"}
     cache_control = os.getenv("R2_CACHE_CONTROL", "").strip()
     if cache_control:
         extra["CacheControl"] = cache_control
     client.upload_file(str(exe_path), bucket, object_key, ExtraArgs=extra)
-
-
-def _build_zip_from_exe(exe_path: Path) -> Path:
-    fd, temp_zip = tempfile.mkstemp(prefix="robot_audit_publish_", suffix=".zip")
-    os.close(fd)
-    zip_path = Path(temp_zip)
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
-        zf.write(exe_path, arcname=exe_path.name)
-    return zip_path
 
 
 def _render_headers(api_key: str) -> dict:
@@ -112,21 +100,12 @@ def main() -> None:
     print(f"SHA256: {sha256}")
     print(f"Size: {size} bytes")
 
-    zip_object_key = os.getenv("R2_PUBLIC_PACKAGE_KEY", "").strip() or str(Path(args.object_key).with_suffix(".zip"))
-    zip_path = _build_zip_from_exe(exe_path)
-
     # Subir a R2
     try:
         _upload_to_r2(exe_path, args.object_key)
-        _upload_to_r2(zip_path, zip_object_key)
         print("Subido a R2.")
     except Exception as exc:
         raise SystemExit(f"Error subiendo a R2: {exc}") from exc
-    finally:
-        try:
-            zip_path.unlink(missing_ok=True)
-        except Exception:
-            pass
 
     # Actualizar Render (si hay credenciales)
     render_key = os.getenv("RENDER_API_KEY", "").strip()
