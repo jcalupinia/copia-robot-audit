@@ -139,6 +139,15 @@ def _iter_r2_body(stream_body, chunk_size: int = 1024 * 512):
             pass
 
 
+def _public_base_url(request: Request) -> str:
+    explicit = os.getenv("APP_BASE_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    proto = request.headers.get("x-forwarded-proto", "").strip() or request.url.scheme
+    host = request.headers.get("x-forwarded-host", "").strip() or request.headers.get("host", "").strip() or request.url.netloc
+    return f"{proto}://{host}".rstrip("/")
+
+
 def _password_reset_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -482,7 +491,7 @@ def updates_latest(request: Request):
     file_url = os.getenv("UPDATE_FILE_URL", "").strip()
     file_path = os.getenv("UPDATE_FILE_PATH", "").strip()
     if not file_url and file_path:
-        base = str(request.base_url).rstrip("/")
+        base = _public_base_url(request)
         file_url = f"{base}/updates/download"
     if not file_url and not file_path:
         r2_url = _r2_presigned_url()
@@ -580,8 +589,7 @@ def landing_page(request: Request):
             version = ""
     if not version:
         version = "desconocida"
-    base_url = str(request.base_url).rstrip("/")
-    download_url = f"{base_url}/updates/download"
+    download_url = "/updates/download"
     token = os.getenv("UPDATE_TOKEN", "").strip()
     if token:
         download_url = f"{download_url}?token={token}"
@@ -873,6 +881,13 @@ def landing_page(request: Request):
       }}
 
       async function saveWithPicker() {{
+        const response = await fetch(downloadUrl, {{ credentials: "same-origin" }});
+        if (!response.ok) {{
+          throw new Error("No se pudo iniciar la descarga.");
+        }}
+        if (!response.body) {{
+          throw new Error("El navegador no devolvio el flujo del archivo.");
+        }}
         const handle = await window.showSaveFilePicker({{
           suggestedName: fileName,
           excludeAcceptAllOption: true,
@@ -883,14 +898,6 @@ def landing_page(request: Request):
             }}
           }}]
         }});
-
-        const response = await fetch(downloadUrl, {{ credentials: "same-origin" }});
-        if (!response.ok) {{
-          throw new Error("No se pudo iniciar la descarga.");
-        }}
-        if (!response.body) {{
-          throw new Error("El navegador no devolvio el flujo del archivo.");
-        }}
         const writable = await handle.createWritable();
         let closed = false;
         try {{
