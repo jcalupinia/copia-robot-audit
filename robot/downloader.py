@@ -10856,6 +10856,8 @@ def descargar_sri(
                 formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
                 descargar_pdf_mes = "PDF" in formatos_norm
                 reportes_dia = []
+                reportes_pdf_generados = []
+                reportes_xml_generados = []
                 resultado_mes = None
                 for idx_dia, dia_iter in enumerate(dias_consultar):
                     _check_cancel("emitidos_dia")
@@ -10882,10 +10884,15 @@ def descargar_sri(
                     total_xml += resultado_dia.get("n_xml", 0)
                     total_pdf += resultado_dia.get("n_pdf", 0)
                     resultado_mes = resultado_dia
+                    reporte_xml_dia = resultado_dia.get("reporte_xml")
+                    if reporte_xml_dia and Path(reporte_xml_dia).exists():
+                        reportes_xml_generados.append(str(Path(reporte_xml_dia)))
                     if descargar_pdf_mes:
                         reporte_dia = resultado_dia.get("reporte_pdf")
                         if reporte_dia and Path(reporte_dia).exists():
+                            reporte_dia = str(Path(reporte_dia))
                             reportes_dia.append(reporte_dia)
+                            reportes_pdf_generados.append(reporte_dia)
                     if checkpoint_path_str and idx_dia < len(dias_consultar) - 1:
                         _update_download_checkpoint_progress(
                             checkpoint_path_str,
@@ -10927,12 +10934,14 @@ def descargar_sri(
                         tipo_slug,
                         sufijos_dia,
                     )
+                    reportes_xml_dia = sorted({*reportes_xml_dia, *reportes_xml_generados})
                     reportes_pdf_dia = _collect_existing_reports(
                         carpeta_mes / "PDF",
                         "emitidos_reporte_pdf",
                         tipo_slug,
                         sufijos_dia,
                     )
+                    reportes_pdf_dia = sorted({*reportes_pdf_dia, *reportes_pdf_generados})
                     if "XML" in formatos_norm and total_xml > 0:
                         if carpeta_mes.exists():
                             xml_dir_mes = carpeta_mes / "XML"
