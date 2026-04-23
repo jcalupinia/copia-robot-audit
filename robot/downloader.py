@@ -4,7 +4,7 @@ from typing import Optional
 import threading
 from urllib.parse import urlencode
 import pandas as pd
-import csv, re, json, os, time, unicodedata, html, calendar
+import csv, re, json, os, time, unicodedata, html, calendar, uuid
 from datetime import datetime
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -8352,6 +8352,81 @@ def _cerrar_sesion(pagina) -> bool:
         pass
     return True
 
+
+DOWNLOAD_ROW_RETRY_ATTEMPTS = max(1, int(os.getenv("DOWNLOAD_ROW_RETRY_ATTEMPTS", "2")))
+
+
+def _build_download_row_id(*parts) -> str:
+    tokens = []
+    for part in parts:
+        text = str(part or "").strip()
+        if text:
+            tokens.append(text)
+    return " | ".join(tokens) if tokens else str(uuid.uuid4())
+
+
+def _build_download_verification(
+    registros_esperados: int,
+    esperados_xml: set,
+    descargados_xml: set,
+    esperados_pdf: set,
+    descargados_pdf: set,
+) -> dict:
+    faltantes_xml = max(0, len(esperados_xml) - len(descargados_xml))
+    faltantes_pdf = max(0, len(esperados_pdf) - len(descargados_pdf))
+    descarga_completa = faltantes_xml == 0 and faltantes_pdf == 0
+    partes = [f"Filas detectadas: {int(registros_esperados or 0)}"]
+    if esperados_xml:
+        partes.append(f"XML {len(descargados_xml)}/{len(esperados_xml)}")
+    if esperados_pdf:
+        partes.append(f"PDF {len(descargados_pdf)}/{len(esperados_pdf)}")
+    mensaje = " | ".join(partes)
+    if not descarga_completa:
+        mensaje += f" | Faltantes XML: {faltantes_xml}, PDF: {faltantes_pdf}"
+    return {
+        "registros_esperados": int(registros_esperados or 0),
+        "esperados_xml": len(esperados_xml),
+        "esperados_pdf": len(esperados_pdf),
+        "descargados_xml_verificados": len(descargados_xml),
+        "descargados_pdf_verificados": len(descargados_pdf),
+        "faltantes_xml": faltantes_xml,
+        "faltantes_pdf": faltantes_pdf,
+        "descarga_completa": descarga_completa,
+        "mensaje_verificacion": mensaje,
+    }
+
+
+def _merge_download_verification(resultados: list[dict]) -> dict:
+    registros_esperados = sum(
+        int((r or {}).get("registros_esperados", (r or {}).get("n_registros", 0)) or 0)
+        for r in resultados
+    )
+    esperados_xml = sum(int((r or {}).get("esperados_xml", 0) or 0) for r in resultados)
+    esperados_pdf = sum(int((r or {}).get("esperados_pdf", 0) or 0) for r in resultados)
+    descargados_xml = sum(
+        int((r or {}).get("descargados_xml_verificados", (r or {}).get("n_xml", 0)) or 0)
+        for r in resultados
+    )
+    descargados_pdf = sum(
+        int((r or {}).get("descargados_pdf_verificados", (r or {}).get("n_pdf", 0)) or 0)
+        for r in resultados
+    )
+    return {
+        "registros_esperados": registros_esperados,
+        "esperados_xml": esperados_xml,
+        "esperados_pdf": esperados_pdf,
+        "descargados_xml_verificados": descargados_xml,
+        "descargados_pdf_verificados": descargados_pdf,
+        "faltantes_xml": max(0, esperados_xml - descargados_xml),
+        "faltantes_pdf": max(0, esperados_pdf - descargados_pdf),
+        "descarga_completa": descargados_xml >= esperados_xml and descargados_pdf >= esperados_pdf,
+        "mensaje_verificacion": (
+            f"Filas detectadas: {registros_esperados}"
+            + (f" | XML {descargados_xml}/{esperados_xml}" if esperados_xml else "")
+            + (f" | PDF {descargados_pdf}/{esperados_pdf}" if esperados_pdf else "")
+        ),
+    }
+
 def _login(
     context,
     page,
@@ -9146,6 +9221,11 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
     n_pdf = 0
     txt_path = None
     pdf_report_rows = []
+    registros_esperados = 0
+    esperados_xml = set()
+    esperados_pdf = set()
+    descargados_xml = set()
+    descargados_pdf = set()
 
     if "XML" in formatos:
         link_reporte = page.locator("a#frmPrincipal\\:lnkTxtlistado")
@@ -9230,85 +9310,109 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 celdas = fila.locator("td")
                 if not celdas.count():
                     continue
+                clave_fila = _extraer_clave_fila(celdas)
                 razon_texto = celdas.nth(1).inner_text().strip()
                 bloques = [segmento.strip() for segmento in razon_texto.splitlines() if segmento.strip()]
                 razon_social = bloques[-1] if bloques else f"documento_{pagina}_{idx+1}"
                 nombre_base = _nombre_documento_mes(tipo_slug, fecha_token_doc, razon_social)
+                row_id = _build_download_row_id(
+                    clave_fila,
+                    tipo_slug,
+                    razon_social,
+                    f"pag{pagina}",
+                    f"fila{idx+1}",
+                )
+                registros_esperados += 1
+                if descargar_xml:
+                    esperados_xml.add(row_id)
+                if descargar_pdf:
+                    esperados_pdf.add(row_id)
 
                 xml_guardado = False
                 xml_path_report = None
                 if descargar_xml_para_reporte and not xml_guardado:
-                    xml_link_directo = fila.locator("a[id$=':lnkXml']")
-                    if not xml_link_directo.count():
-                        xml_link_directo = fila.locator("a[title*='xml' i], button[title*='xml' i]")
-                    if not xml_link_directo.count():
-                        icono_xml = fila.locator("img[title*='xml' i], img[alt*='xml' i]")
-                        if icono_xml.count():
-                            contenedor = icono_xml.first.locator("xpath=ancestor::a[1] | xpath=ancestor::button[1]")
-                            if not contenedor.count():
-                                contenedor = icono_xml.first.locator("xpath=ancestor::span[1]")
-                            if contenedor.count():
-                                xml_link_directo = contenedor.first
-                    if xml_link_directo and xml_link_directo.count():
-                        destino_base_directo = xml_dir / nombre_base
-                        destino_xml_directo = _resolver_destino_unico(destino_base_directo, ".xml")
-                        resultado_directo = _guardar_xml_desde_enlace(page, xml_link_directo, destino_xml_directo)
-                        if resultado_directo:
-                            xml_path_report = resultado_directo
-                            if descargar_xml:
-                                n_xml += 1
-                            else:
-                                xml_temp_paths.append(xml_path_report)
-                            xml_guardado = True
-                            lote_xml_ok += 1
+                    for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
+                        xml_link_directo = fila.locator("a[id$=':lnkXml']")
+                        if not xml_link_directo.count():
+                            xml_link_directo = fila.locator("a[title*='xml' i], button[title*='xml' i]")
+                        if not xml_link_directo.count():
+                            icono_xml = fila.locator("img[title*='xml' i], img[alt*='xml' i]")
+                            if icono_xml.count():
+                                contenedor = icono_xml.first.locator("xpath=ancestor::a[1] | xpath=ancestor::button[1]")
+                                if not contenedor.count():
+                                    contenedor = icono_xml.first.locator("xpath=ancestor::span[1]")
+                                if contenedor.count():
+                                    xml_link_directo = contenedor.first
+                        if xml_link_directo and xml_link_directo.count():
+                            destino_base_directo = xml_dir / nombre_base
+                            destino_xml_directo = _resolver_destino_unico(destino_base_directo, ".xml")
+                            resultado_directo = _guardar_xml_desde_enlace(page, xml_link_directo, destino_xml_directo)
+                            if resultado_directo:
+                                xml_path_report = resultado_directo
+                                if descargar_xml:
+                                    n_xml += 1
+                                    descargados_xml.add(row_id)
+                                else:
+                                    xml_temp_paths.append(xml_path_report)
+                                xml_guardado = True
+                                lote_xml_ok += 1
+                                break
 
-                if descargar_xml_para_reporte and not xml_guardado:
-                    xml_link = None
-                    selectores_xml = [
-                        "a[id$=':lnkXml']",
-                        "a[id*='lnkXml']",
-                        "a[title*='xml' i]",
-                        "button[id*='lnkXml']",
-                        "button[title*='xml' i]",
-                    ]
-                    for selector in selectores_xml:
-                        posible = fila.locator(selector)
-                        if posible.count():
-                            xml_link = posible.first
-                            break
-                    if not xml_link:
-                        icono_xml = fila.locator("img[title*='xml' i], img[alt*='xml' i]")
-                        if icono_xml.count():
-                            contenedor = icono_xml.first.locator("xpath=ancestor::a[1]")
-                            if contenedor.count():
-                                xml_link = contenedor.first
-                    if xml_link:
-                        destino_xml = xml_dir / f"{nombre_base}.xml"
-                        sufijo_xml = 1
-                        while destino_xml.exists():
-                            destino_xml = xml_dir / f"{nombre_base}_{sufijo_xml}.xml"
-                            sufijo_xml += 1
-                        try:
-                            with page.expect_download(timeout=DOWNLOAD_TIMEOUT) as descarga_info:
-                                xml_link.click(no_wait_after=True)
-                            descarga_xml = descarga_info.value
-                            sugerido = descarga_xml.suggested_filename or destino_xml.name
-                            extension = Path(sugerido).suffix or ".xml"
-                            destino_final = destino_xml.with_suffix(extension)
+                        xml_link = None
+                        selectores_xml = [
+                            "a[id$=':lnkXml']",
+                            "a[id*='lnkXml']",
+                            "a[title*='xml' i]",
+                            "button[id*='lnkXml']",
+                            "button[title*='xml' i]",
+                        ]
+                        for selector in selectores_xml:
+                            posible = fila.locator(selector)
+                            if posible.count():
+                                xml_link = posible.first
+                                break
+                        if not xml_link:
+                            icono_xml = fila.locator("img[title*='xml' i], img[alt*='xml' i]")
+                            if icono_xml.count():
+                                contenedor = icono_xml.first.locator("xpath=ancestor::a[1]")
+                                if contenedor.count():
+                                    xml_link = contenedor.first
+                        if xml_link:
+                            destino_xml = xml_dir / f"{nombre_base}.xml"
                             sufijo_xml = 1
-                            while destino_final.exists():
-                                destino_final = destino_xml.with_name(f"{destino_xml.stem}_{sufijo_xml}{extension}")
+                            while destino_xml.exists():
+                                destino_xml = xml_dir / f"{nombre_base}_{sufijo_xml}.xml"
                                 sufijo_xml += 1
-                            descarga_xml.save_as(str(destino_final))
-                            xml_path_report = destino_final
-                            if descargar_xml:
-                                n_xml += 1
-                            else:
-                                xml_temp_paths.append(xml_path_report)
-                            xml_guardado = True
-                            lote_xml_ok += 1
-                        except Exception as err:
-                            print(f"[WARN] No se pudo descargar XML para '{razon_social}': {err}")
+                            try:
+                                with page.expect_download(timeout=DOWNLOAD_TIMEOUT) as descarga_info:
+                                    xml_link.click(no_wait_after=True)
+                                descarga_xml = descarga_info.value
+                                sugerido = descarga_xml.suggested_filename or destino_xml.name
+                                extension = Path(sugerido).suffix or ".xml"
+                                destino_final = destino_xml.with_suffix(extension)
+                                sufijo_xml = 1
+                                while destino_final.exists():
+                                    destino_final = destino_xml.with_name(f"{destino_xml.stem}_{sufijo_xml}{extension}")
+                                    sufijo_xml += 1
+                                descarga_xml.save_as(str(destino_final))
+                                xml_path_report = destino_final
+                                if descargar_xml:
+                                    n_xml += 1
+                                    descargados_xml.add(row_id)
+                                else:
+                                    xml_temp_paths.append(xml_path_report)
+                                xml_guardado = True
+                                lote_xml_ok += 1
+                                break
+                            except Exception as err:
+                                print(f"[WARN] No se pudo descargar XML para '{razon_social}' (intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}")
+                        if xml_guardado:
+                            break
+                        if intento_xml < DOWNLOAD_ROW_RETRY_ATTEMPTS:
+                            try:
+                                page.wait_for_timeout(250)
+                            except Exception:
+                                pass
 
                 usar_xml_reporte = False
                 if descargar_pdf and xml_path_report:
@@ -9323,40 +9427,50 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                         print(f"[WARN] No se pudo procesar XML para reporte: {err}")
 
                 if descargar_pdf:
-                    destino_pdf = pdf_dir / f"{nombre_base}.pdf"
-                    link_id = f"frmPrincipal:tablaCompRecibidos:{idx}:lnkPdf"
-                    resultado_pdf = None
-                    if view_state:
-                        resultado_pdf = _descargar_pdf_recibidos_post_con_viewstate(
-                            page, link_id, view_state, destino_pdf
-                        )
-                    if not resultado_pdf:
-                        view_state = _obtener_viewstate_actual() or view_state
+                    pdf_guardado = False
+                    for intento_pdf in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
+                        destino_pdf = pdf_dir / f"{nombre_base}.pdf"
+                        link_id = f"frmPrincipal:tablaCompRecibidos:{idx}:lnkPdf"
+                        resultado_pdf = None
                         if view_state:
                             resultado_pdf = _descargar_pdf_recibidos_post_con_viewstate(
                                 page, link_id, view_state, destino_pdf
                             )
-                    if not resultado_pdf:
-                        link_pdf = fila.locator("a[id$=':lnkPdf']")
-                        if not link_pdf.count():
-                            link_pdf = fila.locator("a[title*='pdf' i], button[title*='pdf' i]")
-                        if link_pdf.count():
-                            resultado_pdf = _guardar_pdf_desde_jsf(page, link_pdf.first, destino_pdf)
-                            if not resultado_pdf:
-                                resultado_pdf = _guardar_pdf_desde_enlace(page, link_pdf.first, destino_pdf)
-                    if resultado_pdf:
-                        n_pdf += 1
-                        lote_pdf_ok += 1
-                        if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
-                            if not usar_xml_reporte:
-                                datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
-                                    resultado_pdf,
-                                    es_retencion=es_retencion,
-                                    es_nota_credito=es_nota_credito,
-                                    es_nota_debito=es_nota_debito,
+                        if not resultado_pdf:
+                            view_state = _obtener_viewstate_actual() or view_state
+                            if view_state:
+                                resultado_pdf = _descargar_pdf_recibidos_post_con_viewstate(
+                                    page, link_id, view_state, destino_pdf
                                 )
-                                pdf_report_rows.append(datos_pdf)
-                    else:
+                        if not resultado_pdf:
+                            link_pdf = fila.locator("a[id$=':lnkPdf']")
+                            if not link_pdf.count():
+                                link_pdf = fila.locator("a[title*='pdf' i], button[title*='pdf' i]")
+                            if link_pdf.count():
+                                resultado_pdf = _guardar_pdf_desde_jsf(page, link_pdf.first, destino_pdf)
+                                if not resultado_pdf:
+                                    resultado_pdf = _guardar_pdf_desde_enlace(page, link_pdf.first, destino_pdf)
+                        if resultado_pdf:
+                            n_pdf += 1
+                            descargados_pdf.add(row_id)
+                            lote_pdf_ok += 1
+                            pdf_guardado = True
+                            if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
+                                if not usar_xml_reporte:
+                                    datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
+                                        resultado_pdf,
+                                        es_retencion=es_retencion,
+                                        es_nota_credito=es_nota_credito,
+                                        es_nota_debito=es_nota_debito,
+                                    )
+                                    pdf_report_rows.append(datos_pdf)
+                            break
+                        if intento_pdf < DOWNLOAD_ROW_RETRY_ATTEMPTS:
+                            try:
+                                page.wait_for_timeout(250)
+                            except Exception:
+                                pass
+                    if not pdf_guardado:
                         print(f"[WARN] No se pudo descargar PDF para '{razon_social}': no se obtuvo archivo.")
 
                 lote_contador += 1
@@ -9418,6 +9532,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         "estado": "ok",
         "n_xml": n_xml,
         "n_pdf": n_pdf,
+        "n_registros": registros_esperados,
         "carpeta_tipo": str(carpeta_mes),
         "tipo_slug": tipo_slug,
         "tipo_visible": tipo_visible,
@@ -9429,6 +9544,19 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         resultado["reporte_pdf"] = str(reporte_pdf_path)
     if txt_path:
         resultado["txt"] = str(txt_path)
+    resultado.update(
+        _build_download_verification(
+            registros_esperados,
+            esperados_xml,
+            descargados_xml,
+            esperados_pdf,
+            descargados_pdf,
+        )
+    )
+    if not resultado.get("descarga_completa", True):
+        print(f"[WARN] Verificacion de Recibidos incompleta: {resultado.get('mensaje_verificacion')}")
+    else:
+        print(f"[INFO] Verificacion de Recibidos OK: {resultado.get('mensaje_verificacion')}")
 
     if es_retencion and not descargar_xml and xml_temp_paths:
         for xml_tmp in xml_temp_paths:
@@ -9842,6 +9970,11 @@ def _flujo_emitidos(
     n_pdf = 0
     n_xml = 0
     pdf_report_rows = []
+    registros_esperados = 0
+    esperados_xml = set()
+    esperados_pdf = set()
+    descargados_xml = set()
+    descargados_pdf = set()
 
     info_base = {
         "carpeta_tipo": str(carpeta_tipo),
@@ -9888,6 +10021,7 @@ def _flujo_emitidos(
             "mensaje": "No se encontraron filas en la tabla",
             "n_registros": 0,
         })
+        info_base.update(_build_download_verification(0, set(), set(), set(), set()))
         return info_base
 
     xml_temp_paths = []
@@ -9981,29 +10115,53 @@ def _flujo_emitidos(
                     fecha_token_doc,
                     tipo_serie_completo or razon_texto or f"emitido_{pagina}_{idx+1}",
                 )
+                row_id = _build_download_row_id(
+                    clave_texto,
+                    tipo_slug_archivo,
+                    tipo_serie_texto,
+                    razon_texto,
+                    f"pag{pagina}",
+                    f"fila{idx+1}",
+                )
+                registros_esperados += 1
+                if descargar_xml and not omitir_soap_xml:
+                    esperados_xml.add(row_id)
+                if descargar_pdf:
+                    esperados_pdf.add(row_id)
                 xml_path_report = None
 
                 if es_rechazado:
                     try:
                         if descargar_xml_para_reporte:
                             if clave_texto:
-                                try:
-                                    resultado_xml = _descargar_xml_emitido_por_clave(
-                                        request_context,
-                                        clave_texto,
-                                        xml_dir,
-                                        nombre_base_pdf,
-                                        claves_guardadas,
-                                    )
-                                    if resultado_xml:
-                                        xml_path_report = resultado_xml
-                                        if descargar_xml:
-                                            n_xml += 1
-                                        else:
-                                            xml_temp_paths.append(xml_path_report)
-                                        lote_xml_ok += 1
-                                except Exception as err:
-                                    print(f"[WARN] No se pudo obtener XML SOAP para '{nombre_base_pdf}': {err}")
+                                for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
+                                    try:
+                                        resultado_xml = _descargar_xml_emitido_por_clave(
+                                            request_context,
+                                            clave_texto,
+                                            xml_dir,
+                                            nombre_base_pdf,
+                                            claves_guardadas,
+                                        )
+                                        if resultado_xml:
+                                            xml_path_report = resultado_xml
+                                            if descargar_xml:
+                                                n_xml += 1
+                                                descargados_xml.add(row_id)
+                                            else:
+                                                xml_temp_paths.append(xml_path_report)
+                                            lote_xml_ok += 1
+                                            break
+                                    except Exception as err:
+                                        print(
+                                            f"[WARN] No se pudo obtener XML SOAP para '{nombre_base_pdf}' "
+                                            f"(intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}"
+                                        )
+                                    if intento_xml < DOWNLOAD_ROW_RETRY_ATTEMPTS:
+                                        try:
+                                            page.wait_for_timeout(250)
+                                        except Exception:
+                                            pass
                             else:
                                 print(
                                     f"[WARN] La fila '{nombre_base_pdf}' no tiene clave de acceso para solicitar el XML."
@@ -10026,22 +10184,32 @@ def _flujo_emitidos(
                                 except Exception:
                                     link_id = None
                                 resultado_pdf = None
-                                if link_id and view_state:
-                                    resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
-                                        page, link_id, view_state, destino_pdf
-                                    )
-                                if not resultado_pdf:
-                                    view_state = _obtener_viewstate_actual() or view_state
+                                for intento_pdf in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
+                                    resultado_pdf = None
                                     if link_id and view_state:
                                         resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
                                             page, link_id, view_state, destino_pdf
                                         )
-                                if not resultado_pdf:
-                                    resultado_pdf = _guardar_pdf_desde_jsf(page, contenedor, destino_pdf)
-                                if not resultado_pdf:
-                                    resultado_pdf = _guardar_pdf_desde_enlace(page, contenedor, destino_pdf)
+                                    if not resultado_pdf:
+                                        view_state = _obtener_viewstate_actual() or view_state
+                                        if link_id and view_state:
+                                            resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
+                                                page, link_id, view_state, destino_pdf
+                                            )
+                                    if not resultado_pdf:
+                                        resultado_pdf = _guardar_pdf_desde_jsf(page, contenedor, destino_pdf)
+                                    if not resultado_pdf:
+                                        resultado_pdf = _guardar_pdf_desde_enlace(page, contenedor, destino_pdf)
+                                    if resultado_pdf:
+                                        break
+                                    if intento_pdf < DOWNLOAD_ROW_RETRY_ATTEMPTS:
+                                        try:
+                                            page.wait_for_timeout(250)
+                                        except Exception:
+                                            pass
                                 if resultado_pdf:
                                     n_pdf += 1
+                                    descargados_pdf.add(row_id)
                                     lote_pdf_ok += 1
                                     if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
                                         datos_pdf = None
@@ -10108,23 +10276,34 @@ def _flujo_emitidos(
 
                 if descargar_xml_para_reporte and not omitir_soap_xml:
                     if clave_texto:
-                        try:
-                            resultado_xml = _descargar_xml_emitido_por_clave(
-                                request_context,
-                                clave_texto,
-                                xml_dir,
-                                nombre_base_pdf,
-                                claves_guardadas,
-                            )
-                            if resultado_xml:
-                                xml_path_report = resultado_xml
-                                if descargar_xml:
-                                    n_xml += 1
-                                else:
-                                    xml_temp_paths.append(xml_path_report)
-                                lote_xml_ok += 1
-                        except Exception as err:
-                            print(f"[WARN] No se pudo obtener XML SOAP para '{nombre_base_pdf}': {err}")
+                        for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
+                            try:
+                                resultado_xml = _descargar_xml_emitido_por_clave(
+                                    request_context,
+                                    clave_texto,
+                                    xml_dir,
+                                    nombre_base_pdf,
+                                    claves_guardadas,
+                                )
+                                if resultado_xml:
+                                    xml_path_report = resultado_xml
+                                    if descargar_xml:
+                                        n_xml += 1
+                                        descargados_xml.add(row_id)
+                                    else:
+                                        xml_temp_paths.append(xml_path_report)
+                                    lote_xml_ok += 1
+                                    break
+                            except Exception as err:
+                                print(
+                                    f"[WARN] No se pudo obtener XML SOAP para '{nombre_base_pdf}' "
+                                    f"(intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}"
+                                )
+                            if intento_xml < DOWNLOAD_ROW_RETRY_ATTEMPTS:
+                                try:
+                                    page.wait_for_timeout(250)
+                                except Exception:
+                                    pass
                     else:
                         print(f"[WARN] La fila '{nombre_base_pdf}' no tiene clave de acceso para solicitar el XML.")
 
@@ -10142,22 +10321,32 @@ def _flujo_emitidos(
                     except Exception:
                         link_id = None
                     resultado_pdf = None
-                    if link_id and view_state:
-                        resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
-                            page, link_id, view_state, destino_pdf
-                        )
-                    if not resultado_pdf:
-                        view_state = _obtener_viewstate_actual() or view_state
+                    for intento_pdf in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
+                        resultado_pdf = None
                         if link_id and view_state:
                             resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
                                 page, link_id, view_state, destino_pdf
                             )
-                    if not resultado_pdf:
-                        resultado_pdf = _guardar_pdf_desde_jsf(page, link_pdf.first, destino_pdf)
-                    if not resultado_pdf:
-                        resultado_pdf = _guardar_pdf_desde_enlace(page, link_pdf.first, destino_pdf)
+                        if not resultado_pdf:
+                            view_state = _obtener_viewstate_actual() or view_state
+                            if link_id and view_state:
+                                resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
+                                    page, link_id, view_state, destino_pdf
+                                )
+                        if not resultado_pdf:
+                            resultado_pdf = _guardar_pdf_desde_jsf(page, link_pdf.first, destino_pdf)
+                        if not resultado_pdf:
+                            resultado_pdf = _guardar_pdf_desde_enlace(page, link_pdf.first, destino_pdf)
+                        if resultado_pdf:
+                            break
+                        if intento_pdf < DOWNLOAD_ROW_RETRY_ATTEMPTS:
+                            try:
+                                page.wait_for_timeout(250)
+                            except Exception:
+                                pass
                     if resultado_pdf:
                         n_pdf += 1
+                        descargados_pdf.add(row_id)
                         lote_pdf_ok += 1
                         if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
                             datos_pdf = None
@@ -10358,13 +10547,26 @@ def _flujo_emitidos(
     if not df.empty:
         info_base.update({
             "estado": "ok",
-            "n_registros": len(df),
+            "n_registros": registros_esperados or len(df),
         })
     else:
         info_base.update({
             "estado": "sin_resultados",
             "n_registros": 0,
         })
+    info_base.update(
+        _build_download_verification(
+            registros_esperados or len(df),
+            esperados_xml,
+            descargados_xml,
+            esperados_pdf,
+            descargados_pdf,
+        )
+    )
+    if not info_base.get("descarga_completa", True):
+        print(f"[WARN] Verificacion de Emitidos incompleta: {info_base.get('mensaje_verificacion')}")
+    else:
+        print(f"[INFO] Verificacion de Emitidos OK: {info_base.get('mensaje_verificacion')}")
     if not descargar_xml and xml_temp_paths:
         for xml_tmp in xml_temp_paths:
             try:
@@ -10551,6 +10753,7 @@ def descargar_sri(
                 total_pdf = 0
                 detalle_dias = []
                 reportes_pdf_dia = []
+                resultados_verificacion = []
                 resultado_mes = None
 
                 for idx_dia, dia_iter in enumerate(dias_consultar):
@@ -10558,6 +10761,7 @@ def descargar_sri(
                     resultado_dia = _consultar_recibidos_dia(mes_actual, dia_iter)
                     total_xml += resultado_dia.get("n_xml", 0)
                     total_pdf += resultado_dia.get("n_pdf", 0)
+                    resultados_verificacion.append(resultado_dia)
                     detalle_dias.append(
                         {
                             "dia": dia_iter,
@@ -10593,6 +10797,8 @@ def descargar_sri(
                     f"{dias_consultar[0]:02d}/{mes_actual:02d}/{anio}"
                     f" - {dias_consultar[-1]:02d}/{mes_actual:02d}/{anio}"
                 )
+                resultado_mes.update(_merge_download_verification(resultados_verificacion))
+                resultado_mes["n_registros"] = resultado_mes.get("registros_esperados", 0)
 
                 tipo_visible = TIPOS_MAP.get(tipo, tipo)
                 tipo_slug = resultado_mes.get("tipo_slug", _slug_tipo(tipo_visible or tipo))
@@ -10677,6 +10883,7 @@ def descargar_sri(
                 detalle_meses = []
                 total_xml = 0
                 total_pdf = 0
+                resultados_verificacion = []
                 mes_inicio = int(resume_month if resume_download else mes)
                 mes_fin_val = int(mes_fin_val)
                 resultado_mes = None
@@ -10685,6 +10892,7 @@ def descargar_sri(
                     resultado_mes = _recibidos_por_mes(mes_actual, 0)
                     total_xml += resultado_mes.get("n_xml", 0)
                     total_pdf += resultado_mes.get("n_pdf", 0)
+                    resultados_verificacion.append(resultado_mes)
                     detalle_meses.append(
                         {
                             "mes": mes_actual,
@@ -10725,6 +10933,8 @@ def descargar_sri(
                 fecha_fin = f"{dia_fin:02d}/{mes_fin_val:02d}/{anio}"
                 resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
                 resultado["reportes_xml"] = reportes_xml
+                resultado.update(_merge_download_verification(resultados_verificacion))
+                resultado["n_registros"] = resultado.get("registros_esperados", 0)
                 tipo_visible = TIPOS_MAP.get(tipo, tipo)
                 tipo_dir_nombre = _nombre_carpeta_tipo_visible(tipo_visible or tipo)
                 tipo_slug = resultado.get(
@@ -10853,6 +11063,7 @@ def descargar_sri(
                     dias_consultar = [dia_int]
                 total_regs = total_xml = total_pdf = 0
                 detalle_dias = []
+                resultados_verificacion = []
                 formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
                 descargar_pdf_mes = "PDF" in formatos_norm
                 reportes_dia = []
@@ -10883,6 +11094,7 @@ def descargar_sri(
                     total_regs += resultado_dia.get("n_registros", 0)
                     total_xml += resultado_dia.get("n_xml", 0)
                     total_pdf += resultado_dia.get("n_pdf", 0)
+                    resultados_verificacion.append(resultado_dia)
                     resultado_mes = resultado_dia
                     reporte_xml_dia = resultado_dia.get("reporte_xml")
                     if reporte_xml_dia and Path(reporte_xml_dia).exists():
@@ -10916,6 +11128,7 @@ def descargar_sri(
                     resultado_mes["estado"] = "sin_descargas" if total_regs == 0 else "ok"
                     resultado_mes["mensaje"] = f"Procesados {len(dias_consultar)} días del mes"
                     resultado_mes["detalles_dias"] = detalle_dias
+                    resultado_mes.update(_merge_download_verification(resultados_verificacion))
                     estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
                     estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
                     estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"
@@ -11033,6 +11246,7 @@ def descargar_sri(
                 reportes_pdf = []
                 detalle_meses = []
                 total_regs = total_xml = total_pdf = 0
+                resultados_verificacion = []
                 mes_inicio = int(resume_month if resume_download else mes)
                 mes_fin_val = int(mes_fin_val)
                 resultado_mes = None
@@ -11049,6 +11263,7 @@ def descargar_sri(
                     total_regs += resultado_mes.get("n_registros", 0)
                     total_xml += resultado_mes.get("n_xml", 0)
                     total_pdf += resultado_mes.get("n_pdf", 0)
+                    resultados_verificacion.append(resultado_mes)
                     if resultado_mes.get("reporte_xml"):
                         reportes_xml.append(resultado_mes["reporte_xml"])
                     if resultado_mes.get("reporte_pdf"):
@@ -11078,6 +11293,7 @@ def descargar_sri(
                 fecha_fin = f"{calendar.monthrange(anio, mes_fin_val)[1]:02d}/{mes_fin_val:02d}/{anio}"
                 resultado["fecha_filtro"] = f"{fecha_inicio} - {fecha_fin}"
                 resultado["reportes_xml"] = reportes_xml
+                resultado.update(_merge_download_verification(resultados_verificacion))
                 estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
                 estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
                 estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"

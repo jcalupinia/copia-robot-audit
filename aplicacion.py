@@ -358,6 +358,9 @@ def _render_download_finished_modal() -> None:
     carpeta_tipo = resultado.get("carpeta_tipo")
     if carpeta_tipo:
         lineas.append(f"Carpeta destino: {Path(carpeta_tipo)}")
+    mensaje_verificacion = str(resultado.get("mensaje_verificacion") or "").strip()
+    if mensaje_verificacion:
+        lineas.append(f"Verificación: {mensaje_verificacion}")
 
     st.write(f"El proceso de {origen.lower()} para {tipo.lower()} ha finalizado correctamente.")
     for linea in lineas:
@@ -3076,8 +3079,14 @@ with tab1:
             estado = resultado.get("estado", "")
             carpeta_tipo = Path(resultado.get("carpeta_tipo") or params.get("destino"))
             aviso_recorte = resultado.get("aviso_recorte")
+            mensaje_verificacion = str(resultado.get("mensaje_verificacion") or "").strip()
             if aviso_recorte:
                 st.warning(aviso_recorte)
+            if mensaje_verificacion:
+                if resultado.get("descarga_completa", True):
+                    st.caption(mensaje_verificacion)
+                else:
+                    st.warning(f"Verificación de descarga: {mensaje_verificacion}")
             if estado in {"sin_descargas", "sin_resultados"}:
                 st.warning(" No se encontraron comprobantes para el período seleccionado.")
             elif params.get("origen") == "Emitidos":
