@@ -6695,64 +6695,6 @@ def _obtener_source_detalle_emitido(page, row_index: int) -> str:
         return ""
 
 
-def _snapshot_filas_emitidos(page, es_rechazado: bool = False) -> list[dict]:
-    selector = "#frmPrincipal\\\\:tablaCompRechazados_data tr" if es_rechazado else "#frmPrincipal\\\\:tablaCompEmitidos_data tr"
-    try:
-        rows = page.evaluate(
-            """(selector) => {
-                const allRows = Array.from(document.querySelectorAll(selector));
-                const textOf = (cells, idx) => ((cells[idx]?.innerText) || "").trim();
-                const bestDetailId = (row) => {
-                    const candidatos = Array.from(row.querySelectorAll("a, button"));
-                    const score = (el) => {
-                        const id = el.id || "";
-                        const onclick = (el.getAttribute("onclick") || "").toLowerCase();
-                        const title = (el.getAttribute("title") || "").toLowerCase();
-                        const aria = (el.getAttribute("aria-label") || "").toLowerCase();
-                        const txt = (el.textContent || "").toLowerCase();
-                        if (onclick.includes("panel-detalle-factura") || onclick.includes("detalle")) return 3;
-                        if (title.includes("detalle") || aria.includes("detalle") || txt.includes("detalle") || txt.includes("ver")) return 2;
-                        if (id && !id.includes("lnkPdf") && !id.includes("lnkXml")) return 1;
-                        return 0;
-                    };
-                    let best = "";
-                    let bestScore = 0;
-                    for (const el of candidatos) {
-                        if (!el.id) continue;
-                        const s = score(el);
-                        if (s > bestScore) {
-                            bestScore = s;
-                            best = el.id;
-                        }
-                    }
-                    return best;
-                };
-                return allRows.map((row, idx) => {
-                    const cells = Array.from(row.querySelectorAll("td"));
-                    const pdfNode = row.querySelector("a[id$=':lnkPdf'], a[title*='pdf' i], button[title*='pdf' i], img[alt*='pdf' i], img[title*='pdf' i]");
-                    const pdfAnchor = pdfNode ? (pdfNode.closest("a") || pdfNode) : null;
-                    return {
-                        row_index: idx,
-                        total_celdas: cells.length,
-                        tipo_serie_texto: textOf(cells, 1),
-                        clave_texto: textOf(cells, 2),
-                        fecha_aut_texto: textOf(cells, 3),
-                        razon_texto: textOf(cells, 4),
-                        valor_sin_imp_texto: textOf(cells, 5),
-                        iva_texto: textOf(cells, 6),
-                        importe_total_texto: textOf(cells, 7),
-                        pdf_link_id: pdfAnchor && pdfAnchor.id ? pdfAnchor.id : "",
-                        source_id_detalle: bestDetailId(row),
-                    };
-                });
-            }""",
-            selector,
-        )
-        return rows if isinstance(rows, list) else []
-    except Exception:
-        return []
-
-
 def _extraer_lineas_pdf_layout(pdf_path: Path) -> list[dict]:
     try:
         from pdfminer.high_level import extract_pages
@@ -9957,10 +9899,6 @@ def _flujo_emitidos(
         pagina = 1
         lote_size = 10
         claves_guardadas = set()
-        pdf_esperados = set()
-        pdf_descargados = set()
-        xml_esperados = set()
-        xml_descargados = set()
         request_context = page.context.request
         payload_base = _obtener_form_base_emitidos(page)
         def _pdf_report_incompleto(datos: dict, min_campos: int = 4) -> bool:
@@ -9986,33 +9924,53 @@ def _flujo_emitidos(
             _check_cancel("emitidos_pagina")
             page_inicio = time.perf_counter()
             view_state = _obtener_viewstate_actual()
-            filas_snapshot = _snapshot_filas_emitidos(page, es_rechazado=es_rechazado)
             filas = tabla_emitidos.locator("tr")
-            total_filas = len(filas_snapshot)
+            total_filas = filas.count()
             lote_inicio = time.perf_counter()
             lote_contador = 0
             lote_xml_ok = 0
             lote_pdf_ok = 0
-            for idx, fila_data in enumerate(filas_snapshot):
+            for idx in range(total_filas):
                 _check_cancel("emitidos_fila")
                 fila = filas.nth(idx)
-                total_celdas = int(fila_data.get("total_celdas") or 0)
+                celdas = fila.locator("td")
+                try:
+                    total_celdas = celdas.count()
+                except Exception:
+                    total_celdas = 0
                 if total_celdas < 2:
                     continue
-                tipo_serie_texto = str(fila_data.get("tipo_serie_texto") or "").strip()
+                try:
+                    tipo_serie_texto = celdas.nth(1).inner_text().strip()
+                except Exception:
+                    tipo_serie_texto = ""
                 tipo_detectado = _extraer_tipo_documento(tipo_serie_texto)
                 if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
                     print(
                         f"[WARN] Se omitio una fila de Emitidos porque corresponde a '{tipo_detectado}' y no a '{tipo_visible or tipo}'."
                     )
                     continue
-                clave_texto = str(fila_data.get("clave_texto") or "").strip()
-                razon_texto = str(fila_data.get("razon_texto") or "").strip()
-                fecha_aut_texto = str(fila_data.get("fecha_aut_texto") or "").strip()
-                valor_sin_imp_texto = str(fila_data.get("valor_sin_imp_texto") or "").strip()
-                iva_texto = str(fila_data.get("iva_texto") or "").strip()
-                importe_total_texto = str(fila_data.get("importe_total_texto") or "").strip()
-                row_id = clave_texto or f"{pagina}:{idx}:{tipo_serie_texto}"
+                clave_texto = _extraer_clave_fila(celdas)
+                try:
+                    razon_texto = celdas.nth(4).inner_text().strip() if total_celdas > 4 else ""
+                except Exception:
+                    razon_texto = ""
+                try:
+                    fecha_aut_texto = celdas.nth(3).inner_text().strip() if total_celdas > 3 else ""
+                except Exception:
+                    fecha_aut_texto = ""
+                try:
+                    valor_sin_imp_texto = celdas.nth(5).inner_text().strip() if total_celdas > 5 else ""
+                except Exception:
+                    valor_sin_imp_texto = ""
+                try:
+                    iva_texto = celdas.nth(6).inner_text().strip() if total_celdas > 6 else ""
+                except Exception:
+                    iva_texto = ""
+                try:
+                    importe_total_texto = celdas.nth(7).inner_text().strip() if total_celdas > 7 else ""
+                except Exception:
+                    importe_total_texto = ""
 
                 tipo_serie_completo = " ".join(
                     fragment for fragment in [tipo_serie_texto, clave_texto] if fragment
@@ -10029,23 +9987,16 @@ def _flujo_emitidos(
                     try:
                         if descargar_xml_para_reporte:
                             if clave_texto:
-                                xml_esperados.add(row_id)
                                 try:
-                                    resultado_xml = None
-                                    for intento_xml in range(2):
-                                        resultado_xml = _descargar_xml_emitido_por_clave(
-                                            request_context,
-                                            clave_texto,
-                                            xml_dir,
-                                            nombre_base_pdf,
-                                            claves_guardadas,
-                                        )
-                                        if resultado_xml:
-                                            break
-                                        time.sleep(0.15)
+                                    resultado_xml = _descargar_xml_emitido_por_clave(
+                                        request_context,
+                                        clave_texto,
+                                        xml_dir,
+                                        nombre_base_pdf,
+                                        claves_guardadas,
+                                    )
                                     if resultado_xml:
                                         xml_path_report = resultado_xml
-                                        xml_descargados.add(row_id)
                                         if descargar_xml:
                                             n_xml += 1
                                         else:
@@ -10059,39 +10010,37 @@ def _flujo_emitidos(
                                 )
 
                         if descargar_pdf:
-                            pdf_esperados.add(row_id)
                             # En "No Autorizados" el icono XML suele tener id :lnkPdf aunque sea XML.
-                            link_id = str(fila_data.get("pdf_link_id") or "").strip()
                             enlace_pdf = fila.locator(
                                 "a[id$=':lnkPdf'], a[title*='pdf' i], img[alt*='pdf' i], img[title*='pdf' i]"
                             )
-                            if link_id or enlace_pdf.count():
-                                contenedor = enlace_pdf.first if enlace_pdf.count() else fila
+                            if enlace_pdf.count():
+                                contenedor = enlace_pdf.first
                                 # Si es <img>, buscamos su <a> ancestro
-                                if enlace_pdf.count() and contenedor.locator("xpath=ancestor::a[1]").count():
+                                if contenedor.locator("xpath=ancestor::a[1]").count():
                                     contenedor = contenedor.locator("xpath=ancestor::a[1]").first
                                 destino_pdf = pdf_dir / f"{nombre_base_pdf}.pdf"
+                                link_id = None
+                                try:
+                                    link_id = contenedor.get_attribute("id")
+                                except Exception:
+                                    link_id = None
                                 resultado_pdf = None
-                                for intento_pdf in range(2):
+                                if link_id and view_state:
+                                    resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
+                                        page, link_id, view_state, destino_pdf
+                                    )
+                                if not resultado_pdf:
+                                    view_state = _obtener_viewstate_actual() or view_state
                                     if link_id and view_state:
                                         resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
                                             page, link_id, view_state, destino_pdf
                                         )
-                                    if not resultado_pdf:
-                                        view_state = _obtener_viewstate_actual() or view_state
-                                        if link_id and view_state:
-                                            resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
-                                                page, link_id, view_state, destino_pdf
-                                            )
-                                    if not resultado_pdf and enlace_pdf.count():
-                                        resultado_pdf = _guardar_pdf_desde_jsf(page, contenedor, destino_pdf)
-                                    if not resultado_pdf and enlace_pdf.count():
-                                        resultado_pdf = _guardar_pdf_desde_enlace(page, contenedor, destino_pdf)
-                                    if resultado_pdf:
-                                        break
-                                    time.sleep(0.15)
+                                if not resultado_pdf:
+                                    resultado_pdf = _guardar_pdf_desde_jsf(page, contenedor, destino_pdf)
+                                if not resultado_pdf:
+                                    resultado_pdf = _guardar_pdf_desde_enlace(page, contenedor, destino_pdf)
                                 if resultado_pdf:
-                                    pdf_descargados.add(row_id)
                                     n_pdf += 1
                                     lote_pdf_ok += 1
                                     if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
@@ -10159,23 +10108,16 @@ def _flujo_emitidos(
 
                 if descargar_xml_para_reporte and not omitir_soap_xml:
                     if clave_texto:
-                        xml_esperados.add(row_id)
                         try:
-                            resultado_xml = None
-                            for intento_xml in range(2):
-                                resultado_xml = _descargar_xml_emitido_por_clave(
-                                    request_context,
-                                    clave_texto,
-                                    xml_dir,
-                                    nombre_base_pdf,
-                                    claves_guardadas,
-                                )
-                                if resultado_xml:
-                                    break
-                                time.sleep(0.15)
+                            resultado_xml = _descargar_xml_emitido_por_clave(
+                                request_context,
+                                clave_texto,
+                                xml_dir,
+                                nombre_base_pdf,
+                                claves_guardadas,
+                            )
                             if resultado_xml:
                                 xml_path_report = resultado_xml
-                                xml_descargados.add(row_id)
                                 if descargar_xml:
                                     n_xml += 1
                                 else:
@@ -10187,41 +10129,34 @@ def _flujo_emitidos(
                         print(f"[WARN] La fila '{nombre_base_pdf}' no tiene clave de acceso para solicitar el XML.")
 
                 if descargar_pdf:
-                    pdf_esperados.add(row_id)
-                    link_id = str(fila_data.get("pdf_link_id") or "").strip()
                     link_pdf = fila.locator("a[id$=':lnkPdf']")
-                    if not link_id and not link_pdf.count():
+                    if not link_pdf.count():
                         link_pdf = fila.locator("a[title*='pdf' i], button[title*='pdf' i]")
-                    if not link_id and not link_pdf.count():
+                    if not link_pdf.count():
                         continue
 
                     destino_pdf = pdf_dir / f"{nombre_base_pdf}.pdf"
-                    if not link_id and link_pdf.count():
-                        try:
-                            link_id = link_pdf.first.get_attribute("id")
-                        except Exception:
-                            link_id = None
+                    link_id = None
+                    try:
+                        link_id = link_pdf.first.get_attribute("id")
+                    except Exception:
+                        link_id = None
                     resultado_pdf = None
-                    for intento_pdf in range(2):
+                    if link_id and view_state:
+                        resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
+                            page, link_id, view_state, destino_pdf
+                        )
+                    if not resultado_pdf:
+                        view_state = _obtener_viewstate_actual() or view_state
                         if link_id and view_state:
                             resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
                                 page, link_id, view_state, destino_pdf
                             )
-                        if not resultado_pdf:
-                            view_state = _obtener_viewstate_actual() or view_state
-                            if link_id and view_state:
-                                resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
-                                    page, link_id, view_state, destino_pdf
-                                )
-                        if not resultado_pdf and link_pdf.count():
-                            resultado_pdf = _guardar_pdf_desde_jsf(page, link_pdf.first, destino_pdf)
-                        if not resultado_pdf and link_pdf.count():
-                            resultado_pdf = _guardar_pdf_desde_enlace(page, link_pdf.first, destino_pdf)
-                        if resultado_pdf:
-                            break
-                        time.sleep(0.15)
+                    if not resultado_pdf:
+                        resultado_pdf = _guardar_pdf_desde_jsf(page, link_pdf.first, destino_pdf)
+                    if not resultado_pdf:
+                        resultado_pdf = _guardar_pdf_desde_enlace(page, link_pdf.first, destino_pdf)
                     if resultado_pdf:
-                        pdf_descargados.add(row_id)
                         n_pdf += 1
                         lote_pdf_ok += 1
                         if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
@@ -10288,7 +10223,7 @@ def _flujo_emitidos(
                                         ruc_emisor=ruc_emisor,
                                     )
                                     detalle_data = None
-                                    source_id_detalle = str(fila_data.get("source_id_detalle") or "").strip() or _obtener_source_detalle_emitido(page, idx)
+                                    source_id_detalle = _obtener_source_detalle_emitido(page, idx)
                                     if source_id_detalle:
                                         detalle_data = _obtener_detalle_emitido_xhr(
                                             page,
@@ -10364,14 +10299,6 @@ def _flujo_emitidos(
                 pagina += 1
                 continue
             break
-        if descargar_xml_para_reporte and not omitir_soap_xml:
-            faltantes_xml = sorted(xml_esperados - xml_descargados)
-            if faltantes_xml:
-                print(f"[WARN] Emitidos: faltaron {len(faltantes_xml)} XML respecto a las filas detectadas. Ejemplos: {faltantes_xml[:5]}")
-        if descargar_pdf:
-            faltantes_pdf = sorted(pdf_esperados - pdf_descargados)
-            if faltantes_pdf:
-                print(f"[WARN] Emitidos: faltaron {len(faltantes_pdf)} PDF respecto a las filas detectadas. Ejemplos: {faltantes_pdf[:5]}")
         info_base["n_xml"] = n_xml
         info_base["n_pdf"] = n_pdf
 
