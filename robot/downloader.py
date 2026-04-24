@@ -351,85 +351,55 @@ RETENCION_REPORT_COLUMNS = [
 ]
 
 EMITIDOS_RETENCION_REPORT_COLUMNS = [
-    "Estado",
-    "Número de Autorización",
-    "Fecha de Autorización",
-    "Ambiente",
-    "Razón Social Emisor",
-    "Dir. Establecimiento",
-    "Obligado Contabilidad",
-    "Tipo Identificación Comprador",
-    "Identificación Comprador",
-    "Tipo Emisión",
-    "Nombre Comercial",
-    "Código del Documento",
-    "Establecimiento",
-    "Punto de Emisión",
-    "Secuencial",
-    "Dirección Matriz",
-    "Contribuyente RIMPE",
-    "RUC Emisor",
-    "Clave de Acceso",
-    "Fecha de Emisión",
-    "Razón Social Comprador",
-    "Dirección Comprador",
-    "Moneda",
-    "Plazo Pago",
-    "Unidad Tiempo Pago",
-    "Descripciones",
-    "Forma Pago",
-    "Total Sin Impuestos",
-    "Base Gravada",
-    "Base No Gravada",
-    "Tarifas IVA",
-    "Monto IVA",
-    "Total Descuento",
-    "Propina",
-    "Importe Total",
-    "Total Pago",
-    "Agente de Retención",
-    "Contribuyente Especial",
-    "Obligado a llevar Contabilidad",
-    "Razón Social Sujeto Retenido",
-    "Identificación Sujeto Retenido",
-    "Periodo Fiscal",
-    "Dirección del Establecimiento",
-    "Tipo Identificación Sujeto Retenido",
-    "Parte Relacionada",
-    "Código de Sustento",
-    "Código del Documento de Sustento",
-    "Número de Documento de Sustento",
-    "Fecha de Emisión del Documento de Sustento",
-    "Fecha de Registro Contable",
-    "Número de Autorización del Documento de Sustento",
-    "Pago Local o Externo",
-    "Código Impuesto Doc. Sustento",
-    "Código Porcentaje",
-    "Base Imponible Impuesto",
-    "Tarifa",
-    "Valor Impuesto",
-    "Campos Adicionales",
-    "RENTA - codigoRetencion",
-    "RENTA - baseImponible",
-    "RENTA - porcentajeRetener",
-    "RENTA - valorRetenido",
-    "Sustento Imp. 1 - Código",
-    "Sustento Imp. 1 - Cod. Porcentaje",
-    "Sustento Imp. 1 - Base Imponible",
-    "Sustento Imp. 1 - Tarifa",
-    "Sustento Imp. 1 - Valor",
-    "Factura Ret. 1 - Codigo",
-    "Factura Ret. 1 - Cod. Porcentaje",
-    "Factura Ret. 1 - Tarifa",
-    "Factura Ret. 1 - Valor",
-    "IVA - codigoRetencion",
-    "IVA - baseImponible",
-    "IVA - porcentajeRetener",
-    "IVA - valorRetenido",
-    "Factura Ret. 2 - Codigo",
-    "Factura Ret. 2 - Cod. Porcentaje",
-    "Factura Ret. 2 - Tarifa",
-    "Factura Ret. 2 - Valor",
+    "rucEmisor",
+    "razonSocialEmisor",
+    "nombreComercial",
+    "direccionMatrizEmisor",
+    "direccionSucursalEmisor",
+    "obligadoContabilidad",
+    "numeroContribuyenteEspecial",
+    "numeroAgenteRetencion",
+    "fechaAutorizacion",
+    "ambiente",
+    "emision",
+    "numeroComprobante",
+    "establecimiento",
+    "puntoEmision",
+    "secuencial",
+    "fechaEmision",
+    "razonSocialSujetoRetenido",
+    "identificacionSujetoRetenido",
+    "claveAcceso",
+    "Comprobante_Sustento",
+    "Numero_Sustento",
+    "Fecha_Emision_Sustento",
+    "Ejercicio_Fiscal",
+    "Base_Imponible_Ret_IVA",
+    "Impuesto_Ret_IVA",
+    "Porcentaje_Ret_IVA",
+    "Valor_Retenido_IVA",
+    "Base_Imponible_Ret_IR",
+    "Impuesto_Ret_IR",
+    "Porcentaje_Ret_IR",
+    "Valor_Retenido_IR",
+    "informacionAdicional",
+    "Base_Imponible_Ret_IR_1",
+    "Impuesto_Ret_IR_1",
+    "Porcentaje_Ret_IR_1",
+    "Valor_Retenido_IR_1",
+    "Base_Imponible_Ret_IVA_1",
+    "Impuesto_Ret_IVA_1",
+    "Porcentaje_Ret_IVA_1",
+    "Valor_Retenido_IVA_1",
+    "Base_Imponible_Ret_IR_2",
+    "Impuesto_Ret_IR_2",
+    "Porcentaje_Ret_IR_2",
+    "Valor_Retenido_IR_2",
+    "Base_Imponible_Ret_IVA_2",
+    "Impuesto_Ret_IVA_2",
+    "Porcentaje_Ret_IVA_2",
+    "Valor_Retenido_IVA_2",
+    "tipoDocumento",
 ]
 
 EMITIDOS_RETENCION_FORMA_PAGO_LABEL = {
@@ -463,77 +433,58 @@ EMITIDOS_RETENCION_TIPO_EMISION_LABEL = {
 }
 
 EMITIDOS_RETENCION_TEXT_FORCE_COLUMNS = {
-    "Estado",
-    "Número de Autorización",
-    "Fecha de Autorización",
-    "Ambiente",
-    "Razón Social Emisor",
-    "Dir. Establecimiento",
-    "Obligado Contabilidad",
-    "Tipo Identificación Comprador",
-    "Identificación Comprador",
-    "Tipo Emisión",
-    "Nombre Comercial",
-    "Código del Documento",
-    "Establecimiento",
-    "Punto de Emisión",
-    "Secuencial",
-    "Dirección Matriz",
-    "Contribuyente RIMPE",
-    "RUC Emisor",
-    "Clave de Acceso",
-    "Fecha de Emisión",
-    "Razón Social Comprador",
-    "Dirección Comprador",
-    "Moneda",
-    "Plazo Pago",
-    "Unidad Tiempo Pago",
-    "Descripciones",
-    "Forma Pago",
-    "Agente de Retención",
-    "Contribuyente Especial",
-    "Obligado a llevar Contabilidad",
-    "Razón Social Sujeto Retenido",
-    "Identificación Sujeto Retenido",
-    "Periodo Fiscal",
-    "Dirección del Establecimiento",
-    "Tipo Identificación Sujeto Retenido",
-    "Parte Relacionada",
-    "Código de Sustento",
-    "Código del Documento de Sustento",
-    "Número de Documento de Sustento",
-    "Fecha de Emisión del Documento de Sustento",
-    "Fecha de Registro Contable",
-    "Número de Autorización del Documento de Sustento",
-    "Pago Local o Externo",
-    "Campos Adicionales",
+    "rucEmisor",
+    "razonSocialEmisor",
+    "nombreComercial",
+    "direccionMatrizEmisor",
+    "direccionSucursalEmisor",
+    "obligadoContabilidad",
+    "numeroContribuyenteEspecial",
+    "numeroAgenteRetencion",
+    "fechaAutorizacion",
+    "ambiente",
+    "emision",
+    "numeroComprobante",
+    "establecimiento",
+    "puntoEmision",
+    "secuencial",
+    "fechaEmision",
+    "razonSocialSujetoRetenido",
+    "identificacionSujetoRetenido",
+    "claveAcceso",
+    "Comprobante_Sustento",
+    "Numero_Sustento",
+    "Fecha_Emision_Sustento",
+    "Ejercicio_Fiscal",
+    "Impuesto_Ret_IVA",
+    "Impuesto_Ret_IR",
+    "informacionAdicional",
+    "Impuesto_Ret_IR_1",
+    "Impuesto_Ret_IVA_1",
+    "Impuesto_Ret_IR_2",
+    "Impuesto_Ret_IVA_2",
+    "tipoDocumento",
 }
 
 EMITIDOS_RETENCION_NUMERIC_COLUMNS = {
-    "Total Sin Impuestos",
-    "Base Gravada",
-    "Base No Gravada",
-    "Monto IVA",
-    "Total Descuento",
-    "Propina",
-    "Importe Total",
-    "Total Pago",
-    "Base Imponible Impuesto",
-    "Tarifa",
-    "Valor Impuesto",
-    "RENTA - baseImponible",
-    "RENTA - porcentajeRetener",
-    "RENTA - valorRetenido",
-    "Sustento Imp. 1 - Base Imponible",
-    "Sustento Imp. 1 - Tarifa",
-    "Sustento Imp. 1 - Valor",
-    "Factura Ret. 1 - Tarifa",
-    "Factura Ret. 1 - Valor",
-    "IVA - baseImponible",
-    "IVA - porcentajeRetener",
-    "IVA - valorRetenido",
-    "Factura Ret. 2 - Tarifa",
-    "Factura Ret. 2 - Valor",
+    "Base_Imponible_Ret_IVA",
+    "Porcentaje_Ret_IVA",
+    "Valor_Retenido_IVA",
+    "Base_Imponible_Ret_IR",
+    "Porcentaje_Ret_IR",
+    "Valor_Retenido_IR",
+    "Base_Imponible_Ret_IR_1",
+    "Porcentaje_Ret_IR_1",
+    "Valor_Retenido_IR_1",
+    "Base_Imponible_Ret_IVA_1",
+    "Porcentaje_Ret_IVA_1",
+    "Valor_Retenido_IVA_1",
+    "Base_Imponible_Ret_IR_2",
+    "Porcentaje_Ret_IR_2",
+    "Valor_Retenido_IR_2",
+    "Base_Imponible_Ret_IVA_2",
+    "Porcentaje_Ret_IVA_2",
+    "Valor_Retenido_IVA_2",
 }
 
 EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS = [
@@ -733,71 +684,13 @@ EMITIDOS_FACTURA_NUMERIC_COLUMNS = {
 
 def _emitidos_retencion_default_row() -> dict:
     row = {col: "" for col in EMITIDOS_RETENCION_REPORT_COLUMNS}
-    for col in (
-        "Tipo Identificación Comprador",
-        "Identificación Comprador",
-        "Contribuyente RIMPE",
-        "Razón Social Comprador",
-        "Dirección Comprador",
-        "Moneda",
-        "Plazo Pago",
-        "Unidad Tiempo Pago",
-        "Contribuyente Especial",
-        "Razón Social Sujeto Retenido",
-        "Identificación Sujeto Retenido",
-        "Periodo Fiscal",
-        "Dirección del Establecimiento",
-        "Tipo Identificación Sujeto Retenido",
-        "Parte Relacionada",
-        "Código de Sustento",
-        "Código del Documento de Sustento",
-        "Número de Documento de Sustento",
-        "Fecha de Emisión del Documento de Sustento",
-        "Fecha de Registro Contable",
-        "Número de Autorización del Documento de Sustento",
-        "Pago Local o Externo",
-        "Código Impuesto Doc. Sustento",
-        "Código Porcentaje",
-        "Forma Pago",
-        "Campos Adicionales",
-        "Agente de Retención",
-        "Dir. Establecimiento",
-        "Obligado Contabilidad",
-        "Obligado a llevar Contabilidad",
-    ):
+    for col in ("nombreComercial", "numeroContribuyenteEspecial", "numeroAgenteRetencion", "informacionAdicional"):
         row[col] = "No Disponible"
-    row["Tipo Identificación Comprador"] = "No Disponible - No Disponible"
-    for col in (
-        "Base Gravada",
-        "Base No Gravada",
-        "Monto IVA",
-        "Total Descuento",
-        "Propina",
-        "RENTA - codigoRetencion",
-        "RENTA - baseImponible",
-        "RENTA - porcentajeRetener",
-        "RENTA - valorRetenido",
-        "Sustento Imp. 1 - Código",
-        "Sustento Imp. 1 - Cod. Porcentaje",
-        "Sustento Imp. 1 - Base Imponible",
-        "Sustento Imp. 1 - Tarifa",
-        "Sustento Imp. 1 - Valor",
-        "Factura Ret. 1 - Codigo",
-        "Factura Ret. 1 - Cod. Porcentaje",
-        "Factura Ret. 1 - Tarifa",
-        "Factura Ret. 1 - Valor",
-        "IVA - codigoRetencion",
-        "IVA - baseImponible",
-        "IVA - porcentajeRetener",
-        "IVA - valorRetenido",
-        "Factura Ret. 2 - Codigo",
-        "Factura Ret. 2 - Cod. Porcentaje",
-        "Factura Ret. 2 - Tarifa",
-        "Factura Ret. 2 - Valor",
-    ):
+    for col in EMITIDOS_RETENCION_NUMERIC_COLUMNS:
         row[col] = 0
-    row["Descripciones"] = ""
-    row["Tarifas IVA"] = ""
+    row["Impuesto_Ret_IVA"] = "No Aplica"
+    row["Impuesto_Ret_IR"] = "No Aplica"
+    row["tipoDocumento"] = "Retencion"
     return row
 
 
@@ -819,6 +712,230 @@ def _numero_emitidos_retencion(valor, default=0):
         return valor
     parsed = _parse_decimal(str(valor))
     return parsed if parsed is not None else default
+
+
+def _normalizar_ambiente_retencion_emitidos(valor) -> str:
+    texto = _texto_emitidos_retencion(valor)
+    if not texto:
+        return ""
+    valor_norm = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii").upper()
+    if "PRODUCCION" in valor_norm:
+        return "PRODUCCIÓN"
+    if "PRUEBA" in valor_norm:
+        return "PRUEBAS"
+    return texto
+
+
+def _normalizar_emision_retencion_emitidos(valor) -> str:
+    texto = _texto_emitidos_retencion(valor)
+    if not texto:
+        return ""
+    valor_norm = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii").upper()
+    if "NORMAL" in valor_norm:
+        return "NORMAL"
+    if "INDISPONIBILIDAD" in valor_norm or "CONTINGENCIA" in valor_norm:
+        return "CONTINGENCIA"
+    return texto
+
+
+def _formatear_fecha_autorizacion_retencion_emitidos(valor) -> str:
+    texto = _texto_emitidos_retencion(valor)
+    if not texto:
+        return ""
+    for fmt_in in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S"):
+        try:
+            dt = datetime.strptime(texto, fmt_in)
+            return dt.strftime("%d/%m/%Y %H:%M:%S")
+        except Exception:
+            continue
+    match = re.search(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})", texto)
+    if match:
+        try:
+            dt = datetime.strptime(f"{match.group(1)} {match.group(2)}", "%Y-%m-%d %H:%M:%S")
+            return dt.strftime("%d/%m/%Y %H:%M:%S")
+        except Exception:
+            pass
+    return texto
+
+
+def _detalle_retencion_emitidos(legacy: dict, prefijo: str) -> list[dict]:
+    if prefijo == "IVA":
+        label = "IVA"
+        keys = [
+            ("Base_Imponible_Ret_IVA", "Impuesto_Ret_IVA", "Porcentaje_Ret_IVA", "Valor_Retenido_IVA"),
+            ("Base_Imponible_Ret_IVA_1", "Impuesto_Ret_IVA_1", "Porcentaje_Ret_IVA_1", "Valor_Retenido_IVA_1"),
+        ]
+    else:
+        label = "Renta"
+        keys = [
+            ("Base_Imponible_Ret_IR", "Impuesto_Ret_IR", "Porcentaje_Ret_IR", "Valor_Retenido_IR"),
+            ("Base_Imponible_Ret_IR_1", "Impuesto_Ret_IR_1", "Porcentaje_Ret_IR_1", "Valor_Retenido_IR_1"),
+        ]
+
+    detalles: list[dict] = []
+    for base_key, imp_key, pct_key, val_key in keys:
+        base = _numero_emitidos_retencion(legacy.get(base_key))
+        pct = _numero_emitidos_retencion(legacy.get(pct_key))
+        val = _numero_emitidos_retencion(legacy.get(val_key))
+        imp = _texto_emitidos_retencion(legacy.get(imp_key))
+        if imp.upper() == "NO APLICA":
+            continue
+        if not any([base, pct, val]) and not imp:
+            continue
+        detalle = {"base": base, "imp": label, "pct": pct, "val": val}
+        if not detalles or detalle != detalles[-1]:
+            detalles.append(detalle)
+    return detalles
+
+
+def _asignar_resumen_retencion_emitidos(
+    row: dict,
+    detalles: list[dict],
+    *,
+    base_key: str,
+    imp_key: str,
+    pct_key: str,
+    val_key: str,
+    det1_base_key: str,
+    det1_imp_key: str,
+    det1_pct_key: str,
+    det1_val_key: str,
+    det2_base_key: str,
+    det2_imp_key: str,
+    det2_pct_key: str,
+    det2_val_key: str,
+    label: str,
+    no_aplica_si_vacio: bool = True,
+) -> None:
+    if not detalles:
+        row[base_key] = 0
+        row[pct_key] = 0
+        row[val_key] = 0
+        row[det1_base_key] = 0
+        row[det1_pct_key] = 0
+        row[det1_val_key] = 0
+        row[det2_base_key] = 0
+        row[det2_pct_key] = 0
+        row[det2_val_key] = 0
+        row[imp_key] = "No Aplica" if no_aplica_si_vacio else ""
+        row[det1_imp_key] = ""
+        row[det2_imp_key] = ""
+        return
+
+    if len(detalles) == 1:
+        base = detalles[0]["base"]
+        pct = detalles[0]["pct"]
+        val = detalles[0]["val"]
+        row[base_key] = base
+        row[imp_key] = label
+        row[pct_key] = pct
+        row[val_key] = val
+        row[det1_base_key] = base
+        row[det1_imp_key] = label
+        row[det1_pct_key] = pct
+        row[det1_val_key] = val
+        row[det2_base_key] = 0
+        row[det2_imp_key] = ""
+        row[det2_pct_key] = 0
+        row[det2_val_key] = 0
+        return
+
+    row[base_key] = sum(d["base"] for d in detalles)
+    row[imp_key] = "Varios"
+    row[pct_key] = 0
+    row[val_key] = sum(d["val"] for d in detalles)
+    first = detalles[0]
+    second = detalles[1]
+    row[det1_base_key] = first["base"]
+    row[det1_imp_key] = label
+    row[det1_pct_key] = first["pct"]
+    row[det1_val_key] = first["val"]
+    row[det2_base_key] = second["base"]
+    row[det2_imp_key] = label
+    row[det2_pct_key] = second["pct"]
+    row[det2_val_key] = second["val"]
+
+
+def _map_retencion_legacy_to_emitidos_sample_row(legacy: dict | None) -> dict:
+    row = _emitidos_retencion_default_row()
+    if not isinstance(legacy, dict):
+        return row
+
+    row["rucEmisor"] = _texto_emitidos_retencion(legacy.get("rucEmisor"))
+    row["razonSocialEmisor"] = _texto_emitidos_retencion(legacy.get("razonSocialEmisor"))
+    row["nombreComercial"] = _texto_emitidos_retencion(legacy.get("nombreComercial"), "No Disponible")
+    row["direccionMatrizEmisor"] = _texto_emitidos_retencion(legacy.get("direccionMatrizEmisor"))
+    row["direccionSucursalEmisor"] = _texto_emitidos_retencion(legacy.get("direccionSucursalEmisor"))
+    row["obligadoContabilidad"] = _texto_emitidos_retencion(legacy.get("obligadoContabilidad"))
+    row["numeroContribuyenteEspecial"] = _texto_emitidos_retencion(
+        legacy.get("numeroContribuyenteEspecial"), "No Disponible"
+    )
+    row["numeroAgenteRetencion"] = _texto_emitidos_retencion(
+        legacy.get("numeroAgenteRetencion"), "No Disponible"
+    )
+    row["fechaAutorizacion"] = _formatear_fecha_autorizacion_retencion_emitidos(
+        legacy.get("fechaAutorizacion")
+    )
+    row["ambiente"] = _normalizar_ambiente_retencion_emitidos(legacy.get("ambiente"))
+    row["emision"] = _normalizar_emision_retencion_emitidos(legacy.get("emision"))
+    row["numeroComprobante"] = _texto_emitidos_retencion(legacy.get("numeroComprobante"))
+    row["establecimiento"] = _texto_emitidos_retencion(legacy.get("establecimiento"))
+    row["puntoEmision"] = _texto_emitidos_retencion(legacy.get("puntoEmision"))
+    row["secuencial"] = _texto_emitidos_retencion(legacy.get("secuencial"))
+    row["fechaEmision"] = _texto_emitidos_retencion(legacy.get("fechaEmision"))
+    row["razonSocialSujetoRetenido"] = _texto_emitidos_retencion(
+        legacy.get("razonSocialSujetoRetenido")
+    )
+    row["identificacionSujetoRetenido"] = _texto_emitidos_retencion(
+        legacy.get("identificacionSujetoRetenido")
+    )
+    row["claveAcceso"] = _texto_emitidos_retencion(legacy.get("claveAcceso"))
+    row["Comprobante_Sustento"] = _texto_emitidos_retencion(legacy.get("Comprobante_Sustento"))
+    row["Numero_Sustento"] = _texto_emitidos_retencion(legacy.get("Numero_Sustento")).replace("-", "")
+    row["Fecha_Emision_Sustento"] = _texto_emitidos_retencion(legacy.get("Fecha_Emision_Sustento"))
+    row["Ejercicio_Fiscal"] = _texto_emitidos_retencion(legacy.get("Ejercicio_Fiscal"))
+    row["informacionAdicional"] = _texto_emitidos_retencion(
+        legacy.get("informacionAdicional"), "No Disponible"
+    )
+    row["tipoDocumento"] = _texto_emitidos_retencion(legacy.get("tipoDocumento"), "Retencion")
+
+    iva_detalles = _detalle_retencion_emitidos(legacy, "IVA")
+    renta_detalles = _detalle_retencion_emitidos(legacy, "IR")
+    _asignar_resumen_retencion_emitidos(
+        row,
+        iva_detalles,
+        base_key="Base_Imponible_Ret_IVA",
+        imp_key="Impuesto_Ret_IVA",
+        pct_key="Porcentaje_Ret_IVA",
+        val_key="Valor_Retenido_IVA",
+        det1_base_key="Base_Imponible_Ret_IVA_1",
+        det1_imp_key="Impuesto_Ret_IVA_1",
+        det1_pct_key="Porcentaje_Ret_IVA_1",
+        det1_val_key="Valor_Retenido_IVA_1",
+        det2_base_key="Base_Imponible_Ret_IVA_2",
+        det2_imp_key="Impuesto_Ret_IVA_2",
+        det2_pct_key="Porcentaje_Ret_IVA_2",
+        det2_val_key="Valor_Retenido_IVA_2",
+        label="IVA",
+    )
+    _asignar_resumen_retencion_emitidos(
+        row,
+        renta_detalles,
+        base_key="Base_Imponible_Ret_IR",
+        imp_key="Impuesto_Ret_IR",
+        pct_key="Porcentaje_Ret_IR",
+        val_key="Valor_Retenido_IR",
+        det1_base_key="Base_Imponible_Ret_IR_1",
+        det1_imp_key="Impuesto_Ret_IR_1",
+        det1_pct_key="Porcentaje_Ret_IR_1",
+        det1_val_key="Valor_Retenido_IR_1",
+        det2_base_key="Base_Imponible_Ret_IR_2",
+        det2_imp_key="Impuesto_Ret_IR_2",
+        det2_pct_key="Porcentaje_Ret_IR_2",
+        det2_val_key="Valor_Retenido_IR_2",
+        label="Renta",
+    )
+    return row
 
 
 def _nota_credito_emitidos_default_row() -> dict:
@@ -3039,192 +3156,69 @@ def _extraer_datos_xml_retencion(xml_path: Path) -> dict:
 
 
 def _extraer_datos_xml_retencion_emitido(xml_path: Path) -> dict:
-    row = _emitidos_retencion_default_row()
-    root, meta = _extraer_xml_emitidos_autorizacion(xml_path)
+    legacy = _extraer_datos_xml_retencion(xml_path)
+    row = _map_retencion_legacy_to_emitidos_sample_row(legacy)
+    root, _meta = _extraer_xml_emitidos_autorizacion(xml_path)
     if root is None:
         return row
 
-    info_trib = root.find("infoTributaria")
-    info_comp = root.find("infoCompRetencion")
     doc_sustento = root.find(".//docsSustento/docSustento")
-
-    if info_trib is not None:
-        cod_doc = _texto_emitidos_retencion(info_trib.findtext("codDoc"))
-        row["Razón Social Emisor"] = _texto_emitidos_retencion(info_trib.findtext("razonSocial"))
-        row["Nombre Comercial"] = _texto_emitidos_retencion_na(info_trib.findtext("nombreComercial"))
-        row["Establecimiento"] = _texto_emitidos_retencion(info_trib.findtext("estab"))
-        row["Punto de Emisión"] = _texto_emitidos_retencion(info_trib.findtext("ptoEmi"))
-        row["Secuencial"] = _texto_emitidos_retencion(info_trib.findtext("secuencial"))
-        row["Dirección Matriz"] = _texto_emitidos_retencion(info_trib.findtext("dirMatriz"))
-        row["RUC Emisor"] = _texto_emitidos_retencion(info_trib.findtext("ruc"))
-        row["Clave de Acceso"] = _texto_emitidos_retencion(info_trib.findtext("claveAcceso"))
-        row["Ambiente"] = _label_ambiente_emitidos_retencion(
-            info_trib.findtext("ambiente") or meta.get("ambiente")
-        )
-        row["Tipo Emisión"] = _label_emision_emitidos_retencion(info_trib.findtext("tipoEmision"))
-        row["Código del Documento"] = EMITIDOS_RETENCION_DOC_CODE_LABEL.get(cod_doc, cod_doc or "No Disponible")
-        row["Agente de Retención"] = _texto_emitidos_retencion_na(
-            info_trib.findtext("agenteRetencion") or root.findtext(".//agenteRetencion")
-        )
-
-    row["Estado"] = _texto_emitidos_retencion(meta.get("estado"), "AUTORIZADO")
-    row["Número de Autorización"] = _texto_emitidos_retencion(
-        meta.get("numero_autorizacion") or row.get("Clave de Acceso")
-    )
-    row["Fecha de Autorización"] = _texto_emitidos_retencion(meta.get("fecha_autorizacion"))
-
-    if info_comp is not None:
-        dir_est = _texto_emitidos_retencion_na(info_comp.findtext("dirEstablecimiento"))
-        obligado = _texto_emitidos_retencion_na(info_comp.findtext("obligadoContabilidad"))
-        row["Dir. Establecimiento"] = dir_est
-        row["Obligado Contabilidad"] = obligado
-        row["Fecha de Emisión"] = _texto_emitidos_retencion(info_comp.findtext("fechaEmision"))
-        row["Contribuyente Especial"] = _texto_emitidos_retencion_na(info_comp.findtext("contribuyenteEspecial"))
-        row["Obligado a llevar Contabilidad"] = obligado
-        row["Razón Social Sujeto Retenido"] = _texto_emitidos_retencion_na(
-            info_comp.findtext("razonSocialSujetoRetenido")
-        )
-        row["Identificación Sujeto Retenido"] = _texto_emitidos_retencion_na(
-            info_comp.findtext("identificacionSujetoRetenido")
-        )
-        row["Periodo Fiscal"] = _texto_emitidos_retencion_na(info_comp.findtext("periodoFiscal"))
-        row["Dirección del Establecimiento"] = dir_est
-        row["Tipo Identificación Sujeto Retenido"] = _texto_emitidos_retencion_na(
-            info_comp.findtext("tipoIdentificacionSujetoRetenido")
-        )
-        row["Parte Relacionada"] = _texto_emitidos_retencion_na(info_comp.findtext("parteRel"))
-
-    if doc_sustento is not None:
-        row["Código de Sustento"] = _texto_emitidos_retencion_na(doc_sustento.findtext("codSustento"))
-        row["Código del Documento de Sustento"] = _texto_emitidos_retencion_na(
-            doc_sustento.findtext("codDocSustento")
-        )
-        row["Número de Documento de Sustento"] = _texto_emitidos_retencion_na(
-            doc_sustento.findtext("numDocSustento")
-        )
-        row["Fecha de Emisión del Documento de Sustento"] = _texto_emitidos_retencion_na(
-            doc_sustento.findtext("fechaEmisionDocSustento")
-        )
-        row["Fecha de Registro Contable"] = _texto_emitidos_retencion_na(
-            doc_sustento.findtext("fechaRegistroContable")
-        )
-        row["Número de Autorización del Documento de Sustento"] = _texto_emitidos_retencion_na(
-            doc_sustento.findtext("numAutDocSustento")
-        )
-        row["Pago Local o Externo"] = _texto_emitidos_retencion_na(doc_sustento.findtext("pagoLocExt"))
-        row["Total Sin Impuestos"] = _numero_emitidos_retencion(doc_sustento.findtext("totalSinImpuestos"))
-        row["Importe Total"] = _numero_emitidos_retencion(doc_sustento.findtext("importeTotal"))
-
-        pago = doc_sustento.find("./pagos/pago")
-        if pago is not None:
-            row["Forma Pago"] = _label_forma_pago_emitidos_retencion(pago.findtext("formaPago"))
-            row["Total Pago"] = _numero_emitidos_retencion(
-                pago.findtext("total"),
-                row["Importe Total"],
-            )
-            row["Plazo Pago"] = _texto_emitidos_retencion_na(pago.findtext("plazo"))
-            row["Unidad Tiempo Pago"] = _texto_emitidos_retencion_na(pago.findtext("unidadTiempo"))
-        else:
-            row["Total Pago"] = row["Importe Total"]
-
-        impuesto_doc = doc_sustento.find("./impuestosDocSustento/impuestoDocSustento")
-        if impuesto_doc is not None:
-            row["Código Impuesto Doc. Sustento"] = _texto_emitidos_retencion_na(
-                impuesto_doc.findtext("codImpuestoDocSustento")
-            )
-            row["Código Porcentaje"] = _texto_emitidos_retencion_na(
-                impuesto_doc.findtext("codigoPorcentaje")
-            )
-            row["Base Imponible Impuesto"] = _numero_emitidos_retencion(impuesto_doc.findtext("baseImponible"))
-            row["Tarifa"] = _numero_emitidos_retencion(impuesto_doc.findtext("tarifa"))
-            row["Valor Impuesto"] = _numero_emitidos_retencion(impuesto_doc.findtext("valorImpuesto"))
-            row["Sustento Imp. 1 - Código"] = row["Código Impuesto Doc. Sustento"]
-            row["Sustento Imp. 1 - Cod. Porcentaje"] = row["Código Porcentaje"]
-            row["Sustento Imp. 1 - Base Imponible"] = row["Base Imponible Impuesto"]
-            row["Sustento Imp. 1 - Tarifa"] = row["Tarifa"]
-            row["Sustento Imp. 1 - Valor"] = row["Valor Impuesto"]
-
-        retenciones = doc_sustento.findall("./retenciones/retencion")
-    else:
-        row["Total Pago"] = row["Importe Total"]
-        retenciones = root.findall(".//impuestos/impuesto")
-
-    for idx, ret in enumerate(retenciones[:2], start=1):
+    retenciones = doc_sustento.findall("./retenciones/retencion") if doc_sustento is not None else []
+    iva_detalles = []
+    renta_detalles = []
+    for ret in retenciones:
         codigo = _texto_emitidos_retencion(ret.findtext("codigo"))
-        row[f"Factura Ret. {idx} - Codigo"] = codigo or 0
-        row[f"Factura Ret. {idx} - Cod. Porcentaje"] = "N/A" if codigo else 0
-        row[f"Factura Ret. {idx} - Tarifa"] = 0
-        row[f"Factura Ret. {idx} - Valor"] = 0
+        detalle = {
+            "base": _numero_emitidos_retencion(ret.findtext("baseImponible")),
+            "pct": _numero_emitidos_retencion(ret.findtext("porcentajeRetener")),
+            "val": _numero_emitidos_retencion(ret.findtext("valorRetenido")),
+        }
+        if codigo == "2":
+            iva_detalles.append(detalle)
+        elif codigo == "1":
+            renta_detalles.append(detalle)
 
-        if codigo == "1":
-            row["RENTA - codigoRetencion"] = _texto_emitidos_retencion(ret.findtext("codigoRetencion")) or 0
-            row["RENTA - baseImponible"] = _numero_emitidos_retencion(ret.findtext("baseImponible"))
-            row["RENTA - porcentajeRetener"] = _numero_emitidos_retencion(ret.findtext("porcentajeRetener"))
-            row["RENTA - valorRetenido"] = _numero_emitidos_retencion(ret.findtext("valorRetenido"))
-        elif codigo == "2":
-            row["IVA - codigoRetencion"] = _texto_emitidos_retencion(ret.findtext("codigoRetencion")) or 0
-            row["IVA - baseImponible"] = _numero_emitidos_retencion(ret.findtext("baseImponible"))
-            row["IVA - porcentajeRetener"] = _numero_emitidos_retencion(ret.findtext("porcentajeRetener"))
-            row["IVA - valorRetenido"] = _numero_emitidos_retencion(ret.findtext("valorRetenido"))
-
-    adicionales = []
-    for campo in root.findall(".//infoAdicional/campoAdicional"):
-        nombre = _texto_emitidos_retencion(campo.attrib.get("nombre"))
-        valor = _texto_emitidos_retencion(campo.text)
-        if nombre or valor:
-            adicionales.append(f"{nombre}: {valor}".strip(": "))
-    if adicionales:
-        row["Campos Adicionales"] = "; ".join(adicionales)
+    if iva_detalles:
+        _asignar_resumen_retencion_emitidos(
+            row,
+            [{"base": d["base"], "imp": "IVA", "pct": d["pct"], "val": d["val"]} for d in iva_detalles],
+            base_key="Base_Imponible_Ret_IVA",
+            imp_key="Impuesto_Ret_IVA",
+            pct_key="Porcentaje_Ret_IVA",
+            val_key="Valor_Retenido_IVA",
+            det1_base_key="Base_Imponible_Ret_IVA_1",
+            det1_imp_key="Impuesto_Ret_IVA_1",
+            det1_pct_key="Porcentaje_Ret_IVA_1",
+            det1_val_key="Valor_Retenido_IVA_1",
+            det2_base_key="Base_Imponible_Ret_IVA_2",
+            det2_imp_key="Impuesto_Ret_IVA_2",
+            det2_pct_key="Porcentaje_Ret_IVA_2",
+            det2_val_key="Valor_Retenido_IVA_2",
+            label="IVA",
+        )
+    if renta_detalles:
+        _asignar_resumen_retencion_emitidos(
+            row,
+            [{"base": d["base"], "imp": "Renta", "pct": d["pct"], "val": d["val"]} for d in renta_detalles],
+            base_key="Base_Imponible_Ret_IR",
+            imp_key="Impuesto_Ret_IR",
+            pct_key="Porcentaje_Ret_IR",
+            val_key="Valor_Retenido_IR",
+            det1_base_key="Base_Imponible_Ret_IR_1",
+            det1_imp_key="Impuesto_Ret_IR_1",
+            det1_pct_key="Porcentaje_Ret_IR_1",
+            det1_val_key="Valor_Retenido_IR_1",
+            det2_base_key="Base_Imponible_Ret_IR_2",
+            det2_imp_key="Impuesto_Ret_IR_2",
+            det2_pct_key="Porcentaje_Ret_IR_2",
+            det2_val_key="Valor_Retenido_IR_2",
+            label="Renta",
+        )
     return row
 
 
 def _map_retencion_legada_a_emitidos_row(legacy: dict | None) -> dict:
-    row = _emitidos_retencion_default_row()
-    if not isinstance(legacy, dict):
-        return row
-    row["Razón Social Emisor"] = _texto_emitidos_retencion_na(legacy.get("razonSocialEmisor"))
-    row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(legacy.get("direccionSucursalEmisor"))
-    row["Obligado Contabilidad"] = _texto_emitidos_retencion_na(legacy.get("obligadoContabilidad"))
-    row["Nombre Comercial"] = _texto_emitidos_retencion_na(legacy.get("nombreComercial"))
-    row["Código del Documento"] = "07 - COMPROBANTE DE RETENCIÓN"
-    row["Establecimiento"] = _texto_emitidos_retencion(legacy.get("establecimiento"))
-    row["Punto de Emisión"] = _texto_emitidos_retencion(legacy.get("puntoEmision"))
-    row["Secuencial"] = _texto_emitidos_retencion(legacy.get("secuencial"))
-    row["Dirección Matriz"] = _texto_emitidos_retencion(legacy.get("direccionMatrizEmisor"))
-    row["RUC Emisor"] = _texto_emitidos_retencion(legacy.get("rucEmisor"))
-    row["Clave de Acceso"] = _texto_emitidos_retencion(legacy.get("claveAcceso"))
-    row["Fecha de Emisión"] = _texto_emitidos_retencion(legacy.get("fechaEmision"))
-    row["Fecha de Autorización"] = _texto_emitidos_retencion(legacy.get("fechaAutorizacion"))
-    row["Importe Total"] = _numero_emitidos_retencion(legacy.get("valorTotal"))
-    row["Total Sin Impuestos"] = _numero_emitidos_retencion(legacy.get("Base_Imponible_Ret_IR")) or _numero_emitidos_retencion(legacy.get("Base_Imponible_Ret_IVA"))
-    row["Total Pago"] = row["Importe Total"]
-    row["Agente de Retención"] = _texto_emitidos_retencion_na(legacy.get("numeroAgenteRetencion"))
-    row["Contribuyente Especial"] = _texto_emitidos_retencion_na(legacy.get("numeroContribuyenteEspecial"))
-    row["Obligado a llevar Contabilidad"] = row["Obligado Contabilidad"]
-    row["Razón Social Sujeto Retenido"] = _texto_emitidos_retencion_na(legacy.get("razonSocialSujetoRetenido"))
-    row["Identificación Sujeto Retenido"] = _texto_emitidos_retencion_na(legacy.get("identificacionSujetoRetenido"))
-    row["Periodo Fiscal"] = _texto_emitidos_retencion_na(legacy.get("Ejercicio_Fiscal"))
-    row["Dirección del Establecimiento"] = row["Dir. Establecimiento"]
-    row["Código del Documento de Sustento"] = _texto_emitidos_retencion_na(legacy.get("Comprobante_Sustento"))
-    row["Número de Documento de Sustento"] = _texto_emitidos_retencion_na(legacy.get("Numero_Sustento"))
-    row["Fecha de Emisión del Documento de Sustento"] = _texto_emitidos_retencion_na(legacy.get("Fecha_Emision_Sustento"))
-    row["Campos Adicionales"] = _texto_emitidos_retencion_na(legacy.get("informacionAdicional"))
-    row["RENTA - codigoRetencion"] = _texto_emitidos_retencion(legacy.get("Impuesto_Ret_IR")) or 0
-    row["RENTA - baseImponible"] = _numero_emitidos_retencion(legacy.get("Base_Imponible_Ret_IR"))
-    row["RENTA - porcentajeRetener"] = _numero_emitidos_retencion(legacy.get("Porcentaje_Ret_IR"))
-    row["RENTA - valorRetenido"] = _numero_emitidos_retencion(legacy.get("Valor_Retenido_IR"))
-    row["IVA - codigoRetencion"] = _texto_emitidos_retencion(legacy.get("Impuesto_Ret_IVA")) or 0
-    row["IVA - baseImponible"] = _numero_emitidos_retencion(legacy.get("Base_Imponible_Ret_IVA"))
-    row["IVA - porcentajeRetener"] = _numero_emitidos_retencion(legacy.get("Porcentaje_Ret_IVA"))
-    row["IVA - valorRetenido"] = _numero_emitidos_retencion(legacy.get("Valor_Retenido_IVA"))
-    if row["RENTA - codigoRetencion"]:
-        row["Factura Ret. 1 - Codigo"] = "1"
-        row["Factura Ret. 1 - Cod. Porcentaje"] = "N/A"
-    if row["IVA - codigoRetencion"]:
-        target = "1" if row["Factura Ret. 1 - Codigo"] == 0 else "2"
-        row[f"Factura Ret. {target} - Codigo"] = "2"
-        row[f"Factura Ret. {target} - Cod. Porcentaje"] = "N/A"
-    return row
+    return _map_retencion_legacy_to_emitidos_sample_row(legacy)
 
 
 def _extraer_lineas_layout_pdf(pdf_path: Path, y_tolerance: float = 3.0) -> list[dict]:
@@ -3547,205 +3541,7 @@ def _extraer_campos_adicionales_emitidos_desde_texto(texto_pdf: str) -> str:
 
 
 def _extraer_datos_pdf_retencion_emitido(pdf_path: Path) -> dict:
-    lineas = _extraer_lineas_layout_pdf(pdf_path)
-    if not lineas:
-        return _map_retencion_legada_a_emitidos_row(_extraer_datos_pdf_retencion(pdf_path))
-
-    row = _emitidos_retencion_default_row()
-    row["Estado"] = "AUTORIZADO"
-    row["Código del Documento"] = "07 - COMPROBANTE DE RETENCIÓN"
-    row["Forma Pago"] = "20 - OTROS CON UTILIZACIÓN DEL SISTEMA FINANCIERO"
-    row["Pago Local o Externo"] = "01"
-    row["Código de Sustento"] = "06"
-    row["Moneda"] = "No Disponible"
-    row["Plazo Pago"] = "No Disponible"
-    row["Unidad Tiempo Pago"] = "No Disponible"
-    row["Tipo Identificación Comprador"] = "No Disponible - No Disponible"
-    row["Identificación Comprador"] = "No Disponible"
-    row["Razón Social Comprador"] = "No Disponible"
-    row["Dirección Comprador"] = "No Disponible"
-    row["Contribuyente RIMPE"] = "No Disponible"
-    row["Contribuyente Especial"] = "No Disponible"
-
-    texto = _leer_texto_pdf(pdf_path)
-    texto_norm = _normalizar_texto_pdf(texto)
-    auth = _extraer_regex(texto_norm, [r"(\d{49})"])
-    numero = _extraer_regex(texto_norm, [r"No\.\s*(\d{3}-\d{3}-\d{9})"])
-    ruc = _extraer_regex(texto_norm, [r"R\.U\.C\.\s*:?\s*(\d{13})"])
-    fecha_hora_auth = _extraer_regex(texto_norm, [r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})"])
-
-    row["Número de Autorización"] = auth or "No Disponible"
-    row["Clave de Acceso"] = auth or "No Disponible"
-    row["Fecha de Autorización"] = _fecha_hora_pdf_a_iso(fecha_hora_auth)
-    row["RUC Emisor"] = ruc or "No Disponible"
-    if numero:
-        row["Establecimiento"], row["Punto de Emisión"], row["Secuencial"] = numero.split("-")
-    if auth and len(auth) == 49:
-        row["Ambiente"] = _label_ambiente_emitidos_retencion(auth[23])
-        row["Tipo Emisión"] = _label_emision_emitidos_retencion(auth[47])
-    else:
-        row["Ambiente"] = _label_ambiente_emitidos_retencion(_extraer_regex(texto_norm, [r"AMBIENTE\s*:?\s*([A-ZÁÉÍÓÚÑ]+)"]))
-        row["Tipo Emisión"] = _label_emision_emitidos_retencion(_extraer_regex(texto_norm, [r"EMISI[ÓO]N\s*:?\s*([A-ZÁÉÍÓÚÑ]+)"]))
-
-    idx_num_aut = _buscar_indice_linea_layout(lineas, "NUMERO DE AUTORIZACION")
-    if idx_num_aut is not None:
-        row["Razón Social Emisor"] = _texto_emitidos_retencion_na(
-            _siguiente_linea_layout_no_vacia(lineas, idx_num_aut + 1, max_x=260)
-        )
-    idx_aut = _buscar_indice_linea_layout_exacta(lineas, "AUTORIZACION")
-    if idx_aut is not None:
-        for pos in range(idx_aut + 1, len(lineas)):
-            candidato = _texto_linea_layout(lineas[pos], max_x=260)
-            if candidato and candidato != row["Razón Social Emisor"]:
-                row["Nombre Comercial"] = _texto_emitidos_retencion_na(candidato)
-                break
-    idx_amb = _buscar_indice_linea_layout(lineas, "AMBIENTE")
-    if idx_amb is not None:
-        candidato = re.sub(r"(?i)\bAMBIENTE\s*:.*$", "", lineas[idx_amb].get("text", "")).strip()
-        if not candidato and idx_amb > 0:
-            candidato = _texto_linea_layout(lineas[idx_amb - 1], max_x=260)
-        if candidato and candidato != row["Razón Social Emisor"]:
-            row["Nombre Comercial"] = _texto_emitidos_retencion_na(candidato)
-
-    idx_matriz = _buscar_indice_linea_layout(lineas, "DIRECCION MATRIZ")
-    if idx_matriz is not None:
-        row["Dirección Matriz"] = _texto_emitidos_retencion_na(
-            _texto_linea_layout(lineas[idx_matriz], min_x=120, max_x=310)
-        )
-    idx_sucursal = _buscar_indice_linea_layout(lineas, "DIRECCION SUCURSAL")
-    if idx_sucursal is not None:
-        row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(
-            _texto_linea_layout(lineas[idx_sucursal], min_x=120, max_x=310)
-        )
-        row["Dirección del Establecimiento"] = row["Dir. Establecimiento"]
-
-    row["Obligado Contabilidad"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"OBLIGADO\s+A\s+LLEVAR\s+CONTABILIDAD\s*(SI|NO)"]))
-    row["Obligado a llevar Contabilidad"] = row["Obligado Contabilidad"]
-    row["Agente de Retención"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"AGENTE\s+DE\s+RETENCION\s+RESOLUCION\s+NO\.\s*([0-9]+)"]))
-
-    idx_razon = _buscar_indice_linea_layout(lineas, "RAZON SOCIAL / NOMBRES Y APELLIDOS")
-    if idx_razon is not None:
-        row["Razón Social Sujeto Retenido"] = _texto_emitidos_retencion_na(_texto_linea_layout(lineas[idx_razon], min_x=180))
-        row["Identificación Sujeto Retenido"] = _texto_emitidos_retencion_na(_siguiente_linea_layout_no_vacia(lineas, idx_razon, min_x=80, max_x=180))
-        row["Fecha de Emisión"] = _texto_emitidos_retencion_na(_siguiente_linea_layout_no_vacia(lineas, idx_razon + 1, min_x=80, max_x=180))
-
-    ident_sujeto = re.sub(r"\D+", "", row["Identificación Sujeto Retenido"])
-    tipo_id_sujeto = re.sub(r"\D+", "", row["Identificación Sujeto Retenido"])
-    if len(tipo_id_sujeto) == 13:
-        row["Tipo Identificación Sujeto Retenido"] = "04"
-    elif len(tipo_id_sujeto) == 10:
-        row["Tipo Identificación Sujeto Retenido"] = "05"
-
-    idx_info_adic = _buscar_indice_linea_layout(lineas, "INFORMACION ADICIONAL")
-    if idx_info_adic is not None:
-        row["Campos Adicionales"] = _texto_emitidos_retencion_na(_extraer_campos_adicionales_por_layout(lineas, float(lineas[idx_info_adic].get("top", 0.0))))
-
-    top_inicio_tabla = 0.0
-    idx_inicio_tabla = _buscar_indice_linea_layout(lineas, "COMPROBANTE NUMERO")
-    if idx_inicio_tabla is not None:
-        top_inicio_tabla = float(lineas[idx_inicio_tabla].get("top", 0.0))
-    top_fin_tabla = float(lineas[idx_info_adic].get("top", 9999.0)) if idx_info_adic is not None else 9999.0
-    lineas_tabla = [ln for ln in lineas if top_inicio_tabla < float(ln.get("top", 0.0)) < top_fin_tabla]
-
-    tipo_doc_sustento = ""
-    numero_doc_partes = []
-    fecha_doc_sustento = ""
-    periodo_fiscal = ""
-    iva_row = None
-    renta_row = None
-    renta_top = None
-
-    for linea in lineas_tabla:
-        texto_linea = linea.get("text", "")
-        texto_upper = _normalizar_label_simple(texto_linea)
-        izquierda = _texto_linea_layout(linea, max_x=75)
-        centro_num = [w.get("text", "") for w in linea.get("words", []) if 80 <= float(w.get("x0", 0.0)) <= 150 and re.fullmatch(r"\d+", (w.get("text", "") or ""))]
-        if izquierda and not tipo_doc_sustento and any(token in texto_upper for token in ("FACTURA", "LIQUIDACION", "NOTA", "GUIA")):
-            tipo_doc_sustento = izquierda
-        if centro_num:
-            numero_doc_partes.extend(centro_num)
-        if not fecha_doc_sustento:
-            fecha_match = re.search(r"\d{2}/\d{2}/\d{4}", texto_linea)
-            if fecha_match:
-                fecha_doc_sustento = fecha_match.group(0)
-        if not periodo_fiscal:
-            periodo_match = re.search(r"\d{2}/\d{4}", texto_linea)
-            if periodo_match:
-                periodo_fiscal = periodo_match.group(0)
-        if "IVA" in texto_upper:
-            nums = [w.get("text", "") for w in linea.get("words", []) if float(w.get("x0", 0.0)) >= 280 and re.fullmatch(r"\d+(?:\.\d+)?", (w.get("text", "") or ""))]
-            if len(nums) >= 3:
-                iva_row = tuple(nums[:3]) + (float(linea.get("top", 0.0)),)
-        if "RENTA" in texto_upper or "IMPUESTO A LA" in texto_upper:
-            renta_top = float(linea.get("top", 0.0))
-
-    base_candidates = []
-    for linea in lineas_tabla:
-        texto_upper = _normalizar_label_simple(linea.get("text", ""))
-        if "IVA" in texto_upper:
-            continue
-        nums = [w.get("text", "") for w in linea.get("words", []) if float(w.get("x0", 0.0)) >= 280 and re.fullmatch(r"\d+(?:\.\d+)?", (w.get("text", "") or ""))]
-        if len(nums) >= 3:
-            base_candidates.append((float(linea.get("top", 0.0)), nums[:3]))
-    if base_candidates:
-        if renta_top is not None:
-            base_candidates.sort(key=lambda item: abs(item[0] - renta_top))
-        renta_row = base_candidates[0]
-
-    numero_doc_sustento = "".join(numero_doc_partes)
-    row["Código del Documento de Sustento"] = _codigo_documento_sri(tipo_doc_sustento)
-    row["Número de Documento de Sustento"] = _texto_emitidos_retencion_na(numero_doc_sustento)
-    row["Fecha de Emisión del Documento de Sustento"] = _texto_emitidos_retencion_na(fecha_doc_sustento)
-    row["Fecha de Registro Contable"] = row["Fecha de Emisión"]
-    row["Periodo Fiscal"] = _texto_emitidos_retencion_na(periodo_fiscal)
-    row["Parte Relacionada"] = "No Disponible"
-    row["Número de Autorización del Documento de Sustento"] = "No Disponible"
-
-    renta_base = 0
-    if renta_row:
-        renta_base = _numero_emitidos_retencion(renta_row[1][0])
-        row["RENTA - baseImponible"] = renta_base
-        row["RENTA - porcentajeRetener"] = _numero_emitidos_retencion(renta_row[1][1])
-        row["RENTA - valorRetenido"] = _numero_emitidos_retencion(renta_row[1][2])
-        row["RENTA - codigoRetencion"] = 0
-
-    iva_top = None
-    if iva_row:
-        row["IVA - baseImponible"] = _numero_emitidos_retencion(iva_row[0])
-        row["IVA - porcentajeRetener"] = _numero_emitidos_retencion(iva_row[1])
-        row["IVA - valorRetenido"] = _numero_emitidos_retencion(iva_row[2])
-        row["IVA - codigoRetencion"] = 1
-        iva_top = iva_row[3]
-
-    total_sin_impuestos = renta_base or 0
-    row["Total Sin Impuestos"] = total_sin_impuestos
-    row["Base Gravada"] = 0
-    row["Base No Gravada"] = 0
-    row["Código Impuesto Doc. Sustento"] = "2" if total_sin_impuestos else "No Disponible"
-    row["Código Porcentaje"] = "4" if total_sin_impuestos else "No Disponible"
-    row["Base Imponible Impuesto"] = total_sin_impuestos if total_sin_impuestos else 0
-    row["Tarifa"] = 15 if total_sin_impuestos else 0
-    row["Valor Impuesto"] = round(total_sin_impuestos * 0.15, 2) if total_sin_impuestos else 0
-    row["Importe Total"] = round(total_sin_impuestos + row["Valor Impuesto"], 2) if total_sin_impuestos else 0
-    row["Total Pago"] = row["Importe Total"]
-    row["Sustento Imp. 1 - Código"] = row["Código Impuesto Doc. Sustento"]
-    row["Sustento Imp. 1 - Cod. Porcentaje"] = row["Código Porcentaje"]
-    row["Sustento Imp. 1 - Base Imponible"] = row["Base Imponible Impuesto"]
-    row["Sustento Imp. 1 - Tarifa"] = row["Tarifa"]
-    row["Sustento Imp. 1 - Valor"] = row["Valor Impuesto"]
-
-    conceptos = []
-    if iva_top is not None:
-        conceptos.append((iva_top, "2"))
-    if renta_row:
-        conceptos.append((renta_row[0], "1"))
-    conceptos.sort(key=lambda item: item[0])
-    for idx, (_, codigo) in enumerate(conceptos[:2], start=1):
-        row[f"Factura Ret. {idx} - Codigo"] = codigo
-        row[f"Factura Ret. {idx} - Cod. Porcentaje"] = "N/A"
-
-    legacy = _map_retencion_legada_a_emitidos_row(_extraer_datos_pdf_retencion(pdf_path))
-    return _combinar_rows_emitidos_especificos(row, legacy)
+    return _map_retencion_legacy_to_emitidos_sample_row(_extraer_datos_pdf_retencion(pdf_path))
 
 
 def _map_nota_credito_legada_a_emitidos_row(legacy: dict | None) -> dict:
@@ -4983,8 +4779,8 @@ def _guardar_reporte_pdf_retencion_emitidos_excel(rows: list[dict], excel_path: 
 
     try:
         with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="07")
-            ws = writer.sheets["07"]
+            df.to_excel(writer, index=False, sheet_name="Retencion")
+            ws = writer.sheets["Retencion"]
             for idx, column in enumerate(EMITIDOS_RETENCION_REPORT_COLUMNS, start=1):
                 if column in EMITIDOS_RETENCION_TEXT_FORCE_COLUMNS:
                     for row_idx in range(2, ws.max_row + 1):
