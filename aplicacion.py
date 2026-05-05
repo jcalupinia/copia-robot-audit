@@ -390,7 +390,7 @@ def _render_close_app_modal() -> None:
     if st.session_state.get("_desktop_exit_in_progress"):
         st.success("Cerrando aplicacion...")
         st.caption("Se cerrara el servicio local y la ventana de comandos del ejecutable.")
-        st.caption("Si la pestana del navegador queda abierta, puedes cerrarla manualmente.")
+        st.caption("Si la pestaña del navegador queda abierta, puedes cerrarla manualmente.")
         components.html(
             """
             <script>
@@ -983,7 +983,7 @@ def _friendly_download_error_message(raw_error: str, origen: str | None = None) 
     if "login del sri" in low or "credenciales" in low:
         return (
             "error",
-            "No se pudo iniciar sesion en el portal del SRI. Verifica tus credenciales e intenta nuevamente.",
+            "No se pudo iniciar sesión en el portal del SRI. Verifica tus credenciales e intenta nuevamente.",
         )
 
     if "error http" in low:
@@ -1587,7 +1587,7 @@ def _persist_user_preferences():
     try:
         PREFERENCES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     except Exception as err:
-        st.warning(f"No se pudo guardar la configuracin local: {err}")
+        st.warning(f"No se pudo guardar la configuración local: {err}")
 
 
 def _onboarding_steps() -> list[dict[str, str]]:
@@ -1609,7 +1609,7 @@ def _onboarding_steps() -> list[dict[str, str]]:
             "content": "Selecciona la carpeta base donde se guardarán los documentos y reportes.",
         },
         {
-            "title": "Ejecucion",
+            "title": "Ejecución",
             "content": "Haz clic en Iniciar proceso y espera el resumen final con reportes descargables.",
         },
     ]
@@ -1660,7 +1660,7 @@ def _render_first_use_tour() -> None:
     with col_finish:
         if st.button("Finalizar", key="tour_finish", use_container_width=True):
             _finish_first_use_tour()
-            st.success("Tour completado. Puedes verlo nuevamente desde la pestana Ayuda.")
+            st.success("Tour completado. Puedes verlo nuevamente desde la pestaña Ayuda.")
             st.rerun()
     with col_skip:
         if st.button("Omitir y no mostrar", key="tour_skip", use_container_width=True):
@@ -2089,7 +2089,7 @@ def _build_custom_report_from_folder(
             continue
         if is_nota_debito and origen == "Emitidos":
             row = _extraer_datos_xml_nota_debito_emitido(xml_path)
-            fecha_doc = _parse_report_date(row.get("Fecha de EmisiÃ³n")) or _parse_report_date(row.get("Fecha de AutorizaciÃ³n"))
+            fecha_doc = _parse_report_date(row.get("Fecha de Emisión")) or _parse_report_date(row.get("Fecha de AutorizaciÃ³n"))
             if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
                 continue
             key = _report_row_key(row)
@@ -2965,7 +2965,7 @@ with tab1:
                 selecciono_xml_emitidos = "XML" in formatos_final
                 selecciono_pdf_emitidos = "PDF" in formatos_final
                 if es_emitidos_autorizados and selecciono_xml_emitidos:
-                    if modo_fechas_emitidos == "Mes y dÃ­a":
+                    if modo_fechas_emitidos == "Mes y día":
                         if dia_val in (0, None):
                             fecha_inicio_sel = date(anio_val, mes_val, 1)
                             fecha_fin_sel = date(anio_val, mes_val, calendar.monthrange(anio_val, mes_val)[1])
@@ -2992,7 +2992,7 @@ with tab1:
                         )
                         if selecciono_pdf_emitidos:
                             formatos_final = [fmt for fmt in formatos_final if fmt != "XML"]
-                            st.warning(aviso_fecha_xml + " Se continuara automaticamente solo con PDF.")
+                            st.warning(aviso_fecha_xml + " Se continuará automaticamente solo con PDF.")
                         else:
                             st.warning(aviso_fecha_xml + " Selecciona PDF o usa una fecha dentro de los ultimos 30 dias.")
                             st.stop()
@@ -3303,16 +3303,22 @@ with tab2:
 
     if "custom_report_base_dir" not in st.session_state:
         st.session_state["custom_report_base_dir"] = st.session_state.get("download_base_dir", str(DESC_DIR))
-    custom_dir_value = st.session_state.get("custom_report_base_dir", str(DESC_DIR))
+    if "_custom_report_base_dir_pending" in st.session_state:
+        pending_custom_dir = st.session_state.pop("_custom_report_base_dir_pending")
+        st.session_state["custom_report_base_dir"] = pending_custom_dir
+        st.session_state["custom_report_base_dir_input"] = pending_custom_dir
+    if "custom_report_base_dir_input" not in st.session_state:
+        st.session_state["custom_report_base_dir_input"] = st.session_state.get("custom_report_base_dir", str(DESC_DIR))
+    custom_dir_value = st.session_state.get("custom_report_base_dir_input", str(DESC_DIR))
     st.text_input(
         "Carpeta fuente",
-        key="custom_report_base_dir",
+        key="custom_report_base_dir_input",
         help="Selecciona la carpeta donde ya tienes descargados los comprobantes.",
     )
     if st.button("Seleccionar carpeta fuente", key="btn_select_custom_report_dir"):
         seleccionada, error = _select_directory_dialog(custom_dir_value)
         if seleccionada:
-            st.session_state["custom_report_base_dir"] = str(Path(seleccionada).expanduser())
+            st.session_state["_custom_report_base_dir_pending"] = str(Path(seleccionada).expanduser())
             st.rerun()
         if error:
             st.warning(error)
@@ -3438,7 +3444,7 @@ with tab2:
         fecha_fin_custom = date(int(custom_year), 12, 31)
 
     if st.button("Generar reporte por fechas", key="btn_generate_custom_report", use_container_width=True):
-        source_dir = Path(st.session_state.get("custom_report_base_dir") or "").expanduser()
+        source_dir = Path(st.session_state.get("custom_report_base_dir_input") or "").expanduser()
         if not source_dir.exists():
             st.error("La carpeta fuente no existe. Selecciona una ruta válida.")
         elif fecha_inicio_custom is None or fecha_fin_custom is None:
@@ -3782,7 +3788,7 @@ with tab2:
                     etiqueta = f"{idx + 1}. {ruta_path.name} ({fila.get('timestamp', '')})"
                     descargables.append((etiqueta, ruta_path))
 
-        if descargables:
+        if False and descargables:
             st.markdown("##### Descargar reporte generado anteriormente")
             opciones = ["Seleccione un reporte"] + [etq for etq, _ in descargables]
             seleccion = st.selectbox(
@@ -3946,7 +3952,7 @@ with tab3:
 
     modo_fecha_consolidar = st.radio(
         "Modo de fecha",
-        ["Mes y dia", "Rango de meses", "Ano completo"],
+        ["Mes y dia", "Rango de meses", "Año completo"],
         horizontal=True,
         key="consolidar_modo_fechas",
     )
@@ -4158,7 +4164,7 @@ with tab4:
 
     st.markdown(
         """
-1. Inicia sesion con tu correo y contrasena.
+1. Inicia sesión con tu correo y contraseña.
 2. En Descarga de Comprobantes, completa RUC, clave SRI y filtros.
 3. Elige formato XML y/o PDF segun la necesidad.
 4. Selecciona la carpeta base de descarga.
