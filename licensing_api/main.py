@@ -12,6 +12,7 @@ import smtplib
 import ssl
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 
@@ -48,6 +49,24 @@ app = FastAPI(
 
     description="API para autenticación y activación de licencias del robot.",
 
+)
+
+
+# CORS: por defecto cerrado (solo localhost para dev). En producción, configurar
+# la env var ALLOWED_ORIGINS con la lista separada por comas de orígenes
+# permitidos (ej: "https://sri-robot-audit-ik01.onrender.com,https://admin.miempresa.com").
+# Usar "*" solo si se entiende el riesgo; no es compatible con allow_credentials=True.
+_default_origins = "http://localhost:8501,http://127.0.0.1:8501"
+_allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", _default_origins).strip()
+_allowed_origins = [o.strip() for o in _allowed_origins_raw.split(",") if o.strip()]
+_allow_credentials = "*" not in _allowed_origins  # incompatibles según CORS spec
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins or [],
+    allow_credentials=_allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Update-Token"],
 )
 
 
