@@ -18,7 +18,11 @@ APP_NAME = "ROBOT_AUDIT_SRI"
 VERSION_FILENAME = "version.txt"
 
 DEFAULT_LICENSE_API_URL = os.getenv("DEFAULT_LICENSE_API_URL", "https://sri-robot-audit-ik01.onrender.com")
-DEFAULT_UPDATE_TOKEN = os.getenv("DEFAULT_UPDATE_TOKEN", "256ed0dd9849466ebd29888cebdafc52")
+# El token de actualizaciones NO debe estar hardcodeado: se distribuye vía
+# desktop_config.json junto al .exe (o se inyecta al build con la env var
+# DEFAULT_UPDATE_TOKEN). Si queda vacío, el launcher omite el header y solo
+# funcionarán endpoints de update públicos.
+DEFAULT_UPDATE_TOKEN = os.getenv("DEFAULT_UPDATE_TOKEN", "").strip()
 
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 if getattr(sys, "frozen", False):
@@ -31,11 +35,15 @@ INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / 
 
 
 def _default_config() -> dict:
-    return {
+    cfg = {
         "LICENSE_API_URL": DEFAULT_LICENSE_API_URL,
-        "UPDATE_TOKEN": DEFAULT_UPDATE_TOKEN,
         "SESSION_CACHE_DIR": ".session_cache",
     }
+    # Solo incluir UPDATE_TOKEN si hay un valor disponible vía env (build-time).
+    # Si no, la key queda fuera y el usuario la agrega en desktop_config.json.
+    if DEFAULT_UPDATE_TOKEN:
+        cfg["UPDATE_TOKEN"] = DEFAULT_UPDATE_TOKEN
+    return cfg
 
 
 def _normalize_config(raw: dict | None) -> dict:
@@ -61,6 +69,13 @@ def _normalize_config(raw: dict | None) -> dict:
             cfg[key] = current or value
         else:
             cfg[key] = current
+
+    # Normalizar UPDATE_TOKEN si vino en el config del usuario pero no estaba
+    # entre los defaults (caso típico: el .exe se distribuye sin token embebido
+    # y el desktop_config.json lo trae aparte).
+    if "UPDATE_TOKEN" in cfg and isinstance(cfg["UPDATE_TOKEN"], str):
+        cfg["UPDATE_TOKEN"] = cfg["UPDATE_TOKEN"].strip()
+
     return cfg
 
 
