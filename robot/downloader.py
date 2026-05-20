@@ -36,6 +36,10 @@ from robot.captcha_solver import (
     solve_image as solve_captcha_image,
 )
 
+from robot._logging import get_logger
+
+logger = get_logger(__name__)
+
 USER_NOTIFICATION_CALLBACK: Optional[Callable[[str], None]] = None
 CANCEL_EVENT = threading.Event()
 
@@ -5094,7 +5098,7 @@ def _consolidar_reportes_excel(reportes: list[str], destino: Path) -> Path | Non
         try:
             df = pd.read_excel(ruta)
         except Exception as err:
-            print(f"[WARN] No se pudo leer reporte para consolidar: {ruta} ({err})")
+            logger.warning(f"No se pudo leer reporte para consolidar: {ruta} ({err})")
             continue
         if df is None or df.empty:
             continue
@@ -5118,7 +5122,7 @@ def _consolidar_reportes_excel(reportes: list[str], destino: Path) -> Path | Non
         combinado.to_excel(destino, index=False)
         return destino
     except Exception as err:
-        print(f"[WARN] No se pudo escribir reporte consolidado: {destino} ({err})")
+        logger.warning(f"No se pudo escribir reporte consolidado: {destino} ({err})")
         return None
 
 
@@ -5147,7 +5151,7 @@ def _delete_report_files(reportes: list[str]) -> None:
         try:
             Path(ruta).unlink(missing_ok=True)
         except Exception as err:
-            print(f"[WARN] No se pudo eliminar reporte intermedio '{ruta}': {err}")
+            logger.warning(f"No se pudo eliminar reporte intermedio '{ruta}': {err}")
 
 EMITIDOS_FECHA_SELECTORS = [
     "input[id$='fecha_input']",
@@ -5454,7 +5458,7 @@ def _notificar_usuario_captcha(tipo: str, contexto: str):
         try:
             USER_NOTIFICATION_CALLBACK(mensaje)
         except Exception as err:
-            print(f"[WARN] No se pudo enviar notificacion al UI: {err}")
+            logger.warning(f"No se pudo enviar notificacion al UI: {err}")
 
 
 def _notificar_usuario_accion(mensaje: str):
@@ -5466,7 +5470,7 @@ def _notificar_usuario_accion(mensaje: str):
         try:
             USER_NOTIFICATION_CALLBACK(mensaje)
         except Exception as err:
-            print(f"[WARN] No se pudo enviar notificacion al UI: {err}")
+            logger.warning(f"No se pudo enviar notificacion al UI: {err}")
 
 
 def _obtener_form_base_emitidos(page):
@@ -5922,7 +5926,7 @@ def _capturar_xml_emitido_por_dialogo(
         try:
             dialog_locator.first.wait_for(state="visible", timeout=DOWNLOAD_TIMEOUT)
         except PlaywrightTimeoutError as err:
-            print(f"[WARN] No aparecio el dialogo XML para {source_id}: {err}")
+            logger.warning(f"No aparecio el dialogo XML para {source_id}: {err}")
             raise RuntimeError("No aparecio el dialogo de descarga de XML.") from err
         dialog_actual = dialog_locator.first
 
@@ -5939,7 +5943,7 @@ def _capturar_xml_emitido_por_dialogo(
             }"""
         )
         if not form_payload:
-            print(f"[WARN] No se encontro el formulario j_idt913 en el dialogo para {source_id}.")
+            logger.warning(f"No se encontro el formulario j_idt913 en el dialogo para {source_id}.")
             raise RuntimeError("No se pudo obtener el formulario de descarga de XML.")
 
         encoded_payload = urlencode(form_payload, doseq=True)
@@ -5962,18 +5966,18 @@ def _capturar_xml_emitido_por_dialogo(
             headers=request_headers,
         )
         except Exception as err:
-            print(f"[WARN] Fallo la solicitud POST de XML para {source_id}: {err}")
+            logger.warning(f"Fallo la solicitud POST de XML para {source_id}: {err}")
             raise
         if respuesta.status != 200:
-            print(f"[WARN] HTTP {respuesta.status} al solicitar XML de emitidos para {source_id}.")
+            logger.warning(f"HTTP {respuesta.status} al solicitar XML de emitidos para {source_id}.")
             raise RuntimeError(f"Error HTTP {respuesta.status} al descargar XML de emitidos.")
         try:
             cuerpo_bytes = respuesta.body()
         except Exception as err:
-            print(f"[WARN] No se pudo leer cuerpo de respuesta XML para {source_id}: {err}")
+            logger.warning(f"No se pudo leer cuerpo de respuesta XML para {source_id}: {err}")
             raise RuntimeError("No se pudo leer la respuesta del XML de emitidos.") from err
         if not cuerpo_bytes:
-            print(f"[WARN] Respuesta vacia al descargar XML para {source_id}.")
+            logger.warning(f"Respuesta vacia al descargar XML para {source_id}.")
             raise RuntimeError("La respuesta del XML de emitidos llego vacia.")
         try:
             contenido = cuerpo_bytes.decode("utf-8")
@@ -5987,7 +5991,7 @@ def _capturar_xml_emitido_por_dialogo(
         try:
             meta = _parse_emitido_comprobante(contenido, None)
         except Exception as err:
-            print(f"[WARN] No se pudo interpretar el XML de emitidos descargado: {err}")
+            logger.warning(f"No se pudo interpretar el XML de emitidos descargado: {err}")
             meta = {"xml_contenido": contenido}
         if not isinstance(meta, dict):
             meta = {"xml_contenido": contenido}
@@ -6218,7 +6222,7 @@ def _extraer_datos_pdf_por_tipo_layout_first(
         try:
             layout_data = _extract_pdf_layout_fields(pdf_path) or {}
         except Exception as err:
-            print(f"[WARN] No se pudo extraer por layout visual el PDF '{pdf_path.name}': {err}")
+            logger.warning(f"No se pudo extraer por layout visual el PDF '{pdf_path.name}': {err}")
 
     if es_retencion:
         legacy_data = _extraer_datos_pdf_retencion(pdf_path)
@@ -6853,7 +6857,7 @@ def _guardar_pdf_desde_enlace(page, link_locator, base_destino: Path) -> Optiona
         errores.append(f"Falla al capturar respuesta PDF: {err}")
 
     for mensaje in errores:
-        print(f"[WARN] {mensaje}")
+        logger.warning(f"{mensaje}")
     return None
 
 
@@ -7373,7 +7377,7 @@ def _guardar_xml_desde_enlace(page, link_locator, base_destino: Path) -> Optiona
         errores.append(f"Falla al capturar respuesta XML: {err}")
 
     for mensaje in errores:
-        print(f"[WARN] {mensaje}")
+        logger.warning(f"{mensaje}")
     return None
 
 def _seleccionar(page, etiqueta: str, valor_visible: str):
@@ -7695,7 +7699,7 @@ def _resolver_captcha(page, contexto: str) -> bool:
 
         input_captcha = _localizar_input_captcha(page)
         if input_captcha is None:
-            print(f"[WARN] Campo de texto para captcha no encontrado ({contexto}); esperando resolucion manual.")
+            logger.warning(f"Campo de texto para captcha no encontrado ({contexto}); esperando resolucion manual.")
             _notificar_usuario_captcha("captcha de imagen", contexto)
             _espera_captcha(page)
             return False
@@ -7703,13 +7707,13 @@ def _resolver_captcha(page, contexto: str) -> bool:
         try:
             imagen = page.locator("img[alt='captcha']").screenshot(type="png")
         except Exception as err:
-            print(f"[WARN] No se pudo capturar la imagen del captcha (intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}")
+            logger.warning(f"No se pudo capturar la imagen del captcha (intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}")
             break
 
         try:
             codigo = solve_captcha_image(imagen)
         except CaptchaSolverError as err:
-            print(f"[WARN] Fallo al resolver captcha con 2Captcha (intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}")
+            logger.warning(f"Fallo al resolver captcha con 2Captcha (intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}")
             continue
 
         try:
@@ -7717,9 +7721,9 @@ def _resolver_captcha(page, contexto: str) -> bool:
             input_captcha.fill(codigo)
             return True
         except Exception as err:
-            print(f"[WARN] No se pudo escribir el captcha resuelto (intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}")
+            logger.warning(f"No se pudo escribir el captcha resuelto (intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}")
 
-    print("[WARN] Se agotaron los intentos automaticos de captcha; esperando resolucion manual.")
+    logger.warning("Se agotaron los intentos automaticos de captcha; esperando resolucion manual.")
     _notificar_usuario_captcha("captcha de imagen", contexto)
     _espera_captcha(page)
     return False
@@ -7973,7 +7977,7 @@ def _abrir_modulo_consultas(page, origen: str):
             locator.first.click(timeout=timeout)
             return True
         except Exception as err:
-            print(f"[WARN] No se pudo interactuar con {descripcion}: {err}")
+            logger.warning(f"No se pudo interactuar con {descripcion}: {err}")
             return False
 
     def _wait_overlays():
@@ -7993,7 +7997,7 @@ def _abrir_modulo_consultas(page, origen: str):
                 return
             except Exception as err:
                 ultimo_error = err
-                print(f"[WARN] Reintentando acceso directo al formulario ({intento + 1}/3): {err}")
+                logger.warning(f"Reintentando acceso directo al formulario ({intento + 1}/3): {err}")
         raise RuntimeError(f"No se pudo abrir el formulario de {origen.lower()}: {ultimo_error}")
 
     def _ensure_menu_visible():
@@ -8007,7 +8011,7 @@ def _abrir_modulo_consultas(page, origen: str):
     def _expand_panel(selector: str, descripcion: str):
         header = page.locator(selector)
         if not header.count():
-            print(f"[WARN] No se encontró {descripcion}.")
+            logger.warning(f"No se encontró {descripcion}.")
             return False
         try:
             expanded = (header.first.get_attribute("aria-expanded") or "").lower()
@@ -8020,7 +8024,7 @@ def _abrir_modulo_consultas(page, origen: str):
             page.wait_for_timeout(200)
             return True
         except Exception as err:
-            print(f"[WARN] No se pudo expandir {descripcion}: {err}")
+            logger.warning(f"No se pudo expandir {descripcion}: {err}")
             return False
 
     _wait_overlays()
@@ -8053,9 +8057,9 @@ def _abrir_modulo_consultas(page, origen: str):
         try:
             consultas_locator.first.click(timeout=1500)
         except Exception as err:
-            print(f"[WARN] No se pudo hacer clic en 'Consultas': {err}")
+            logger.warning(f"No se pudo hacer clic en 'Consultas': {err}")
     else:
-        print("[WARN] No se encontró el botón de Consultas; intentando acceso directo.")
+        logger.warning("No se encontró el botón de Consultas; intentando acceso directo.")
 
     try:
         page.wait_for_load_state("domcontentloaded", timeout=2000)
@@ -8317,7 +8321,7 @@ def _login(
                         except Exception:
                             pass
                     else:
-                        print("[WARN] No se pudo accionar el boton 'Ingresar'; el objeto page no expone teclado.")
+                        logger.warning("No se pudo accionar el boton 'Ingresar'; el objeto page no expone teclado.")
 
             try:
                 page.wait_for_load_state("networkidle", timeout=1000)
@@ -8350,7 +8354,7 @@ def _login(
                 captcha_retry += 1
                 if captcha_retry >= CAPTCHA_MAX_ATTEMPTS:
                     raise RuntimeError("No fue posible completar el login del SRI (captcha).")
-                print(f"[INFO] Reintentando login por captcha adicional ({captcha_retry}/{CAPTCHA_MAX_ATTEMPTS}).")
+                logger.info(f"Reintentando login por captcha adicional ({captcha_retry}/{CAPTCHA_MAX_ATTEMPTS}).")
                 continue
 
             raise RuntimeError("No fue posible completar el login del SRI (credenciales o captcha).")
@@ -8746,9 +8750,9 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 }"""
             )
             if ok:
-                print("[INFO] Recibidos configurado en modo submit unico (evita doble XHR por clic).")
+                logger.info("Recibidos configurado en modo submit unico (evita doble XHR por clic).")
         except Exception as err:
-            print(f"[WARN] No se pudo configurar submit unico en Recibidos: {err}")
+            logger.warning(f"No se pudo configurar submit unico en Recibidos: {err}")
 
     def _esperar_api_recaptcha_lista(timeout: int = 8000) -> bool:
         try:
@@ -8833,11 +8837,11 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             page.goto(RECIBIDOS_DIRECT_URL, wait_until="domcontentloaded", timeout=5000)
             page.wait_for_selector(selector_ano_css, state="visible", timeout=10000)
         except Exception as err:
-            print(f"[WARN] No se pudo recargar Recibidos para reintentar captcha: {err}")
+            logger.warning(f"No se pudo recargar Recibidos para reintentar captcha: {err}")
             return False
         ok = _aplicar_filtros_recibidos(estricto=False)
         if not ok:
-            print("[WARN] No se pudieron reaplicar filtros de Recibidos al reintentar captcha.")
+            logger.warning("No se pudieron reaplicar filtros de Recibidos al reintentar captcha.")
             return False
         _forzar_submit_unico_recibidos()
         return ok
@@ -8877,7 +8881,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                         _rehidratar_consulta_recibidos()
                     if RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
                         espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
-                        print(f"[INFO] Esperando {espera:.1f}s antes de reintento manual.")
+                        logger.info(f"Esperando {espera:.1f}s antes de reintento manual.")
                         time.sleep(espera)
                     continue
                 if alerta_manual:
@@ -8894,7 +8898,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                     _rehidratar_consulta_recibidos()
                 if RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
                     espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
-                    print(f"[INFO] Esperando {espera:.1f}s antes de reintento manual.")
+                    logger.info(f"Esperando {espera:.1f}s antes de reintento manual.")
                     time.sleep(espera)
             return False
         token_previo = _leer_token_recaptcha()
@@ -8947,7 +8951,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 token_previo = token_actual or token_previo
                 if intento < intentos and RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
                     espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
-                    print(f"[INFO] Esperando {espera:.1f}s antes de reintentar Recibidos.")
+                    logger.info(f"Esperando {espera:.1f}s antes de reintentar Recibidos.")
                     time.sleep(espera)
                 continue
             try:
@@ -8965,7 +8969,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             token_previo = token_actual or token_previo
             if intento < intentos and RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
                 espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
-                print(f"[INFO] Sin tabla tras intento {intento}/{intentos}. Espera {espera:.1f}s.")
+                logger.info(f"Sin tabla tras intento {intento}/{intentos}. Espera {espera:.1f}s.")
                 time.sleep(espera)
         return False
 
@@ -9035,9 +9039,9 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 txt_path = txt_dir / txt_nombre
                 descarga.save_as(str(txt_path))
             except Exception as err:
-                print(f"[WARN] No se pudo descargar el reporte TXT/XML: {err}")
+                logger.warning(f"No se pudo descargar el reporte TXT/XML: {err}")
         else:
-            print("[WARN] No se encontro el enlace 'Descargar reporte' para XML.")
+            logger.warning("No se encontro el enlace 'Descargar reporte' para XML.")
 
     descargar_xml = "XML" in formatos
     descargar_pdf = "PDF" in formatos
@@ -9201,7 +9205,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                                 lote_xml_ok += 1
                                 break
                             except Exception as err:
-                                print(f"[WARN] No se pudo descargar XML para '{razon_social}' (intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}")
+                                logger.warning(f"No se pudo descargar XML para '{razon_social}' (intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}")
                         if xml_guardado:
                             break
                         if intento_xml < DOWNLOAD_ROW_RETRY_ATTEMPTS:
@@ -9220,7 +9224,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                         pdf_report_rows.append(datos_xml)
                         usar_xml_reporte = True
                     except Exception as err:
-                        print(f"[WARN] No se pudo procesar XML para reporte: {err}")
+                        logger.warning(f"No se pudo procesar XML para reporte: {err}")
 
                 if descargar_pdf:
                     pdf_guardado = False
@@ -9267,7 +9271,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                             except Exception:
                                 pass
                     if not pdf_guardado:
-                        print(f"[WARN] No se pudo descargar PDF para '{razon_social}': no se obtuvo archivo.")
+                        logger.warning(f"No se pudo descargar PDF para '{razon_social}': no se obtuvo archivo.")
 
                 lote_contador += 1
                 if lote_contador >= lote_size or idx == total_filas - 1:
@@ -9283,7 +9287,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                     lote_pdf_ok = 0
 
             duracion_pagina = time.perf_counter() - page_inicio
-            print(f"[INFO] Pag {pagina} completa: {total_filas} filas en {duracion_pagina:.2f}s")
+            logger.info(f"Pag {pagina} completa: {total_filas} filas en {duracion_pagina:.2f}s")
 
             boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
             if boton_siguiente.count():
@@ -9319,11 +9323,11 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             if _guardar_reporte_pdf_retencion_excel(pdf_report_rows, pdf_report_path):
                 reporte_pdf_path = pdf_report_path
             else:
-                print("[WARN] No se pudo construir el reporte PDF de retenciones (recibidos).")
+                logger.warning("No se pudo construir el reporte PDF de retenciones (recibidos).")
         elif _guardar_reporte_pdf_excel(pdf_report_rows, pdf_report_path):
             reporte_pdf_path = pdf_report_path
         else:
-            print("[WARN] No se pudo construir el reporte PDF de recibidos.")
+            logger.warning("No se pudo construir el reporte PDF de recibidos.")
     resultado = {
         "estado": "ok",
         "n_xml": n_xml,
@@ -9350,9 +9354,9 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         )
     )
     if not resultado.get("descarga_completa", True):
-        print(f"[WARN] Verificacion de Recibidos incompleta: {resultado.get('mensaje_verificacion')}")
+        logger.warning(f"Verificacion de Recibidos incompleta: {resultado.get('mensaje_verificacion')}")
     else:
-        print(f"[INFO] Verificacion de Recibidos OK: {resultado.get('mensaje_verificacion')}")
+        logger.info(f"Verificacion de Recibidos OK: {resultado.get('mensaje_verificacion')}")
 
     if es_retencion and not descargar_xml and xml_temp_paths:
         for xml_tmp in xml_temp_paths:
@@ -9519,7 +9523,7 @@ def _flujo_emitidos(
         tipo,
     ):
         if not _seleccionar(page, "Tipo de comprobante", tipo_visible):
-            print(f"[WARN] No se pudo seleccionar el tipo de comprobante '{tipo_visible}' en Emitidos.")
+            logger.warning(f"No se pudo seleccionar el tipo de comprobante '{tipo_visible}' en Emitidos.")
 
     estado_visible = ESTADOS_EMITIDOS_MAP.get(estado_autorizacion, estado_autorizacion)
     if estado_visible:
@@ -9576,7 +9580,7 @@ def _flujo_emitidos(
                 fecha_emision,
                 EMITIDOS_FECHA_SELECTORS,
             ):
-                print(f"[WARN] No se pudo completar la fecha de emision con '{fecha_emision}' en Emitidos.")
+                logger.warning(f"No se pudo completar la fecha de emision con '{fecha_emision}' en Emitidos.")
 
     est_valor = establecimiento or ""
     if not est_valor or est_valor.lower() == "todos":
@@ -9604,7 +9608,7 @@ def _flujo_emitidos(
                 est_valor,
                 EMITIDOS_ESTABLECIMIENTO_SELECTORS,
             ):
-                print(f"[WARN] No se pudo establecer el establecimiento '{est_valor}' en Emitidos.")
+                logger.warning(f"No se pudo establecer el establecimiento '{est_valor}' en Emitidos.")
 
     punto_valor = punto_emision
     if est_valor and est_valor.lower() != "todos" and not punto_valor:
@@ -9627,7 +9631,7 @@ def _flujo_emitidos(
                 punto_valor,
                 EMITIDOS_PUNTO_SELECTORS,
             ):
-                print(f"[WARN] No se pudo establecer el punto de emision '{punto_valor}' en Emitidos.")
+                logger.warning(f"No se pudo establecer el punto de emision '{punto_valor}' en Emitidos.")
 
     estado_nombre = (estado_visible or "Sin Estado").strip() or "Sin Estado"
     estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
@@ -10025,7 +10029,7 @@ def _flujo_emitidos(
                                                     datos_xml = _extraer_datos_xml_pdf_report(xml_path_report)
                                                 datos_pdf = datos_xml
                                             except Exception as err:
-                                                print(f"[WARN] No se pudo usar XML para el reporte PDF: {err}")
+                                                logger.warning(f"No se pudo usar XML para el reporte PDF: {err}")
                                         if datos_pdf is None:
                                             if es_retencion:
                                                 datos_pdf = _extraer_datos_pdf_retencion_emitido(resultado_pdf)
@@ -10067,7 +10071,7 @@ def _flujo_emitidos(
                                     f"[WARN] No se encontro enlace PDF para '{nombre_base_pdf}' en No Autorizados."
                                 )
                     except Exception as err:
-                        print(f"[WARN] No se pudo descargar XML/PDF para '{nombre_base_pdf}': {err}")
+                        logger.warning(f"No se pudo descargar XML/PDF para '{nombre_base_pdf}': {err}")
                     continue
 
                 if descargar_xml_para_reporte and not omitir_soap_xml:
@@ -10101,7 +10105,7 @@ def _flujo_emitidos(
                                 except Exception:
                                     pass
                     else:
-                        print(f"[WARN] La fila '{nombre_base_pdf}' no tiene clave de acceso para solicitar el XML.")
+                        logger.warning(f"La fila '{nombre_base_pdf}' no tiene clave de acceso para solicitar el XML.")
 
                 if descargar_pdf:
                     link_pdf = fila.locator("a[id$=':lnkPdf']")
@@ -10162,37 +10166,37 @@ def _flujo_emitidos(
                                         datos_xml = _extraer_datos_xml_pdf_report(xml_path_report)
                                     datos_pdf = datos_xml
                                 except Exception as err:
-                                    print(f"[WARN] No se pudo usar XML para el reporte PDF: {err}")
+                                    logger.warning(f"No se pudo usar XML para el reporte PDF: {err}")
                             if datos_pdf is None:
                                 if es_retencion:
                                     try:
                                         datos_pdf = _extraer_datos_pdf_retencion_emitido(resultado_pdf)
                                     except Exception as err:
-                                        print(f"[WARN] No se pudo leer el PDF de retención para completar el reporte: {err}")
+                                        logger.warning(f"No se pudo leer el PDF de retención para completar el reporte: {err}")
                                         datos_pdf = None
                                 elif es_nota_credito:
                                     try:
                                         datos_pdf = _extraer_datos_pdf_nota_credito_emitido(resultado_pdf)
                                     except Exception as err:
-                                        print(f"[WARN] No se pudo leer el PDF de nota de crédito para completar el reporte: {err}")
+                                        logger.warning(f"No se pudo leer el PDF de nota de crédito para completar el reporte: {err}")
                                         datos_pdf = None
                                 elif es_nota_debito:
                                     try:
                                         datos_pdf = _extraer_datos_pdf_nota_debito_emitido(resultado_pdf)
                                     except Exception as err:
-                                        print(f"[WARN] No se pudo leer el PDF de nota de débito para completar el reporte: {err}")
+                                        logger.warning(f"No se pudo leer el PDF de nota de débito para completar el reporte: {err}")
                                         datos_pdf = None
                                 elif es_factura_emitida:
                                     try:
                                         datos_pdf = _extraer_datos_pdf_factura_emitido(resultado_pdf)
                                     except Exception as err:
-                                        print(f"[WARN] No se pudo leer el PDF de factura para completar el reporte: {err}")
+                                        logger.warning(f"No se pudo leer el PDF de factura para completar el reporte: {err}")
                                         datos_pdf = None
                                 elif es_liquidacion_compra:
                                     try:
                                         datos_pdf = _extraer_datos_pdf_liquidacion_compra_emitido(resultado_pdf)
                                     except Exception as err:
-                                        print(f"[WARN] No se pudo leer el PDF de liquidación de compra para completar el reporte: {err}")
+                                        logger.warning(f"No se pudo leer el PDF de liquidación de compra para completar el reporte: {err}")
                                         datos_pdf = None
                                 else:
                                     datos_dom = _extraer_datos_emitidos_dom(
@@ -10230,7 +10234,7 @@ def _flujo_emitidos(
                                             es_nota_debito=es_nota_debito,
                                         )
                                     except Exception as err:
-                                        print(f"[WARN] No se pudo leer el PDF para completar el reporte: {err}")
+                                        logger.warning(f"No se pudo leer el PDF para completar el reporte: {err}")
                                     datos_pdf = _combinar_datos_reporte_emitidos(
                                         datos_dom,
                                         detalle_data,
@@ -10255,7 +10259,7 @@ def _flujo_emitidos(
                                         datos_pdf["fechaEmision"] = fecha_emision
                                 pdf_report_rows.append(datos_pdf)
                     else:
-                        print(f"[WARN] No se pudo descargar PDF para '{nombre_base_pdf}': no se obtuvo archivo.")
+                        logger.warning(f"No se pudo descargar PDF para '{nombre_base_pdf}': no se obtuvo archivo.")
 
                 lote_contador += 1
                 if lote_contador >= lote_size or idx == total_filas - 1:
@@ -10271,7 +10275,7 @@ def _flujo_emitidos(
                     lote_pdf_ok = 0
 
             duracion_pagina = time.perf_counter() - page_inicio
-            print(f"[INFO] Pag {pagina} completa: {total_filas} filas en {duracion_pagina:.2f}s")
+            logger.info(f"Pag {pagina} completa: {total_filas} filas en {duracion_pagina:.2f}s")
 
             boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
             if boton_siguiente.count():
@@ -10308,7 +10312,7 @@ def _flujo_emitidos(
                 construir_reporte(carpeta_estado, xml_report_path, estado_default_reporte, xml_files=xml_files_emitidos)
                 info_base["reporte_xml"] = str(xml_report_path)
             except Exception as err:
-                print(f"[WARN] No se pudo construir el reporte XML de emitidos: {err}")
+                logger.warning(f"No se pudo construir el reporte XML de emitidos: {err}")
 
     df = pd.DataFrame(data)
     fecha_slug = re.sub(r"[^0-9]+", "", fecha_emision) or "consulta"
@@ -10360,9 +10364,9 @@ def _flujo_emitidos(
         )
     )
     if not info_base.get("descarga_completa", True):
-        print(f"[WARN] Verificacion de Emitidos incompleta: {info_base.get('mensaje_verificacion')}")
+        logger.warning(f"Verificacion de Emitidos incompleta: {info_base.get('mensaje_verificacion')}")
     else:
-        print(f"[INFO] Verificacion de Emitidos OK: {info_base.get('mensaje_verificacion')}")
+        logger.info(f"Verificacion de Emitidos OK: {info_base.get('mensaje_verificacion')}")
     if not descargar_xml and xml_temp_paths:
         for xml_tmp in xml_temp_paths:
             try:
@@ -10451,7 +10455,7 @@ def descargar_sri(
                 )
                 using_persistent_profile = True
             except Exception as err:
-                print(f"[WARN] No se pudo usar perfil persistente; fallback a contexto normal: {err}")
+                logger.warning(f"No se pudo usar perfil persistente; fallback a contexto normal: {err}")
                 persistent_kwargs.pop("channel", None)
                 try:
                     context = p.chromium.launch_persistent_context(
@@ -10611,7 +10615,7 @@ def descargar_sri(
                         try:
                             construir_reporte(base_mes, destino_xml_mes, None, xml_files=xml_files)
                         except Exception as err:
-                            print(f"[WARN] No se pudo construir el reporte XML mensual de recibidos: {err}")
+                            logger.warning(f"No se pudo construir el reporte XML mensual de recibidos: {err}")
                         if destino_xml_mes.exists():
                             resultado_mes["reporte_xml"] = str(destino_xml_mes)
                     resultado_mes["xml_dir"] = str(base_mes / "XML")
@@ -10631,7 +10635,7 @@ def descargar_sri(
                         try:
                             pdf_mes = _consolidar_reportes_excel(reportes_pdf_dia, destino_pdf_mes)
                         except Exception as err:
-                            print(f"[WARN] No se pudo consolidar reporte PDF mensual de recibidos: {err}")
+                            logger.warning(f"No se pudo consolidar reporte PDF mensual de recibidos: {err}")
                             pdf_mes = None
                         if pdf_mes and Path(pdf_mes).exists():
                             resultado_mes["reporte_pdf"] = str(pdf_mes)
@@ -10760,7 +10764,7 @@ def descargar_sri(
                                 try:
                                     construir_reporte(base_anual, destino_anual_xml, None, xml_files=xml_files)
                                 except Exception as err:
-                                    print(f"[WARN] No se pudo construir reporte XML anual (recibidos): {err}")
+                                    logger.warning(f"No se pudo construir reporte XML anual (recibidos): {err}")
                                 if destino_anual_xml.exists():
                                     resultado["reporte_xml_anual"] = str(destino_anual_xml)
                             elif reportes_xml:
@@ -10793,7 +10797,7 @@ def descargar_sri(
                                 try:
                                     construir_reporte(base_rango, destino_rango_xml, None, xml_files=xml_files)
                                 except Exception as err:
-                                    print(f"[WARN] No se pudo construir reporte XML del rango (recibidos): {err}")
+                                    logger.warning(f"No se pudo construir reporte XML del rango (recibidos): {err}")
                                 if destino_rango_xml.exists():
                                     resultado["reporte_xml_rango"] = str(destino_rango_xml)
                 resultado.pop("reporte_pdf", None)
@@ -10825,7 +10829,7 @@ def descargar_sri(
                     page.goto(PORTAL_HOME, wait_until="domcontentloaded", timeout=15000)
                     page.wait_for_load_state("domcontentloaded", timeout=3000)
                 except Exception as err:
-                    print(f"[WARN] No se pudo volver al menu principal antes del reinicio de Emitidos: {err}")
+                    logger.warning(f"No se pudo volver al menu principal antes del reinicio de Emitidos: {err}")
                 if EMITIDOS_RESET_PAUSE_MS > 0:
                     try:
                         page.wait_for_timeout(EMITIDOS_RESET_PAUSE_MS)
@@ -10973,7 +10977,7 @@ def descargar_sri(
                                 resultado_mes["reporte_xml"] = str(xml_report_path)
                                 _delete_report_files(reportes_xml_dia)
                             except Exception as err:
-                                print(f"[WARN] No se pudo construir el reporte XML mensual de emitidos: {err}")
+                                logger.warning(f"No se pudo construir el reporte XML mensual de emitidos: {err}")
                     if descargar_pdf_mes:
                         reportes_dia = list(reportes_pdf_dia)
                     if descargar_pdf_mes and reportes_dia:
@@ -10982,7 +10986,7 @@ def descargar_sri(
                             try:
                                 df_dia = pd.read_excel(ruta_excel)
                             except Exception as err:
-                                print(f"[WARN] No se pudo leer reporte diario '{ruta_excel}': {err}")
+                                logger.warning(f"No se pudo leer reporte diario '{ruta_excel}': {err}")
                                 continue
                             if not df_dia.empty:
                                 frames.append(df_dia)
@@ -11124,7 +11128,7 @@ def descargar_sri(
                                 try:
                                     construir_reporte(base_anual, destino_anual_xml, estado_default_reporte, xml_files=xml_files)
                                 except Exception as err:
-                                    print(f"[WARN] No se pudo construir reporte XML anual (emitidos): {err}")
+                                    logger.warning(f"No se pudo construir reporte XML anual (emitidos): {err}")
                                 if destino_anual_xml.exists():
                                     resultado["reporte_xml_anual"] = str(destino_anual_xml)
                             elif reportes_xml:
@@ -11159,7 +11163,7 @@ def descargar_sri(
                                 try:
                                     construir_reporte(base_rango, destino_rango_xml, estado_default_reporte, xml_files=xml_files)
                                 except Exception as err:
-                                    print(f"[WARN] No se pudo construir reporte XML del rango (emitidos): {err}")
+                                    logger.warning(f"No se pudo construir reporte XML del rango (emitidos): {err}")
                                 if destino_rango_xml.exists():
                                     resultado["reporte_xml_rango"] = str(destino_rango_xml)
                 resultado.pop("reporte_pdf", None)
@@ -11199,7 +11203,7 @@ def descargar_sri(
                 if _cerrar_sesion(objetivo):
                     break
         except Exception as err:
-            print(f"[WARN] No se pudo cerrar la sesion del SRI: {err}")
+            logger.warning(f"No se pudo cerrar la sesion del SRI: {err}")
 
         try:
             if using_persistent_profile:
