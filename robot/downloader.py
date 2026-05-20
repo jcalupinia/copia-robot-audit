@@ -54,6 +54,19 @@ from robot.signals import (
     _check_cancel,
 )
 
+# Utilidades de archivos / paths / parsing TXT extraídas a robot/file_utils.py
+# (Fase 1b del refactor). Se re-importan para que el resto del módulo siga
+# pudiendo usarlas como si vivieran aquí.
+from robot.file_utils import (
+    _collect_existing_reports,
+    _delete_report_files,
+    _detectar_delimitador,
+    _es_clave,
+    _extraer_claves_desde_txt,
+    _mes_a_texto,
+    _sanear_nombre_archivo,
+)
+
 def _extraer_clave_fila(celdas) -> str:
     def _buscar_clave(texto: str) -> str:
         texto = (texto or "").strip()
@@ -5120,33 +5133,6 @@ def _consolidar_reportes_excel(reportes: list[str], destino: Path) -> Path | Non
         return None
 
 
-def _collect_existing_reports(base_dir: Path, prefix: str, tipo_slug: str, suffixes) -> list[str]:
-    if not base_dir.exists():
-        return []
-    encontrados: dict[str, Path] = {}
-    for suffix in suffixes or []:
-        suffix_str = str(suffix or "").strip()
-        if not suffix_str:
-            continue
-        patron = f"{prefix}_{tipo_slug}_{suffix_str}*.xlsx"
-        for ruta in sorted(base_dir.glob(patron)):
-            if not ruta.is_file():
-                continue
-            stem = ruta.stem
-            esperado = f"{prefix}_{tipo_slug}_{suffix_str}"
-            if stem != esperado and not re.fullmatch(rf"{re.escape(esperado)}_\d+", stem):
-                continue
-            encontrados[str(ruta.resolve())] = ruta
-    return [str(ruta) for ruta in sorted(encontrados.values())]
-
-
-def _delete_report_files(reportes: list[str]) -> None:
-    for ruta in reportes or []:
-        try:
-            Path(ruta).unlink(missing_ok=True)
-        except Exception as err:
-            logger.warning(f"No se pudo eliminar reporte intermedio '{ruta}': {err}")
-
 EMITIDOS_FECHA_SELECTORS = [
     "input[id$='fecha_input']",
     "input[name$='fecha_input']",
@@ -5172,11 +5158,6 @@ EMITIDOS_PUNTO_SELECTORS = [
 
 
 # ====== Funciones auxiliares ======
-def _mes_a_texto(mes: int) -> str:
-    return ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
-            "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][mes-1]
-
-
 def _xml_files_por_tipo(base_dir: Path, tipo_prefijo: str) -> list[Path]:
     if not base_dir.exists():
         return []
@@ -5223,40 +5204,6 @@ def _xml_files_por_meses(base_dir: Path, tipo_prefijo: str, meses) -> list[Path]
         vistos.add(ruta)
         normalizados.append(ruta)
     return sorted(normalizados)
-
-def _es_clave(valor: str) -> bool:
-    return bool(re.fullmatch(r"\d{49}", (valor or "").strip()))
-
-def _detectar_delimitador(sample: str) -> str:
-    counts = { ';': sample.count(';'), ',': sample.count(','), '\t': sample.count('\t') }
-    return max(counts, key=counts.get) if any(counts.values()) else ';'
-
-def _extraer_claves_desde_txt(txt_path: Path):
-    claves = []
-    sample = txt_path.read_text(encoding="utf-8", errors="ignore")[:4096]
-    sep = _detectar_delimitador(sample)
-    with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
-        reader = csv.reader(f, delimiter=sep)
-        for row in reader:
-            if not row: 
-                continue
-            clave = next((c.strip() for c in row if _es_clave(c)), None)
-            if not clave:
-                continue
-            tipo = next((c.strip() for c in row if c.lower().startswith(("factura","comprobante","nota","liquidacion"))), "")
-            fecha = next((c.strip() for c in row if re.fullmatch(r"\d{2}/\d{2}/\d{4}", c.strip())), "")
-            claves.append({"clave": clave, "tipo": tipo, "fecha": fecha})
-    return claves
-
-def _sanear_nombre_archivo(texto: str, sufijo: str = "") -> str:
-    base = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode("ascii")
-    base = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("_")
-    if not base:
-        base = "documento"
-    if sufijo:
-        base = f"{base}_{sufijo}"
-    return base
-
 
 def _nombre_carpeta_tipo(tipo: str) -> str:
     base = unicodedata.normalize("NFKD", (tipo or "")).encode("ascii", "ignore").decode("ascii")
