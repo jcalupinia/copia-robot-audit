@@ -40,25 +40,19 @@ from robot._logging import get_logger
 
 logger = get_logger(__name__)
 
-USER_NOTIFICATION_CALLBACK: Optional[Callable[[str], None]] = None
-CANCEL_EVENT = threading.Event()
-
-def set_user_notifier(callback: Optional[Callable[[str], None]]):
-    global USER_NOTIFICATION_CALLBACK
-    USER_NOTIFICATION_CALLBACK = callback
-
-def request_cancel():
-    CANCEL_EVENT.set()
-
-def clear_cancel():
-    CANCEL_EVENT.clear()
-
-def cancel_requested() -> bool:
-    return CANCEL_EVENT.is_set()
-
-def _check_cancel(paso: str = "") -> None:
-    if CANCEL_EVENT.is_set():
-        raise RuntimeError("Proceso cancelado por el usuario.")
+# Estado compartido y señales movidas a robot/signals.py (Fase 1a del refactor).
+# Se re-importan aquí para mantener la API pública estable: `aplicacion.py`
+# y otros módulos siguen pudiendo hacer `from robot.downloader import
+# set_user_notifier, request_cancel, ...` sin cambios.
+from robot.signals import (
+    CANCEL_EVENT,
+    cancel_requested,
+    clear_cancel,
+    notify as _notify_user,
+    request_cancel,
+    set_user_notifier,
+    _check_cancel,
+)
 
 def _extraer_clave_fila(celdas) -> str:
     def _buscar_clave(texto: str) -> str:
@@ -5454,11 +5448,7 @@ def _notificar_usuario_captcha(tipo: str, contexto: str):
         'Resuelvelo manualmente en la ventana del navegador y luego continua.'
     )
     print(mensaje)
-    if USER_NOTIFICATION_CALLBACK:
-        try:
-            USER_NOTIFICATION_CALLBACK(mensaje)
-        except Exception as err:
-            logger.warning(f"No se pudo enviar notificacion al UI: {err}")
+    _notify_user(mensaje)
 
 
 def _notificar_usuario_accion(mensaje: str):
@@ -5466,11 +5456,7 @@ def _notificar_usuario_accion(mensaje: str):
     if not mensaje:
         return
     print(mensaje)
-    if USER_NOTIFICATION_CALLBACK:
-        try:
-            USER_NOTIFICATION_CALLBACK(mensaje)
-        except Exception as err:
-            logger.warning(f"No se pudo enviar notificacion al UI: {err}")
+    _notify_user(mensaje)
 
 
 def _obtener_form_base_emitidos(page):
