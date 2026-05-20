@@ -1,23 +1,25 @@
 # --------------------------------------------------------
-# 🤖 SRI ROBOT AUDIT — DOCKERFILE FINAL DEFINITIVO
-# Compatible con Render.com + Chromium instalado correctamente
+# SRI ROBOT AUDIT — Dockerfile
+# Compatible con Render.com + Chromium (Playwright)
+# Endurecido: usuario no-root, healthcheck, caché de pip limpia.
 # --------------------------------------------------------
 
 FROM python:3.11-slim
 
 # Evita prompts y logs truncados
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 
-# Crear carpeta de trabajo
 WORKDIR /app
 
-# Copiar dependencias
-COPY requirements.txt .
-
 # --------------------------------------------------------
-# 🧠 Instalar librerías del sistema necesarias para Chromium y Playwright
+# Librerías del sistema necesarias para Chromium / Playwright.
+# Se instalan en una sola capa y se limpian las listas de apt para
+# reducir el tamaño final de la imagen.
 # --------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget gnupg unzip curl fonts-liberation \
@@ -31,34 +33,51 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --------------------------------------------------------
-# 🧩 Instalar Playwright y navegador Chromium dentro de la imagen
+# Playwright + Chromium. Se instalan como root porque algunas libs
+# requieren permisos del sistema, pero el directorio se hace legible
+# para el usuario no-root que ejecutará la app.
 # --------------------------------------------------------
 RUN pip install --upgrade pip==24.2 setuptools wheel && \
-    pip install --no-cache-dir playwright==1.47.0 && \
+    pip install playwright==1.47.0 && \
     python -m playwright install chromium && \
-    chmod -R 777 /root/.cache/ms-playwright
+    chmod -R a+rX /root /root/.cache
 
 # --------------------------------------------------------
-# 📦 Instalar dependencias del proyecto
+# Dependencias del proyecto (en su propia capa para aprovechar la
+# caché de Docker entre builds).
 # --------------------------------------------------------
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
 # --------------------------------------------------------
-# 📂 Copiar el resto del proyecto
+# Copiar el resto del proyecto y preparar directorios.
 # --------------------------------------------------------
 COPY . .
-
-# Crear carpeta de descargas
-RUN mkdir -p /app/descargas
+RUN mkdir -p /app/descargas /app/historiales
 
 # --------------------------------------------------------
-# ⚙️ Variables de entorno Playwright
+# Variables Playwright
 # --------------------------------------------------------
-ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
-ENV PYPPETEER_HOME=/root/.cache/ms-playwright
+ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright \
+    PYPPETEER_HOME=/root/.cache/ms-playwright
 
 # --------------------------------------------------------
-# 🚀 Comando de inicio Streamlit
+# Crear usuario no-root y traspasarle la propiedad de /app.
+# UID 1001 evita colisión con UIDs reservados del sistema.
 # --------------------------------------------------------
+RUN groupadd --system --gid 1001 appuser && \
+    useradd --system --uid 1001 --gid appuser --shell /sbin/nologin appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+# --------------------------------------------------------
+# Healthcheck — Streamlit expone /_stcore/health.
+# Render ignora esto y usa healthCheckPath de render.yaml,
+# pero sirve para builds locales y otros entornos (compose, k8s).
+# --------------------------------------------------------
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://localhost:8501/_stcore/health || exit 1
+
 EXPOSE 8501
 CMD ["streamlit", "run", "aplicacion.py", "--server.port=8501", "--server.address=0.0.0.0"]

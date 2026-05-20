@@ -1,0 +1,68 @@
+# Control de versiones e historia
+.git
+.gitignore
+.gitattributes
+
+# Entornos virtuales y artefactos de build
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+build/
+dist/
+*.spec
+
+# Caches de herramientas
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov/
+
+# Artefactos de Playwright local (la imagen los reinstala)
+.playwright
+browser_profile
+
+# Datos locales que no deben viajar a la imagen
+descargas/
+historiales/
+.session_cache/
+*.db
+*.sqlite
+*.sqlite3
+cookies_*.json
+session_cache.json
+user_prefs.json
+historial_descargas.json
+password_reset_requests.json
+
+# Secretos locales — nunca dentro de la imagen
+.env
+.env.*
+desktop_config.json
+
+# Editor / IDE
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Documentos y artefactos sueltos
+*.zip
+*.bak
+*.log
+temp_test.py
+debug_login_persistente.html
+
+# Imagen / icono de build de escritorio (no se usan en la imagen Linux)
+LogoAUDIT.ico
+build_desktop.bat
+
+# Notebooks
+*.ipynb
+.ipynb_checkpoints
