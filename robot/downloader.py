@@ -52,6 +52,23 @@ from robot.signals import (
     request_cancel,
     set_user_notifier,
     _check_cancel,
+    _notificar_usuario_accion,
+    _notificar_usuario_captcha,
+)
+
+# Captcha (Sub-fase 2b): detección y resolución de captcha de imagen / reCAPTCHA.
+# Las funciones se re-importan para mantener cualquier uso interno previo.
+from robot.captcha import (
+    CAPTCHA_INPUT_QUERY,
+    CAPTCHA_INPUT_SELECTORS,
+    _captcha_visible,
+    _espera_captcha,
+    _esperar_captcha_manual_input,
+    _esperar_recaptcha_resuelto,
+    _localizar_input_captcha,
+    _recaptcha_challenge_activo,
+    _recaptcha_presente,
+    _resolver_captcha,
 )
 
 # Utilidades de archivos / paths / parsing TXT extraídas a robot/file_utils.py
@@ -5149,21 +5166,9 @@ def _actualizar_view_state_input(page, nuevo_view_state: str):
         pass
 
 
-def _notificar_usuario_captcha(tipo: str, contexto: str):
-    mensaje = (
-        f"[ACCION] Se detecto un {tipo} en '{contexto}'. "
-        'Resuelvelo manualmente en la ventana del navegador y luego continua.'
-    )
-    print(mensaje)
-    _notify_user(mensaje)
-
-
-def _notificar_usuario_accion(mensaje: str):
-    mensaje = (mensaje or "").strip()
-    if not mensaje:
-        return
-    print(mensaje)
-    _notify_user(mensaje)
+# _notificar_usuario_captcha y _notificar_usuario_accion movidos a robot/signals.py
+# (Sub-fase 2b del refactor). Quedan re-importados en la cabecera para mantener
+# compatibilidad con cualquier llamada interna.
 
 
 def _obtener_form_base_emitidos(page):
@@ -7247,178 +7252,6 @@ def _seleccionar_en_select(page, selector: str, *valores) -> bool:
             pass
         if _seleccionar_js():
             return True
-    return False
-
-def _espera_captcha(page, timeout: int = 1000):
-    try:
-        loc = page.locator("img[alt='captcha']")
-        if loc.is_visible(timeout=1000):
-            page.wait_for_selector("img[alt='captcha']", state="detached", timeout=timeout)
-    except Exception:
-        pass
-
-
-def _captcha_visible(page, timeout: int = 0) -> bool:
-    try:
-        loc = page.locator("img[alt='captcha']")
-        if timeout:
-            return loc.is_visible(timeout=timeout)
-        return loc.is_visible()
-    except Exception:
-        return False
-
-
-def _recaptcha_presente(page) -> bool:
-    try:
-        if page.locator("iframe[src*='recaptcha']").count():
-            return True
-    except Exception:
-        pass
-    try:
-        if page.locator("[data-sitekey]").count():
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def _esperar_recaptcha_resuelto(page, timeout: int = 300000) -> bool:
-    """Espera a que el desafío de reCAPTCHA desaparezca u obtenga respuesta."""
-    fin = time.time() + timeout / 1000
-    while time.time() < fin:
-        challenge_activo = False
-        try:
-            challenge_activo = _recaptcha_challenge_activo(page)
-        except Exception:
-            challenge_activo = False
-        if not challenge_activo:
-            return True
-        try:
-            page.wait_for_timeout(500)
-        except Exception:
-            pass
-    return False
-
-
-def _recaptcha_challenge_activo(page) -> bool:
-    try:
-        frame = page.locator("iframe[src*='recaptcha/api2/bframe']")
-        if frame.count():
-            try:
-                return frame.first.is_visible()
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return False
-
-
-CAPTCHA_INPUT_SELECTORS = [
-    "input[name*='captcha' i]",
-    "input[id*='captcha' i]",
-    "input[name='captcha']",
-    "input[id='captcha']",
-    "input#captchaIngresar",
-    "input#captchaTxt",
-]
-CAPTCHA_INPUT_QUERY = ",".join(CAPTCHA_INPUT_SELECTORS)
-
-
-def _esperar_captcha_manual_input(page, timeout: int = 300000) -> bool:
-    """
-    Espera hasta que el usuario ingrese un valor de captcha de forma manual.
-    Se considera resuelto cuando cualquiera de los inputs registrados tiene texto.
-    """
-    try:
-        page.wait_for_function(
-            """(selectorCadena) => {
-                const inputs = document.querySelectorAll(selectorCadena);
-                for (const input of inputs) {
-                    const valor = (input.value || "").trim();
-                    if (valor.length >= 4) {
-                        return true;
-                    }
-                }
-                return false;
-            }""",
-            arg=CAPTCHA_INPUT_QUERY,
-            timeout=timeout,
-        )
-        return True
-    except Exception:
-        return False
-
-
-def _localizar_input_captcha(page):
-    for selector in CAPTCHA_INPUT_SELECTORS:
-        try:
-            locator = page.locator(selector)
-            if locator.count():
-                return locator.first
-        except Exception:
-            continue
-    return None
-
-
-def _resolver_captcha(page, contexto: str) -> bool:
-    recaptcha_detectado = False
-    try:
-        recaptcha_detectado = _recaptcha_presente(page)
-    except Exception:
-        recaptcha_detectado = False
-
-    if recaptcha_detectado:
-        _notificar_usuario_captcha("reCAPTCHA", contexto)
-        _esperar_recaptcha_resuelto(page, timeout=300000)
-        return True
-
-    try:
-        if not _captcha_visible(page, timeout=1000):
-            return False
-    except Exception:
-        return False
-
-    if not captcha_solver_enabled():
-        _notificar_usuario_captcha("captcha de imagen", contexto)
-        _espera_captcha(page)
-        return False
-
-    for intento in range(1, CAPTCHA_MAX_ATTEMPTS + 1):
-        try:
-            if not _captcha_visible(page, timeout=1000):
-                return False
-        except Exception:
-            return False
-
-        input_captcha = _localizar_input_captcha(page)
-        if input_captcha is None:
-            logger.warning(f"Campo de texto para captcha no encontrado ({contexto}); esperando resolucion manual.")
-            _notificar_usuario_captcha("captcha de imagen", contexto)
-            _espera_captcha(page)
-            return False
-
-        try:
-            imagen = page.locator("img[alt='captcha']").screenshot(type="png")
-        except Exception as err:
-            logger.warning(f"No se pudo capturar la imagen del captcha (intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}")
-            break
-
-        try:
-            codigo = solve_captcha_image(imagen)
-        except CaptchaSolverError as err:
-            logger.warning(f"Fallo al resolver captcha con 2Captcha (intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}")
-            continue
-
-        try:
-            input_captcha.fill("")
-            input_captcha.fill(codigo)
-            return True
-        except Exception as err:
-            logger.warning(f"No se pudo escribir el captcha resuelto (intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}")
-
-    logger.warning("Se agotaron los intentos automaticos de captcha; esperando resolucion manual.")
-    _notificar_usuario_captcha("captcha de imagen", contexto)
-    _espera_captcha(page)
     return False
 
 def _resolver_autenticacion_persistente(page) -> bool:

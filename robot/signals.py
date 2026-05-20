@@ -51,6 +51,32 @@ def notify(mensaje: str) -> None:
         logger.warning(f"No se pudo enviar notificacion al UI: {err}")
 
 
+def _notificar_usuario_captcha(tipo: str, contexto: str) -> None:
+    """Notifica al usuario que debe resolver un captcha manualmente.
+
+    Imprime el mensaje a stdout (legacy, lo veía en la consola) Y lo envía
+    al callback de la UI.
+    """
+    mensaje = (
+        f"[ACCION] Se detecto un {tipo} en '{contexto}'. "
+        'Resuelvelo manualmente en la ventana del navegador y luego continua.'
+    )
+    print(mensaje)
+    notify(mensaje)
+
+
+def _notificar_usuario_accion(mensaje: str) -> None:
+    """Imprime y notifica al UI un mensaje de acción para el usuario.
+
+    No hace nada si `mensaje` está vacío (preserva el comportamiento original).
+    """
+    mensaje = (mensaje or "").strip()
+    if not mensaje:
+        return
+    print(mensaje)
+    notify(mensaje)
+
+
 # --------------------------------------------------------------------------- #
 # Cancelación cooperativa
 # --------------------------------------------------------------------------- #
