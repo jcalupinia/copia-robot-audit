@@ -71,6 +71,16 @@ from robot.captcha import (
     _resolver_captcha,
 )
 
+# Helpers de formato/parseo (Sub-fase 2c-ii-a): _parse_decimal y las 4
+# funciones _*_default_row() usadas por la generación de reportes.
+from robot.data_formatters import (
+    _emitidos_retencion_default_row,
+    _factura_emitidos_default_row,
+    _nota_credito_emitidos_default_row,
+    _nota_debito_emitidos_default_row,
+    _parse_decimal,
+)
+
 # Definiciones de columnas Excel (Sub-fase 2c-i): listas, sets y mapeos que
 # describen los reportes generados. Re-exportadas porque aplicacion.py importa
 # PDF_REPORT_COLUMNS, RETENCION_REPORT_COLUMNS, EMITIDOS_RETENCION_REPORT_COLUMNS
@@ -210,18 +220,6 @@ from robot.config import (
 # fueron movidas a robot/report_columns.py (Sub-fase 2c-i del refactor).
 # Se re-importan al final de la cabecera para que `aplicacion.py` siga
 # pudiendo hacer `from robot.downloader import PDF_REPORT_COLUMNS, ...`.
-
-
-def _emitidos_retencion_default_row() -> dict:
-    row = {col: "" for col in EMITIDOS_RETENCION_REPORT_COLUMNS}
-    for col in ("nombreComercial", "numeroContribuyenteEspecial", "numeroAgenteRetencion", "informacionAdicional"):
-        row[col] = "No Disponible"
-    for col in EMITIDOS_RETENCION_NUMERIC_COLUMNS:
-        row[col] = 0
-    row["Impuesto_Ret_IVA"] = "No Aplica"
-    row["Impuesto_Ret_IR"] = "No Aplica"
-    row["tipoDocumento"] = "Retencion"
-    return row
 
 
 def _texto_emitidos_retencion(valor, default: str = "") -> str:
@@ -465,137 +463,6 @@ def _map_retencion_legacy_to_emitidos_sample_row(legacy: dict | None) -> dict:
         det2_val_key="Valor_Retenido_IR_2",
         label="Renta",
     )
-    return row
-
-
-def _nota_credito_emitidos_default_row() -> dict:
-    row = {col: "" for col in EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS}
-    for col in (
-        "Dir. Establecimiento",
-        "Obligado Contabilidad",
-        "Tipo Identificación Comprador",
-        "Identificación Comprador",
-        "Nombre Comercial",
-        "Contribuyente RIMPE",
-        "Razón Social Comprador",
-        "Dirección Comprador",
-        "Moneda",
-        "Plazo Pago",
-        "Unidad Tiempo Pago",
-        "Forma Pago",
-        "Código Documento Modificado",
-        "Número Documento Modificado",
-        "Fecha Emisión Doc. Sustento",
-        "Motivo",
-        "Campos Adicionales",
-    ):
-        row[col] = "No Disponible"
-    for col in (
-        "Total Sin Impuestos",
-        "Base Gravada",
-        "Base No Gravada",
-        "Monto IVA",
-        "Total Descuento",
-        "Propina",
-        "Importe Total",
-        "Total Pago",
-        "Valor Modificación",
-        "Base Gravada 15%",
-        "Monto IVA 15%",
-    ):
-        row[col] = 0
-    row["Tarifas IVA"] = ""
-    row["Descripciones"] = ""
-    return row
-
-
-def _factura_emitidos_default_row() -> dict:
-    row = {col: "" for col in EMITIDOS_FACTURA_REPORT_COLUMNS}
-    for col in (
-        "Estado",
-        "Número de Autorización",
-        "Fecha de Autorización",
-        "Ambiente",
-        "Razón Social Emisor",
-        "Dir. Establecimiento",
-        "Obligado Contabilidad",
-        "Tipo Identificación Comprador",
-        "Identificación Comprador",
-        "Tipo Emisión",
-        "Nombre Comercial",
-        "Código del Documento",
-        "Establecimiento",
-        "Punto de Emisión",
-        "Secuencial",
-        "Dirección Matriz",
-        "Contribuyente RIMPE",
-        "RUC Emisor",
-        "Clave de Acceso",
-        "Fecha de Emisión",
-        "Razón Social Comprador",
-        "Dirección Comprador",
-        "Moneda",
-        "Plazo Pago",
-        "Unidad Tiempo Pago",
-        "Forma Pago",
-        "Campos Adicionales",
-    ):
-        row[col] = "No Disponible"
-    row["Tarifas IVA"] = "0%"
-    for col in (
-        "Total Sin Impuestos",
-        "Base Gravada",
-        "Base No Gravada",
-        "Monto IVA",
-        "Total Descuento",
-        "Propina",
-        "Importe Total",
-        "Total Pago",
-        "Base No Gravada 0%",
-    ):
-        row[col] = 0
-    row["Descripciones"] = ""
-    return row
-
-
-def _nota_debito_emitidos_default_row() -> dict:
-    row = {col: "" for col in EMITIDOS_NOTA_DEBITO_REPORT_COLUMNS}
-    for col in (
-        "Dir. Establecimiento",
-        "Obligado Contabilidad",
-        "Tipo Identificación Comprador",
-        "Identificación Comprador",
-        "Nombre Comercial",
-        "Contribuyente RIMPE",
-        "Razón Social Comprador",
-        "Dirección Comprador",
-        "Moneda",
-        "Plazo Pago",
-        "Unidad Tiempo Pago",
-        "Forma Pago",
-        "Código Documento Modificado",
-        "Número Documento Modificado",
-        "Fecha Emisión Doc. Sustento",
-        "Motivo",
-        "Campos Adicionales",
-    ):
-        row[col] = "No Disponible"
-    for col in (
-        "Total Sin Impuestos",
-        "Base Gravada",
-        "Base No Gravada",
-        "Monto IVA",
-        "Total Descuento",
-        "Propina",
-        "Importe Total",
-        "Total Pago",
-        "Valor Modificación",
-        "Base Gravada 15%",
-        "Monto IVA 15%",
-    ):
-        row[col] = 0
-    row["Tarifas IVA"] = ""
-    row["Descripciones"] = ""
     return row
 
 
@@ -5404,23 +5271,6 @@ def _descargar_xml_emitido_por_clave(
     if clave_meta:
         claves_guardadas.add(clave_meta)
     return destino_final
-
-
-def _parse_decimal(texto: str) -> Optional[float]:
-    bruto = (texto or "").strip().replace("\xa0", "").replace(" ", "")
-    if not bruto:
-        return None
-    candidatos = [
-        bruto,
-        bruto.replace(".", "").replace(",", "."),
-        bruto.replace(",", ""),
-    ]
-    for candidato in candidatos:
-        try:
-            return float(candidato)
-        except ValueError:
-            continue
-    return None
 
 
 def _parse_datetime_local(texto: str) -> Optional[datetime]:
