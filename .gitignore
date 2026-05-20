@@ -18,3 +18,16 @@ historial_descargas.json
 *.bak
 temp_test.py
 debug_login_persistente.html
+
+# Config local del launcher (contiene UPDATE_TOKEN — no commitear).
+# Usar desktop_config.example.json como plantilla.
+desktop_config.json
+
+# Variables de entorno locales — contienen secretos (JWT, SMTP, R2, etc.).
+# Usar .env.example como plantilla.
+.env
+.env.local
+.env.*.local
+
+# Artefactos del harness de Claude Code (sesiones, hooks locales).
+.claude/
