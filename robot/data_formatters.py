@@ -16,6 +16,8 @@ Sub-fase 2c-ii-a del refactor.
 """
 from __future__ import annotations
 
+import re
+from datetime import datetime
 from typing import Optional
 
 from robot.report_columns import (
@@ -49,6 +51,25 @@ def _parse_decimal(texto: str) -> Optional[float]:
     for candidato in candidatos:
         try:
             return float(candidato)
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_datetime_local(texto: str) -> Optional[datetime]:
+    """Parsea fechas en formatos del portal SRI (DD/MM/YYYY [HH:MM[:SS]]).
+
+    Tolera espacios múltiples internos. Devuelve None si no matchea ninguno
+    de los tres formatos esperados.
+    """
+    bruto = (texto or "").strip()
+    if not bruto:
+        return None
+    bruto = re.sub(r"\s+", " ", bruto)
+    formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y")
+    for fmt in formatos:
+        try:
+            return datetime.strptime(bruto, fmt)
         except ValueError:
             continue
     return None

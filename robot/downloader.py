@@ -71,14 +71,29 @@ from robot.captcha import (
     _resolver_captcha,
 )
 
-# Helpers de formato/parseo (Sub-fase 2c-ii-a): _parse_decimal y las 4
-# funciones _*_default_row() usadas por la generación de reportes.
+# Helpers de formato/parseo (Sub-fases 2c-ii-a/b): _parse_decimal, _parse_datetime_local
+# y las 4 funciones _*_default_row() usadas por la generación de reportes.
 from robot.data_formatters import (
     _emitidos_retencion_default_row,
     _factura_emitidos_default_row,
     _nota_credito_emitidos_default_row,
     _nota_debito_emitidos_default_row,
     _parse_decimal,
+    _parse_datetime_local,
+)
+
+# Generación de reportes Excel (Sub-fase 2c-ii-b): las 8 funciones que producen
+# los .xlsx por tipo de comprobante. aplicacion.py importa 7 de ellas desde
+# robot.downloader, así que se re-exportan vía facade.
+from robot.reporting import (
+    _consolidar_reportes_excel,
+    _guardar_reporte_emitidos_excel,
+    _guardar_reporte_pdf_excel,
+    _guardar_reporte_pdf_factura_emitidos_excel,
+    _guardar_reporte_pdf_nota_credito_emitidos_excel,
+    _guardar_reporte_pdf_nota_debito_emitidos_excel,
+    _guardar_reporte_pdf_retencion_emitidos_excel,
+    _guardar_reporte_pdf_retencion_excel,
 )
 
 # Definiciones de columnas Excel (Sub-fase 2c-i): listas, sets y mapeos que
@@ -214,13 +229,11 @@ from robot.config import (
     USER_DATA_DIR,
 )
 
-
 # Las 19 constantes de columnas Excel (PDF_REPORT_COLUMNS, RETENCION_REPORT_COLUMNS,
 # EMITIDOS_*_REPORT_COLUMNS, *_TEXT_FORCE_COLUMNS, *_NUMERIC_COLUMNS, *_LABEL)
 # fueron movidas a robot/report_columns.py (Sub-fase 2c-i del refactor).
 # Se re-importan al final de la cabecera para que `aplicacion.py` siga
 # pudiendo hacer `from robot.downloader import PDF_REPORT_COLUMNS, ...`.
-
 
 def _texto_emitidos_retencion(valor, default: str = "") -> str:
     if valor is None:
@@ -228,10 +241,8 @@ def _texto_emitidos_retencion(valor, default: str = "") -> str:
     texto = re.sub(r"\s+", " ", str(valor).strip())
     return texto or default
 
-
 def _texto_emitidos_retencion_na(valor) -> str:
     return _texto_emitidos_retencion(valor, "No Disponible")
-
 
 def _numero_emitidos_retencion(valor, default=0):
     if valor in ("", None):
@@ -240,7 +251,6 @@ def _numero_emitidos_retencion(valor, default=0):
         return valor
     parsed = _parse_decimal(str(valor))
     return parsed if parsed is not None else default
-
 
 def _normalizar_ambiente_retencion_emitidos(valor) -> str:
     texto = _texto_emitidos_retencion(valor)
@@ -253,7 +263,6 @@ def _normalizar_ambiente_retencion_emitidos(valor) -> str:
         return "PRUEBAS"
     return texto
 
-
 def _normalizar_emision_retencion_emitidos(valor) -> str:
     texto = _texto_emitidos_retencion(valor)
     if not texto:
@@ -264,7 +273,6 @@ def _normalizar_emision_retencion_emitidos(valor) -> str:
     if "INDISPONIBILIDAD" in valor_norm or "CONTINGENCIA" in valor_norm:
         return "CONTINGENCIA"
     return texto
-
 
 def _formatear_fecha_autorizacion_retencion_emitidos(valor) -> str:
     texto = _texto_emitidos_retencion(valor)
@@ -284,7 +292,6 @@ def _formatear_fecha_autorizacion_retencion_emitidos(valor) -> str:
         except Exception:
             pass
     return texto
-
 
 def _detalle_retencion_emitidos(legacy: dict, prefijo: str) -> list[dict]:
     if prefijo == "IVA":
@@ -314,7 +321,6 @@ def _detalle_retencion_emitidos(legacy: dict, prefijo: str) -> list[dict]:
         if not detalles or detalle != detalles[-1]:
             detalles.append(detalle)
     return detalles
-
 
 def _asignar_resumen_retencion_emitidos(
     row: dict,
@@ -382,7 +388,6 @@ def _asignar_resumen_retencion_emitidos(
     row[det2_imp_key] = label
     row[det2_pct_key] = second["pct"]
     row[det2_val_key] = second["val"]
-
 
 def _map_retencion_legacy_to_emitidos_sample_row(legacy: dict | None) -> dict:
     row = _emitidos_retencion_default_row()
@@ -465,13 +470,11 @@ def _map_retencion_legacy_to_emitidos_sample_row(legacy: dict | None) -> dict:
     )
     return row
 
-
 def _label_tipo_ident_emitidos_nota_credito(valor: str) -> str:
     valor = _texto_emitidos_retencion(valor)
     if valor in EMITIDOS_NOTA_CREDITO_TIPO_IDENT_LABEL:
         return EMITIDOS_NOTA_CREDITO_TIPO_IDENT_LABEL[valor]
     return valor or "No Disponible"
-
 
 def _label_ambiente_emitidos_retencion(valor: str) -> str:
     valor = _texto_emitidos_retencion(valor)
@@ -484,7 +487,6 @@ def _label_ambiente_emitidos_retencion(valor: str) -> str:
         return EMITIDOS_RETENCION_AMBIENTE_LABEL["1"]
     return valor
 
-
 def _label_emision_emitidos_retencion(valor: str) -> str:
     valor = _texto_emitidos_retencion(valor)
     if valor in EMITIDOS_RETENCION_TIPO_EMISION_LABEL:
@@ -496,7 +498,6 @@ def _label_emision_emitidos_retencion(valor: str) -> str:
         return EMITIDOS_RETENCION_TIPO_EMISION_LABEL["2"]
     return valor
 
-
 def _label_forma_pago_emitidos_retencion(valor: str) -> str:
     valor = _texto_emitidos_retencion(valor)
     if not valor:
@@ -504,7 +505,6 @@ def _label_forma_pago_emitidos_retencion(valor: str) -> str:
     if valor in EMITIDOS_RETENCION_FORMA_PAGO_LABEL:
         return EMITIDOS_RETENCION_FORMA_PAGO_LABEL[valor]
     return valor
-
 
 def _extraer_xml_emitidos_autorizacion(xml_path: Path) -> tuple[ET.Element | None, dict]:
     try:
@@ -533,7 +533,6 @@ def _extraer_xml_emitidos_autorizacion(xml_path: Path) -> tuple[ET.Element | Non
         return None, meta
     _strip_xml_namespaces(comprobante_root)
     return comprobante_root, meta
-
 
 def _extraer_datos_xml_nota_credito_emitido(xml_path: Path) -> dict:
     row = _nota_credito_emitidos_default_row()
@@ -646,7 +645,6 @@ def _extraer_datos_xml_nota_credito_emitido(xml_path: Path) -> dict:
         row["Campos Adicionales"] = "; ".join(adicionales)
 
     return row
-
 
 def _extraer_datos_xml_nota_debito_emitido(xml_path: Path) -> dict:
     row = _nota_debito_emitidos_default_row()
@@ -2323,7 +2321,6 @@ def _extraer_datos_pdf_retencion(pdf_path: Path) -> dict:
         datos["numeroContribuyenteEspecial"] = "No Disponible"
     return datos
 
-
 def _extraer_datos_xml_retencion(xml_path: Path) -> dict:
     datos = {col: "" for col in RETENCION_REPORT_COLUMNS}
     try:
@@ -2551,7 +2548,6 @@ def _extraer_datos_xml_retencion(xml_path: Path) -> dict:
 
     return datos
 
-
 def _extraer_datos_xml_retencion_emitido(xml_path: Path) -> dict:
     legacy = _extraer_datos_xml_retencion(xml_path)
     row = _map_retencion_legacy_to_emitidos_sample_row(legacy)
@@ -2613,10 +2609,8 @@ def _extraer_datos_xml_retencion_emitido(xml_path: Path) -> dict:
         )
     return row
 
-
 def _map_retencion_legada_a_emitidos_row(legacy: dict | None) -> dict:
     return _map_retencion_legacy_to_emitidos_sample_row(legacy)
-
 
 def _extraer_lineas_layout_pdf(pdf_path: Path, y_tolerance: float = 3.0) -> list[dict]:
     if pdfplumber is None:
@@ -2656,7 +2650,6 @@ def _extraer_lineas_layout_pdf(pdf_path: Path, y_tolerance: float = 3.0) -> list
     except Exception:
         return []
 
-
 def _texto_linea_layout(linea: dict, min_x: float | None = None, max_x: float | None = None) -> str:
     words = []
     for word in linea.get("words", []):
@@ -2670,7 +2663,6 @@ def _texto_linea_layout(linea: dict, min_x: float | None = None, max_x: float | 
             words.append(text)
     return " ".join(words).strip()
 
-
 def _buscar_indice_linea_layout(lineas: list[dict], token: str, start: int = 0) -> int | None:
     token_norm = _normalizar_label_simple(token)
     for idx in range(start, len(lineas)):
@@ -2678,7 +2670,6 @@ def _buscar_indice_linea_layout(lineas: list[dict], token: str, start: int = 0) 
         if token_norm in texto:
             return idx
     return None
-
 
 def _buscar_indice_linea_layout_exacta(lineas: list[dict], token: str, start: int = 0) -> int | None:
     token_norm = _normalizar_label_simple(token)
@@ -2688,14 +2679,12 @@ def _buscar_indice_linea_layout_exacta(lineas: list[dict], token: str, start: in
             return idx
     return None
 
-
 def _siguiente_linea_layout_no_vacia(lineas: list[dict], idx: int, min_x: float | None = None, max_x: float | None = None) -> str:
     for pos in range(idx + 1, len(lineas)):
         texto = _texto_linea_layout(lineas[pos], min_x=min_x, max_x=max_x)
         if texto:
             return texto
     return ""
-
 
 def _fecha_hora_pdf_a_iso(valor: str) -> str:
     valor = (valor or "").strip()
@@ -2707,7 +2696,6 @@ def _fecha_hora_pdf_a_iso(valor: str) -> str:
     except Exception:
         return valor
 
-
 def _codigo_tipo_identificacion_desde_numero(identificacion: str, default: str = "No Disponible") -> str:
     digits = re.sub(r"\D+", "", identificacion or "")
     if len(digits) == 13:
@@ -2715,7 +2703,6 @@ def _codigo_tipo_identificacion_desde_numero(identificacion: str, default: str =
     if len(digits) == 10:
         return _label_tipo_ident_emitidos_nota_credito("05")
     return default
-
 
 def _codigo_documento_sri(descripcion: str, default: str = "No Disponible") -> str:
     texto_norm = _normalizar_label_simple(descripcion)
@@ -2733,7 +2720,6 @@ def _codigo_documento_sri(descripcion: str, default: str = "No Disponible") -> s
         return "07"
     return default
 
-
 def _combinar_rows_emitidos_especificos(primary: dict, secondary: dict | None) -> dict:
     if not isinstance(secondary, dict):
         return primary
@@ -2743,7 +2729,6 @@ def _combinar_rows_emitidos_especificos(primary: dict, secondary: dict | None) -
         if current in ("", None) and value not in ("", None):
             result[key] = value
     return result
-
 
 def _extraer_campos_adicionales_por_layout(lineas: list[dict], top_min: float, left_max: float = 320.0) -> str:
     adicionales = []
@@ -2762,7 +2747,6 @@ def _extraer_campos_adicionales_por_layout(lineas: list[dict], top_min: float, l
             continue
         adicionales.append(f"{etiqueta}: {valor}")
     return "; ".join(adicionales)
-
 
 def _extraer_bloque_direccion_layout(
     lineas: list[dict],
@@ -2788,7 +2772,6 @@ def _extraer_bloque_direccion_layout(
         if texto:
             partes.append(texto)
     return " ".join(partes).strip()
-
 
 def _extraer_items_emitidos_layout(
     lineas: list[dict],
@@ -2850,7 +2833,6 @@ def _extraer_items_emitidos_layout(
         )
     return items
 
-
 def _formatear_descripciones_emitidos(items: list[dict], *, incluir_auxiliar: bool = False) -> str:
     partes = []
     for item in items:
@@ -2869,7 +2851,6 @@ def _formatear_descripciones_emitidos(items: list[dict], *, incluir_auxiliar: bo
         partes.append(", ".join(fragmentos))
     return " ; ".join(partes)
 
-
 def _formatear_cantidad_emitidos(cantidad: str) -> str:
     try:
         valor = float(str(cantidad).replace(",", "."))
@@ -2879,14 +2860,12 @@ def _formatear_cantidad_emitidos(cantidad: str) -> str:
         return f"{valor:.4f}"
     return (cantidad or "").strip()
 
-
 def _formatear_precio_emitidos(precio: str) -> str:
     try:
         valor = float(str(precio).replace(",", "."))
     except Exception:
         return (precio or "").strip()
     return f"{valor:.5f}"
-
 
 def _extraer_campos_adicionales_emitidos_desde_texto(texto_pdf: str) -> str:
     lineas = [ln.strip() for ln in (texto_pdf or "").splitlines() if ln.strip()]
@@ -2936,10 +2915,8 @@ def _extraer_campos_adicionales_emitidos_desde_texto(texto_pdf: str) -> str:
         adicionales.append(texto)
     return "; ".join(adicionales)
 
-
 def _extraer_datos_pdf_retencion_emitido(pdf_path: Path) -> dict:
     return _map_retencion_legacy_to_emitidos_sample_row(_extraer_datos_pdf_retencion(pdf_path))
-
 
 def _map_nota_credito_legada_a_emitidos_row(legacy: dict | None) -> dict:
     row = _nota_credito_emitidos_default_row()
@@ -2995,7 +2972,6 @@ def _map_nota_credito_legada_a_emitidos_row(legacy: dict | None) -> dict:
     row["Base Gravada 15%"] = _numero_emitidos_retencion(legacy.get("subtotal15"))
     row["Monto IVA 15%"] = _numero_emitidos_retencion(legacy.get("iva15"))
     return row
-
 
 def _map_nota_debito_legada_a_emitidos_row(legacy: dict | None) -> dict:
     row = _nota_debito_emitidos_default_row()
@@ -3071,7 +3047,6 @@ def _map_nota_debito_legada_a_emitidos_row(legacy: dict | None) -> dict:
     row["Base Gravada 15%"] = _numero_emitidos_retencion(legacy.get("subtotal15"))
     row["Monto IVA 15%"] = _numero_emitidos_retencion(legacy.get("iva15"))
     return row
-
 
 def _extraer_datos_pdf_nota_credito_emitido(pdf_path: Path) -> dict:
     lineas = _extraer_lineas_layout_pdf(pdf_path)
@@ -3199,7 +3174,6 @@ def _extraer_datos_pdf_nota_credito_emitido(pdf_path: Path) -> dict:
 
     legacy = _map_nota_credito_legada_a_emitidos_row(_extraer_datos_pdf_nota_credito(pdf_path))
     return _combinar_rows_emitidos_especificos(row, legacy)
-
 
 def _extraer_datos_pdf_nota_debito_emitido(pdf_path: Path) -> dict:
     lineas = _extraer_lineas_layout_pdf(pdf_path)
@@ -3345,7 +3319,6 @@ def _extraer_datos_pdf_nota_debito_emitido(pdf_path: Path) -> dict:
     legacy = _map_nota_debito_legada_a_emitidos_row(_extraer_datos_pdf_nota_debito(pdf_path))
     return _combinar_rows_emitidos_especificos(row, legacy)
 
-
 def _map_factura_legada_a_emitidos_row(legacy: dict | None) -> dict:
     row = _factura_emitidos_default_row()
     if not isinstance(legacy, dict):
@@ -3402,7 +3375,6 @@ def _map_factura_legada_a_emitidos_row(legacy: dict | None) -> dict:
     row["Campos Adicionales"] = _texto_emitidos_retencion_na(legacy.get("informacionAdicional"))
     row["Base No Gravada 0%"] = total_sin_imp
     return row
-
 
 def _extraer_datos_xml_factura_emitido(xml_path: Path) -> dict:
     row = _factura_emitidos_default_row()
@@ -3498,7 +3470,6 @@ def _extraer_datos_xml_factura_emitido(xml_path: Path) -> dict:
         row["Campos Adicionales"] = "; ".join(adicionales)
     return row
 
-
 def _extraer_datos_pdf_factura_emitido(pdf_path: Path) -> dict:
     lineas = _extraer_lineas_layout_pdf(pdf_path)
     legacy = _map_factura_legada_a_emitidos_row(_extraer_datos_pdf_por_tipo_layout_first(pdf_path))
@@ -3591,7 +3562,6 @@ def _extraer_datos_pdf_factura_emitido(pdf_path: Path) -> dict:
 
     return _combinar_rows_emitidos_especificos(row, legacy)
 
-
 def _extraer_datos_xml_liquidacion_compra_emitido(xml_path: Path) -> dict:
     datos = _extraer_datos_xml_pdf_report(xml_path)
     datos["tipoDocumento"] = "Liquidación de Compra"
@@ -3609,7 +3579,6 @@ def _extraer_datos_xml_liquidacion_compra_emitido(xml_path: Path) -> dict:
     if not _valor_reporte_presente(datos.get("informacionAdicional")):
         datos["informacionAdicional"] = "No Disponible"
     return datos
-
 
 def _extraer_datos_pdf_liquidacion_compra_emitido(pdf_path: Path) -> dict:
     lineas = _extraer_lineas_layout_pdf(pdf_path)
@@ -3713,7 +3682,6 @@ def _extraer_datos_pdf_liquidacion_compra_emitido(pdf_path: Path) -> dict:
         datos["ambiente"] = "PRODUCCIÓN" if auth[23] == "2" else "PRUEBAS"
         datos["emision"] = "NORMAL" if auth[47] == "1" else datos.get("emision") or "NORMAL"
     return datos
-
 
 def _extraer_datos_xml_pdf_report(xml_path: Path) -> dict:
     datos = {col: "" for col in PDF_REPORT_COLUMNS}
@@ -4078,445 +4046,13 @@ def _extraer_datos_pdf_nota_debito(pdf_path: Path) -> dict:
 
     return datos
 
-def _guardar_reporte_pdf_retencion_excel(rows: list[dict], excel_path: Path) -> bool:
-    if not rows:
-        return False
-    df = pd.DataFrame(rows)
-    for col in RETENCION_REPORT_COLUMNS:
-        if col not in df.columns:
-            df[col] = ""
-    df = df[RETENCION_REPORT_COLUMNS]
-
-    numeric_cols = [
-        "Base_Imponible_Ret_IVA",
-        "Porcentaje_Ret_IVA",
-        "Valor_Retenido_IVA",
-        "Base_Imponible_Ret_IR",
-        "Porcentaje_Ret_IR",
-        "Valor_Retenido_IR",
-        "Base_Imponible_Ret_IR_1",
-        "Porcentaje_Ret_IR_1",
-        "Valor_Retenido_IR_1",
-        "Base_Imponible_Ret_IVA_1",
-        "Porcentaje_Ret_IVA_1",
-        "Valor_Retenido_IVA_1",
-    ]
-
-    def _to_text(val):
-        if val is None:
-            return ""
-        if isinstance(val, float):
-            if pd.isna(val):
-                return ""
-            if val.is_integer():
-                return str(int(val))
-        return str(val).strip()
-
-    def _to_number(val):
-        if val is None:
-            return ""
-        if isinstance(val, float):
-            if pd.isna(val):
-                return ""
-            return val
-        if isinstance(val, int):
-            return val
-        if isinstance(val, str):
-            if not val.strip():
-                return ""
-            parsed = _parse_decimal(val)
-            return parsed if parsed is not None else val
-        return val
-
-    for col in df.columns:
-        if col in numeric_cols:
-            df[col] = df[col].map(_to_number)
-        else:
-            df[col] = df[col].map(_to_text)
-    try:
-        df.to_excel(excel_path, index=False)
-    except Exception:
-        return False
-    return True
 
 
-def _guardar_reporte_pdf_retencion_emitidos_excel(rows: list[dict], excel_path: Path) -> bool:
-    if not rows:
-        return False
-    df = pd.DataFrame(rows)
-    for col in EMITIDOS_RETENCION_REPORT_COLUMNS:
-        if col not in df.columns:
-            df[col] = _emitidos_retencion_default_row().get(col, "")
-    df = df[EMITIDOS_RETENCION_REPORT_COLUMNS].copy()
-
-    def _to_text(val):
-        if val is None:
-            return ""
-        if isinstance(val, float) and pd.isna(val):
-            return ""
-        return str(val).strip()
-
-    def _to_number(val):
-        if val is None:
-            return 0
-        if isinstance(val, float):
-            if pd.isna(val):
-                return 0
-            return val
-        if isinstance(val, int):
-            return val
-        parsed = _parse_decimal(str(val))
-        return parsed if parsed is not None else 0
-
-    for col in df.columns:
-        if col in EMITIDOS_RETENCION_NUMERIC_COLUMNS:
-            df[col] = df[col].map(_to_number)
-        else:
-            df[col] = df[col].map(_to_text)
-
-    try:
-        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Retencion")
-            ws = writer.sheets["Retencion"]
-            for idx, column in enumerate(EMITIDOS_RETENCION_REPORT_COLUMNS, start=1):
-                if column in EMITIDOS_RETENCION_TEXT_FORCE_COLUMNS:
-                    for row_idx in range(2, ws.max_row + 1):
-                        ws.cell(row=row_idx, column=idx).number_format = "@"
-                else:
-                    for row_idx in range(2, ws.max_row + 1):
-                        cell = ws.cell(row=row_idx, column=idx)
-                        if cell.value == "0":
-                            cell.value = 0
-                max_len = len(column)
-                for row_idx in range(1, ws.max_row + 1):
-                    value = ws.cell(row=row_idx, column=idx).value
-                    if value is None:
-                        continue
-                    max_len = max(max_len, len(str(value)))
-                ws.column_dimensions[get_column_letter(idx)].width = min(max(max_len + 2, 12), 52)
-        return True
-    except Exception:
-        return False
 
 
-def _guardar_reporte_pdf_nota_credito_emitidos_excel(rows: list[dict], excel_path: Path) -> bool:
-    if not rows:
-        return False
-    df = pd.DataFrame(rows)
-    for col in EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS:
-        if col not in df.columns:
-            df[col] = _nota_credito_emitidos_default_row().get(col, "")
-    df = df[EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS].copy()
-
-    def _to_text(val):
-        if val is None:
-            return ""
-        if isinstance(val, float) and pd.isna(val):
-            return ""
-        return str(val).strip()
-
-    def _to_number(val):
-        if val is None:
-            return 0
-        if isinstance(val, float):
-            if pd.isna(val):
-                return 0
-            return val
-        if isinstance(val, int):
-            return val
-        parsed = _parse_decimal(str(val))
-        return parsed if parsed is not None else 0
-
-    for col in df.columns:
-        if col in EMITIDOS_NOTA_CREDITO_NUMERIC_COLUMNS:
-            df[col] = df[col].map(_to_number)
-        else:
-            df[col] = df[col].map(_to_text)
-
-    try:
-        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="04")
-            ws = writer.sheets["04"]
-            for idx, column in enumerate(EMITIDOS_NOTA_CREDITO_REPORT_COLUMNS, start=1):
-                if column in EMITIDOS_NOTA_CREDITO_TEXT_FORCE_COLUMNS:
-                    for row_idx in range(2, ws.max_row + 1):
-                        ws.cell(row=row_idx, column=idx).number_format = "@"
-                max_len = len(column)
-                for row_idx in range(1, ws.max_row + 1):
-                    value = ws.cell(row=row_idx, column=idx).value
-                    if value is None:
-                        continue
-                    max_len = max(max_len, len(str(value)))
-                ws.column_dimensions[get_column_letter(idx)].width = min(max(max_len + 2, 12), 52)
-        return True
-    except Exception:
-        return False
 
 
-def _guardar_reporte_pdf_nota_debito_emitidos_excel(rows: list[dict], excel_path: Path) -> bool:
-    if not rows:
-        return False
-    df = pd.DataFrame(rows)
-    for col in EMITIDOS_NOTA_DEBITO_REPORT_COLUMNS:
-        if col not in df.columns:
-            df[col] = _nota_debito_emitidos_default_row().get(col, "")
-    df = df[EMITIDOS_NOTA_DEBITO_REPORT_COLUMNS].copy()
 
-    def _to_text(val):
-        if val is None:
-            return ""
-        if isinstance(val, float) and pd.isna(val):
-            return ""
-        return str(val).strip()
-
-    def _to_number(val):
-        if val is None:
-            return 0
-        if isinstance(val, float):
-            if pd.isna(val):
-                return 0
-            return val
-        if isinstance(val, int):
-            return val
-        parsed = _parse_decimal(str(val))
-        return parsed if parsed is not None else 0
-
-    for col in df.columns:
-        if col in EMITIDOS_NOTA_DEBITO_NUMERIC_COLUMNS:
-            df[col] = df[col].map(_to_number)
-        else:
-            df[col] = df[col].map(_to_text)
-
-    try:
-        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="05")
-            ws = writer.sheets["05"]
-            for idx, column in enumerate(EMITIDOS_NOTA_DEBITO_REPORT_COLUMNS, start=1):
-                if column in EMITIDOS_NOTA_DEBITO_TEXT_FORCE_COLUMNS:
-                    for row_idx in range(2, ws.max_row + 1):
-                        ws.cell(row=row_idx, column=idx).number_format = "@"
-                max_len = len(column)
-                for row_idx in range(1, ws.max_row + 1):
-                    value = ws.cell(row=row_idx, column=idx).value
-                    if value is None:
-                        continue
-                    max_len = max(max_len, len(str(value)))
-                ws.column_dimensions[get_column_letter(idx)].width = min(max(max_len + 2, 12), 52)
-        return True
-    except Exception:
-        return False
-
-
-def _guardar_reporte_pdf_factura_emitidos_excel(rows: list[dict], excel_path: Path) -> bool:
-    if not rows:
-        return False
-    df = pd.DataFrame(rows)
-    for col in EMITIDOS_FACTURA_REPORT_COLUMNS:
-        if col not in df.columns:
-            df[col] = _factura_emitidos_default_row().get(col, "")
-    df = df[EMITIDOS_FACTURA_REPORT_COLUMNS].copy()
-
-    def _to_text(val):
-        if val is None:
-            return ""
-        if isinstance(val, float) and pd.isna(val):
-            return ""
-        return str(val).strip()
-
-    def _to_number(val):
-        if val is None:
-            return 0
-        if isinstance(val, float):
-            if pd.isna(val):
-                return 0
-            return val
-        if isinstance(val, int):
-            return val
-        parsed = _parse_decimal(str(val))
-        return parsed if parsed is not None else 0
-
-    for col in df.columns:
-        if col in EMITIDOS_FACTURA_NUMERIC_COLUMNS:
-            df[col] = df[col].map(_to_number)
-        else:
-            df[col] = df[col].map(_to_text)
-
-    try:
-        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="01")
-            ws = writer.sheets["01"]
-            for idx, column in enumerate(EMITIDOS_FACTURA_REPORT_COLUMNS, start=1):
-                if column in EMITIDOS_FACTURA_TEXT_FORCE_COLUMNS:
-                    for row_idx in range(2, ws.max_row + 1):
-                        ws.cell(row=row_idx, column=idx).number_format = "@"
-                max_len = len(column)
-                for row_idx in range(1, ws.max_row + 1):
-                    value = ws.cell(row=row_idx, column=idx).value
-                    if value is None:
-                        continue
-                    max_len = max(max_len, len(str(value)))
-                ws.column_dimensions[get_column_letter(idx)].width = min(max(max_len + 2, 12), 52)
-        return True
-    except Exception:
-        return False
-
-
-def _guardar_reporte_pdf_excel(rows: list[dict], excel_path: Path) -> bool:
-    if not rows:
-        return False
-    df = pd.DataFrame(rows)
-    for col in PDF_REPORT_COLUMNS:
-        if col not in df.columns:
-            df[col] = ""
-    df = df[PDF_REPORT_COLUMNS]
-    text_cols = [
-        "tipoDocumento",
-        "rucEmisor",
-        "razonSocialEmisor",
-        "nombreComercial",
-        "direccionMatrizEmisor",
-        "direccionSucursalEmisor",
-        "contribuyenteEspecial",
-        "agenteRetencion",
-        "obligadoContabilidad",
-        "tipoContribuyenteRIMPE",
-        "numeroComprobante",
-        "establecimiento",
-        "puntoEmision",
-        "secuencial",
-        "fechaEmision",
-        "fechaAutorizacion",
-        "razonSocialComprador",
-        "identificacionComprador",
-        "direccionComprador",
-        "placa",
-        "guia",
-        "comprobanteModificado",
-        "fechaEmisionModificado",
-        "razonModificacion",
-        "valorModificacion",
-        "descripcionesProductos",
-        "formaPago",
-        "ambiente",
-        "emision",
-        "claveAcceso",
-        "informacionAdicional",
-    ]
-
-    def _to_text(val):
-        if val is None:
-            return ""
-        if isinstance(val, float):
-            if pd.isna(val):
-                return ""
-            if val.is_integer():
-                return str(int(val))
-        return str(val).strip()
-
-    for col in text_cols:
-        if col in df.columns:
-            df[col] = df[col].map(_to_text)
-
-    numeric_cols = [
-        "subtotalTarifaEspecial",
-        "subtotal15",
-        "subtotal12",
-        "subtotal8",
-        "subtotal5",
-        "subtotal0",
-        "subtotalNoObjetoIVA",
-        "subtotalExentoIVA",
-        "subtotalSinImpuestos",
-        "totalDescuento",
-        "ivaTarifaEspecial",
-        "iva15",
-        "iva12",
-        "iva8",
-        "iva5",
-        "ice",
-        "irbpnr",
-        "propina",
-        "valorTotal",
-        "valorTotalSinSubsidio",
-        "formaPagoMonto",
-    ]
-
-    def _to_number(val):
-        if val is None:
-            return ""
-        if isinstance(val, float):
-            if pd.isna(val):
-                return ""
-            return val
-        if isinstance(val, int):
-            return val
-        if isinstance(val, str):
-            if not val.strip():
-                return ""
-            parsed = _parse_decimal(val)
-            return parsed if parsed is not None else val
-        return val
-
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = df[col].map(_to_number)
-    try:
-        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-            df.to_excel(writer, sheet_name="Detalle PDF", index=False)
-            ws = writer.sheets["Detalle PDF"]
-            col_index = {cell.value: idx + 1 for idx, cell in enumerate(ws[1])}
-            for columna in ("rucEmisor", "numeroComprobante", "establecimiento", "puntoEmision", "secuencial", "claveAcceso"):
-                idx = col_index.get(columna)
-                if not idx:
-                    continue
-                col_letter = get_column_letter(idx)
-                for row_idx in range(2, ws.max_row + 1):
-                    celda = ws[f"{col_letter}{row_idx}"]
-                    celda.number_format = "@"
-                    if celda.value is not None:
-                        celda.value = str(celda.value)
-                    celda.alignment = Alignment(horizontal="left")
-    except Exception:
-        return False
-    return True
-
-
-def _consolidar_reportes_excel(reportes: list[str], destino: Path) -> Path | None:
-    rutas = [Path(p) for p in reportes if p and Path(p).exists()]
-    if not rutas:
-        return None
-    dataframes: list[pd.DataFrame] = []
-    columnas: list[str] | None = None
-    for ruta in rutas:
-        try:
-            df = pd.read_excel(ruta)
-        except Exception as err:
-            logger.warning(f"No se pudo leer reporte para consolidar: {ruta} ({err})")
-            continue
-        if df is None or df.empty:
-            continue
-        if columnas is None:
-            columnas = list(df.columns)
-        else:
-            for col in df.columns:
-                if col not in columnas:
-                    columnas.append(col)
-        dataframes.append(df)
-    if not dataframes or not columnas:
-        return None
-    for idx, df in enumerate(dataframes):
-        for col in columnas:
-            if col not in df.columns:
-                df[col] = ""
-        dataframes[idx] = df[columnas]
-    try:
-        destino.parent.mkdir(parents=True, exist_ok=True)
-        combinado = pd.concat(dataframes, ignore_index=True)
-        combinado.to_excel(destino, index=False)
-        return destino
-    except Exception as err:
-        logger.warning(f"No se pudo escribir reporte consolidado: {destino} ({err})")
-        return None
 
 
 EMITIDOS_FECHA_SELECTORS = [
@@ -4540,7 +4076,6 @@ EMITIDOS_PUNTO_SELECTORS = [
     "input[id$='punto']",
     "input[name$='punto']",
 ]
-
 
 
 # ====== Funciones auxiliares ======
@@ -4568,7 +4103,6 @@ def _xml_files_por_tipo(base_dir: Path, tipo_prefijo: str) -> list[Path]:
         except Exception:
             continue
     return sorted(encontrados)
-
 
 def _xml_files_por_meses(base_dir: Path, tipo_prefijo: str, meses) -> list[Path]:
     encontrados: list[Path] = []
@@ -4607,11 +4141,9 @@ def _portal_indisponible(page) -> bool:
     texto = unicodedata.normalize("NFKD", contenido).lower()
     return "ha ocurrido un error" in texto and "indisponibil" in texto
 
-
 def _asegurar_portal_disponible(page):
     if _portal_indisponible(page):
         raise RuntimeError(PORTAL_INDISPONIBLE_MENSAJE)
-
 
 def _obtener_view_state(page) -> str:
     try:
@@ -4621,7 +4153,6 @@ def _obtener_view_state(page) -> str:
     except Exception:
         pass
     return ""
-
 
 def _actualizar_view_state_input(page, nuevo_view_state: str):
     if not nuevo_view_state:
@@ -4634,11 +4165,9 @@ def _actualizar_view_state_input(page, nuevo_view_state: str):
     except Exception:
         pass
 
-
 # _notificar_usuario_captcha y _notificar_usuario_accion movidos a robot/signals.py
 # (Sub-fase 2b del refactor). Quedan re-importados en la cabecera para mantener
 # compatibilidad con cualquier llamada interna.
-
 
 def _obtener_form_base_emitidos(page):
     try:
@@ -4662,7 +4191,6 @@ def _obtener_form_base_emitidos(page):
         datos = {}
     datos.pop("javax.faces.ViewState", None)
     return datos
-
 
 def _extraer_autorizacion_desde_partial(respuesta: str):
     if not respuesta:
@@ -4691,7 +4219,6 @@ def _extraer_autorizacion_desde_partial(respuesta: str):
     nuevo_view_state = view_state_match.group(1).strip() if view_state_match else None
     return autorizacion_bruta, nuevo_view_state
 
-
 def _strip_xml_namespaces(element: ET.Element):
     if element is None:
         return
@@ -4706,7 +4233,6 @@ def _strip_xml_namespaces(element: ET.Element):
                 for key, val in node.attrib.items()
             }
 
-
 def _limpiar_cdata(texto: str) -> str:
     if not texto:
         return ""
@@ -4714,7 +4240,6 @@ def _limpiar_cdata(texto: str) -> str:
     if contenido.startswith("<![CDATA[") and contenido.endswith("]]>"):
         contenido = contenido[9:-3]
     return contenido.strip()
-
 
 def _buscar_autorizacion_en_json(payload):
     if isinstance(payload, dict):
@@ -4731,7 +4256,6 @@ def _buscar_autorizacion_en_json(payload):
         return payload
     return None
 
-
 def _es_url_autorizacion(url: str) -> bool:
     if not url:
         return False
@@ -4739,7 +4263,6 @@ def _es_url_autorizacion(url: str) -> bool:
     if "sri.gob.ec" not in url_lower:
         return False
     return "autoriz" in url_lower
-
 
 def _extraer_comprobante_desde_autorizacion(payload: str):
     if not payload:
@@ -4787,7 +4310,6 @@ def _extraer_comprobante_desde_autorizacion(payload: str):
         return _limpiar_cdata(comprobante_texto), meta
     raise ValueError("La respuesta de autorizacion no contiene un comprobante valido.")
 
-
 def _primer_texto(node: ET.Element, nombres):
     if node is None:
         return ""
@@ -4796,7 +4318,6 @@ def _primer_texto(node: ET.Element, nombres):
         if valor and valor.strip():
             return valor.strip()
     return ""
-
 
 def _fecha_slug(fecha: str) -> str:
     if not fecha:
@@ -4816,7 +4337,6 @@ def _fecha_slug(fecha: str) -> str:
     solo_digitos = re.sub(r"[^\d]", "", texto)
     return solo_digitos[:8]
 
-
 def _total_slug(valor) -> str:
     if isinstance(valor, (int, float)):
         numero = float(valor)
@@ -4825,7 +4345,6 @@ def _total_slug(valor) -> str:
         if numero is None:
             return ""
     return f"{numero:.2f}".replace(".", "_")
-
 
 def _parse_emitido_comprobante(xml_texto: str, meta_autorizacion: Optional[dict] = None):
     contenido = _limpiar_cdata(xml_texto)
@@ -4920,7 +4439,6 @@ def _parse_emitido_comprobante(xml_texto: str, meta_autorizacion: Optional[dict]
         meta["ambiente"] = meta_autorizacion.get("ambiente", "")
     return meta
 
-
 def _construir_nombre_xml_emitido(meta: dict, fallback: str) -> str:
     serie = "-".join(
         parte for parte in (meta.get("estab"), meta.get("pto_emi"), meta.get("secuencial")) if parte
@@ -4947,7 +4465,6 @@ def _construir_nombre_xml_emitido(meta: dict, fallback: str) -> str:
     if len(nombre) > 180:
         nombre = nombre[:180].rstrip("._-")
     return nombre or "emitido"
-
 
 def _capturar_xml_emitido(
     page,
@@ -5028,7 +4545,6 @@ def _capturar_xml_emitido(
     if nuevo_view_state:
         _actualizar_view_state_input(page, nuevo_view_state)
     return destino, nuevo_view_state or view_state
-
 
 
 
@@ -5154,7 +4670,6 @@ def _capturar_xml_emitido_por_dialogo(
         if not contenido:
             raise ValueError("El XML descargado esta vacio.")
 
-
         try:
             meta = _parse_emitido_comprobante(contenido, None)
         except Exception as err:
@@ -5200,7 +4715,6 @@ def _capturar_xml_emitido_por_dialogo(
     nuevo_view_state = _obtener_view_state(page)
     return resultado_path, nuevo_view_state
 
-
 SOAP_ENVELOPE_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
                   xmlns:ec="http://ec.gob.sri.ws.autorizacion">
@@ -5212,7 +4726,6 @@ SOAP_ENVELOPE_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
   </soapenv:Body>
 </soapenv:Envelope>
 """
-
 
 def _descargar_xml_emitido_por_clave(
     request_context,
@@ -5272,20 +4785,8 @@ def _descargar_xml_emitido_por_clave(
         claves_guardadas.add(clave_meta)
     return destino_final
 
-
-def _parse_datetime_local(texto: str) -> Optional[datetime]:
-    bruto = (texto or "").strip()
-    if not bruto:
-        return None
-    bruto = re.sub(r"\s+", " ", bruto)
-    formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y")
-    for fmt in formatos:
-        try:
-            return datetime.strptime(bruto, fmt)
-        except ValueError:
-            continue
-    return None
-
+# _parse_datetime_local movido a robot/data_formatters.py (Sub-fase 2c-ii-b).
+# Se re-importa en la cabecera del módulo.
 
 def _debe_omitir_soap_xml(fecha_emision: str, descargar_xml: bool, dias_limite: int = 30) -> bool:
     if descargar_xml:
@@ -5301,7 +4802,6 @@ def _debe_omitir_soap_xml(fecha_emision: str, descargar_xml: bool, dias_limite: 
         limite = 30
     dias = (datetime.now().date() - fecha_dt.date()).days
     return dias > limite
-
 
 def _inferir_iva_columna(iva_val: float | None, base_val: float | None) -> str | None:
     if not iva_val or not base_val:
@@ -5320,7 +4820,6 @@ def _inferir_iva_columna(iva_val: float | None, base_val: float | None) -> str |
             return col
     return None
 
-
 def _valor_reporte_presente(valor) -> bool:
     if valor is None:
         return False
@@ -5331,7 +4830,6 @@ def _valor_reporte_presente(valor) -> bool:
         return False
     token = _normalizar_token(texto)
     return token not in {"nodisponible", "na", "n/a", "none", "null", "sindato", "nohaydato"}
-
 
 def _texto_probable_comprador_desde_fila(texto: str) -> str:
     valor = (texto or "").strip()
@@ -5345,7 +4843,6 @@ def _texto_probable_comprador_desde_fila(texto: str) -> str:
         return ""
     return valor
 
-
 def _combinar_datos_reporte_emitidos(*fuentes: dict | None) -> dict:
     datos = {col: "" for col in PDF_REPORT_COLUMNS}
     for fuente in fuentes:
@@ -5358,7 +4855,6 @@ def _combinar_datos_reporte_emitidos(*fuentes: dict | None) -> dict:
             if not _valor_reporte_presente(datos.get(col)):
                 datos[col] = nuevo
     return datos
-
 
 def _extraer_datos_pdf_por_tipo_layout_first(
     pdf_path: Path,
@@ -5385,7 +4881,6 @@ def _extraer_datos_pdf_por_tipo_layout_first(
     if not layout_data:
         return legacy_data
     return _combinar_datos_reporte_emitidos(layout_data, legacy_data)
-
 
 def _extraer_datos_emitidos_dom(
     tipo_visible: str,
@@ -5441,13 +4936,11 @@ def _extraer_datos_emitidos_dom(
 
     return datos
 
-
 def _strip_html(texto: str) -> str:
     if not texto:
         return ""
     sin_tags = re.sub(r"<[^>]+>", " ", texto)
     return re.sub(r"\s+", " ", sin_tags).strip()
-
 
 def _extraer_detalle_emitido_desde_partial(respuesta: str) -> dict:
     if not respuesta:
@@ -5470,7 +4963,6 @@ def _extraer_detalle_emitido_desde_partial(respuesta: str) -> dict:
         if etiqueta not in kv or not kv.get(etiqueta):
             kv[etiqueta] = valor
     return kv
-
 
 def _mapear_detalle_emitido_a_pdf(
     detalle: dict,
@@ -5605,7 +5097,6 @@ def _mapear_detalle_emitido_a_pdf(
 
     return datos
 
-
 def _obtener_source_detalle_emitido(page, row_index: int) -> str:
     try:
         return page.evaluate(
@@ -5644,7 +5135,6 @@ def _obtener_source_detalle_emitido(page, row_index: int) -> str:
     except Exception:
         return ""
 
-
 def _extraer_lineas_pdf_layout(pdf_path: Path) -> list[dict]:
     try:
         from pdfminer.high_level import extract_pages
@@ -5677,7 +5167,6 @@ def _extraer_lineas_pdf_layout(pdf_path: Path) -> list[dict]:
         linea["norm"] = _normalizar_label_simple(linea.get("text") or "")
     return lineas
 
-
 def _extraer_numero_desde_texto(texto: str) -> str:
     if not texto:
         return ""
@@ -5685,7 +5174,6 @@ def _extraer_numero_desde_texto(texto: str) -> str:
     if not match:
         return ""
     return match.group(1)
-
 
 def _buscar_valor_layout(lineas: list[dict], etiquetas: list[str], y_tol: float = 2.5) -> str:
     if not lineas:
@@ -5714,7 +5202,6 @@ def _buscar_valor_layout(lineas: list[dict], etiquetas: list[str], y_tol: float 
             candidatos.sort(key=lambda l: (-l["y0"], l["x0"]))
             return candidatos[0].get("text", "").strip()
     return ""
-
 
 def _extraer_datos_pdf_layout(pdf_path: Path) -> dict:
     lineas = _extraer_lineas_pdf_layout(pdf_path)
@@ -5807,7 +5294,6 @@ def _extraer_datos_pdf_layout(pdf_path: Path) -> dict:
 
     return datos
 
-
 def _obtener_detalle_emitido_xhr(
     page,
     request_context,
@@ -5858,7 +5344,6 @@ def _obtener_detalle_emitido_xhr(
         detalle, tipo_visible, tipo_serie_texto, clave_texto, ruc_emisor=ruc_emisor
     )
 
-
 def _click_texto(page, texto: str) -> bool:
     for metodo in [
         lambda: page.get_by_role("button", name=texto, exact=False),
@@ -5871,7 +5356,6 @@ def _click_texto(page, texto: str) -> bool:
         except Exception:
             continue
     return False
-
 
 def _click_consultar_emitidos(page) -> bool:
     selectores = [
@@ -6010,7 +5494,6 @@ def _guardar_pdf_desde_enlace(page, link_locator, base_destino: Path) -> Optiona
         logger.warning(f"{mensaje}")
     return None
 
-
 def _guardar_pdf_desde_jsf(page, link_locator, base_destino: Path) -> Optional[Path]:
     """
     Ejecuta directamente mojarra.jsfcljs (JSF) para disparar la descarga del PDF.
@@ -6092,8 +5575,6 @@ def _guardar_pdf_desde_jsf(page, link_locator, base_destino: Path) -> Optional[P
         return destino_final
     except Exception:
         return None
-
-
 
 
 
@@ -6191,7 +5672,6 @@ def _descargar_pdf_recibidos_post(page, link_locator, base_destino: Path) -> Opt
 
 
 
-
 def _descargar_pdf_emitidos_post(page, link_locator, base_destino: Path) -> Optional[Path]:
     try:
         link_id = link_locator.get_attribute("id")
@@ -6283,7 +5763,6 @@ def _descargar_pdf_emitidos_post(page, link_locator, base_destino: Path) -> Opti
     except Exception:
         return None
     return destino_final
-
 
 def _descargar_pdf_recibidos_post_con_viewstate(
     page,
@@ -6544,11 +6023,9 @@ def _seleccionar(page, etiqueta: str, valor_visible: str):
         pass
     return False
 
-
 def _normalizar_token(texto: str) -> str:
     base = unicodedata.normalize("NFKD", (texto or "")).encode("ascii", "ignore").decode("ascii").lower()
     return re.sub(r"[^a-z0-9]+", "", base)
-
 
 def _rellenar_input_por_label(page, etiquetas, valor: str, selectores_extra=None) -> bool:
     if valor is None:
@@ -6596,7 +6073,6 @@ def _rellenar_input_por_label(page, etiquetas, valor: str, selectores_extra=None
             continue
 
     return False
-
 
 def _seleccionar_en_select(page, selector: str, *valores) -> bool:
     try:
@@ -7048,7 +6524,6 @@ def _abrir_modulo_consultas(page, origen: str):
 
     return page
 
-
 def _esperar_ajax(page, timeout: int = 1000):
     """Espera a que la cola AJAX de PrimeFaces quede vacia para evitar sobrescrituras."""
     try:
@@ -7061,7 +6536,6 @@ def _esperar_ajax(page, timeout: int = 1000):
             page.wait_for_timeout(300)
         except Exception:
             pass
-
 
 def _cerrar_sesion(pagina) -> bool:
     """Intenta cerrar la sesion activa del SRI en la pagina dada."""
@@ -7130,9 +6604,7 @@ def _cerrar_sesion(pagina) -> bool:
         pass
     return True
 
-
 DOWNLOAD_ROW_RETRY_ATTEMPTS = max(1, int(os.getenv("DOWNLOAD_ROW_RETRY_ATTEMPTS", "2")))
-
 
 def _build_download_row_id(*parts) -> str:
     tokens = []
@@ -7141,7 +6613,6 @@ def _build_download_row_id(*parts) -> str:
         if text:
             tokens.append(text)
     return " | ".join(tokens) if tokens else str(uuid.uuid4())
-
 
 def _build_download_verification(
     registros_esperados: int,
@@ -7172,7 +6643,6 @@ def _build_download_verification(
         "descarga_completa": descarga_completa,
         "mensaje_verificacion": mensaje,
     }
-
 
 def _merge_download_verification(resultados: list[dict]) -> dict:
     registros_esperados = sum(
@@ -8348,110 +7818,6 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
 # ?? LECTURA DE TABLA PARA COMPROBANTES EMITIDOS (sin TXT)
 # ============================================================
 
-
-def _guardar_reporte_emitidos_excel(df_emitidos: pd.DataFrame, excel_path: Path, titulo: str = "EMITIDOS") -> bool:
-    if df_emitidos.empty:
-        return False
-
-    columns_order = [
-        "COMPROBANTE",
-        "SERIE_COMPROBANTE",
-        "CLAVE_ACCESO",
-        "FECHA_AUTORIZACION",
-        "FECHA_EMISION",
-        "VALOR_SIN_IMPUESTOS",
-        "IVA",
-        "IMPORTE_TOTAL",
-    ]
-    for col in columns_order:
-        if col not in df_emitidos.columns:
-            df_emitidos[col] = ""
-    df_emitidos = df_emitidos[columns_order].copy()
-
-    def _coerce_decimal_value(val):
-        if isinstance(val, (int, float)):
-            return float(val)
-        parsed = _parse_decimal(val) if isinstance(val, str) else None
-        return parsed if parsed is not None else val
-
-    def _coerce_datetime_value(val):
-        if isinstance(val, datetime):
-            return val
-        parsed = _parse_datetime_local(val) if isinstance(val, str) else None
-        return parsed if parsed is not None else val
-
-    for columna in ["VALOR_SIN_IMPUESTOS", "IVA", "IMPORTE_TOTAL"]:
-        df_emitidos[columna] = df_emitidos[columna].apply(_coerce_decimal_value)
-    for columna in ["FECHA_AUTORIZACION"]:
-        df_emitidos[columna] = df_emitidos[columna].apply(_coerce_datetime_value)
-
-    with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-        sheet_name = "Emitidos"
-        df_emitidos.to_excel(writer, index=False, sheet_name=sheet_name, startrow=1)
-        ws = writer.sheets[sheet_name]
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columns_order))
-        titulo_cell = ws.cell(row=1, column=1, value=titulo)
-        titulo_cell.font = Font(bold=True, size=14)
-        titulo_cell.alignment = Alignment(horizontal="center", vertical="center")
-
-        header_fill = PatternFill("solid", fgColor="305496")
-        header_font = Font(color="FFFFFF", bold=True)
-        for cell in ws[2]:
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-        ws.freeze_panes = "A3"
-
-        text_columns = {"COMPROBANTE", "SERIE_COMPROBANTE", "CLAVE_ACCESO", "FECHA_EMISION"}
-        numeric_columns = {"VALOR_SIN_IMPUESTOS", "IVA", "IMPORTE_TOTAL"}
-        date_columns = {"FECHA_AUTORIZACION"}
-
-        for idx, column in enumerate(columns_order, start=1):
-            max_len = len(column)
-            for cell_tuple in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=idx, max_col=idx):
-                cell = cell_tuple[0]
-                valor = cell.value
-                if valor is None:
-                    continue
-                if isinstance(valor, datetime):
-                    texto_len = len(valor.strftime("%d/%m/%Y %H:%M"))
-                else:
-                    texto_len = len(str(valor))
-                if texto_len > max_len:
-                    max_len = texto_len
-            ws.column_dimensions[get_column_letter(idx)].width = min(max_len + 2, 45)
-
-        for columna in text_columns:
-            if columna not in columns_order:
-                continue
-            col_idx = columns_order.index(columna) + 1
-            for cell_tuple in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=col_idx, max_col=col_idx):
-                celda = cell_tuple[0]
-                celda.number_format = "@"
-                celda.alignment = Alignment(horizontal="left", vertical="center")
-
-        for columna in numeric_columns:
-            if columna not in columns_order:
-                continue
-            col_idx = columns_order.index(columna) + 1
-            for cell_tuple in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=col_idx, max_col=col_idx):
-                celda = cell_tuple[0]
-                if isinstance(celda.value, (int, float)):
-                    celda.number_format = "#,##0.00"
-                    celda.alignment = Alignment(horizontal="right", vertical="center")
-
-        for columna in date_columns:
-            if columna not in columns_order:
-                continue
-            col_idx = columns_order.index(columna) + 1
-            for cell_tuple in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=col_idx, max_col=col_idx):
-                celda = cell_tuple[0]
-                if isinstance(celda.value, datetime):
-                    celda.number_format = "dd/mm/yyyy hh:mm"
-                    celda.alignment = Alignment(horizontal="center", vertical="center")
-
-    return True
 
 def _flujo_emitidos(
     page,
