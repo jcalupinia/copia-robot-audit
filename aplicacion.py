@@ -1030,8 +1030,31 @@ _render_update_modal()
 st.markdown(
     """
     <style>
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap');
-/* Oculta barra superior y cualquier variante del boton Deploy */
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
+/* ===================== Design tokens ===================== */
+:root{
+  --bg-0:#070a14;
+  --bg-1:#0b1020;
+  --glass:rgba(255,255,255,0.045);
+  --glass-strong:rgba(255,255,255,0.07);
+  --glass-hover:rgba(255,255,255,0.11);
+  --border:rgba(255,255,255,0.10);
+  --border-strong:rgba(255,255,255,0.17);
+  --text:#e9edf6;
+  --text-muted:rgba(233,237,246,0.60);
+  --accent:#5b8cff;
+  --accent-2:#8b5cf6;
+  --accent-soft:rgba(91,140,255,0.16);
+  --success:#22c55e;
+  --danger:#ef4444;
+  --radius:14px;
+  --radius-lg:22px;
+  --shadow:0 24px 60px rgba(0,0,0,0.55);
+  --ring:0 0 0 3px rgba(91,140,255,0.28);
+}
+
+/* ===================== Ocultar UI de Streamlit ===================== */
 header[data-testid="stHeader"],
 div[data-testid="stToolbar"],
 div[data-testid="stToolbarActions"],
@@ -1043,369 +1066,356 @@ button[aria-label*="Deploy"],
 a[title="Deploy"],
 a[title*="Deploy"],
 [data-testid="stAppDeployButton"],
-[data-testid="baseButton-headerNoPadding"] {
-    display:none !important;
+[data-testid="baseButton-headerNoPadding"],
+div[data-testid="stDecoration"]{
+  display:none !important;
 }
-div[data-testid="stDecoration"] {
-    display: none !important;
+
+/* ===================== Fondo y tipografia base ===================== */
+.stApp{
+  background:
+    radial-gradient(900px 620px at 10% -8%, rgba(91,140,255,0.20), transparent 60%),
+    radial-gradient(820px 620px at 94% 6%, rgba(139,92,246,0.17), transparent 60%),
+    radial-gradient(760px 760px at 50% 118%, rgba(34,197,94,0.08), transparent 60%),
+    linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+  background-attachment:fixed;
+  color:var(--text);
+  font-family:'Manrope', system-ui, sans-serif;
+}
+.stApp, .stApp p, .stApp span, .stApp label, .stApp li,
+.stApp div, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6{
+  font-family:'Manrope', system-ui, sans-serif;
+}
+.stApp div[data-testid="stAppViewContainer"] .main,
+.stApp div[data-testid="stAppViewContainer"] .main h1,
+.stApp div[data-testid="stAppViewContainer"] .main h2,
+.stApp div[data-testid="stAppViewContainer"] .main h3,
+.stApp div[data-testid="stAppViewContainer"] .main h4,
+.stApp div[data-testid="stAppViewContainer"] .main h5,
+.stApp div[data-testid="stAppViewContainer"] .main h6,
+.stApp div[data-testid="stAppViewContainer"] .main p,
+.stApp div[data-testid="stAppViewContainer"] .main span,
+.stApp div[data-testid="stAppViewContainer"] .main label,
+.stApp [data-testid="stMarkdownContainer"]{
+  color:var(--text);
+}
+
+/* ===================== Titulos ===================== */
+.app-title{
+  font-size:clamp(2.1rem, 2.7vw, 2.8rem) !important;
+  font-weight:800 !important;
+  line-height:1.14 !important;
+  letter-spacing:-0.02em;
+  background:linear-gradient(120deg, #ffffff 0%, #b9c8ee 55%, var(--accent) 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.section-title,
+.historial-title{
+  font-size:clamp(1.4rem, 2vw, 1.85rem) !important;
+  font-weight:700 !important;
+  line-height:1.2 !important;
+  color:#f3f6ff !important;
+  letter-spacing:-0.01em;
+}
+.auth-title{
+  text-align:center;
+  font-size:1.95rem;
+  font-weight:800;
+  letter-spacing:-0.01em;
+  color:#ffffff !important;
+  margin-bottom:1.5rem;
+}
+
+/* ===================== Tarjeta glass (formularios) ===================== */
+div[data-testid="stForm"]{
+  background:var(--glass-strong);
+  backdrop-filter:blur(22px) saturate(150%);
+  -webkit-backdrop-filter:blur(22px) saturate(150%);
+  border:1px solid var(--border-strong);
+  border-radius:var(--radius-lg);
+  padding:2.4rem 2.6rem;
+  box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,0.07);
+  position:relative;
+}
+div[data-testid="stForm"]::before{
+  content:"";
+  position:absolute;
+  inset:0 0 auto 0;
+  height:1px;
+  border-radius:var(--radius-lg) var(--radius-lg) 0 0;
+  background:linear-gradient(90deg, transparent, rgba(91,140,255,0.7), rgba(139,92,246,0.7), transparent);
+}
+div[data-testid="stForm"] label,
+div[data-testid="stForm"] p,
+div[data-testid="stForm"] span{
+  color:var(--text);
+}
+
+/* ===================== Inputs ===================== */
+.stApp div[data-baseweb="input"],
+.stApp div[data-baseweb="textarea"],
+.stApp div[data-baseweb="select"] > div{
+  background:rgba(255,255,255,0.04) !important;
+  border:1px solid var(--border) !important;
+  border-radius:var(--radius) !important;
+  transition:border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.stApp div[data-baseweb="input"]:hover,
+.stApp div[data-baseweb="textarea"]:hover,
+.stApp div[data-baseweb="select"] > div:hover{
+  background:rgba(255,255,255,0.06) !important;
+  border-color:var(--border-strong) !important;
+}
+.stApp div[data-baseweb="input"]:focus-within,
+.stApp div[data-baseweb="textarea"]:focus-within,
+.stApp div[data-baseweb="select"] > div:focus-within{
+  border-color:var(--accent) !important;
+  box-shadow:var(--ring) !important;
+  background:rgba(91,140,255,0.06) !important;
+}
+.stApp input,
+.stApp textarea{
+  color:var(--text) !important;
+  background:transparent !important;
+}
+.stApp input::placeholder,
+.stApp textarea::placeholder{
+  color:var(--text-muted) !important;
+}
+.stApp [data-baseweb="select"] div{
+  color:var(--text) !important;
+}
+div[data-testid="stForm"] div[data-baseweb="input"] button{
+  background:transparent !important;
+  box-shadow:none !important;
+}
+div[data-testid="stForm"] div[data-baseweb="input"] svg,
+.stApp div[data-baseweb="input"] svg{
+  color:var(--text) !important;
+  fill:var(--text) !important;
+}
+
+/* ===================== Boton primario (submit de formularios) ===================== */
+div[data-testid="stForm"] button[kind="primaryFormSubmit"],
+div[data-testid="stForm"] button[data-testid="baseButton-primary"]{
+  background:linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+  color:#ffffff !important;
+  border:none !important;
+  border-radius:12px !important;
+  font-weight:700 !important;
+  letter-spacing:0.01em;
+  padding:0.6rem 1.2rem !important;
+  box-shadow:0 12px 28px rgba(91,140,255,0.32) !important;
+  transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+div[data-testid="stForm"] button[kind="primaryFormSubmit"]:hover,
+div[data-testid="stForm"] button[data-testid="baseButton-primary"]:hover{
+  transform:translateY(-2px);
+  filter:brightness(1.08);
+  box-shadow:0 16px 36px rgba(91,140,255,0.45) !important;
+}
+div[data-testid="stForm"] button[kind="primaryFormSubmit"]:disabled,
+div[data-testid="stForm"] button[data-testid="baseButton-primary"]:disabled{
+  background:rgba(255,255,255,0.08) !important;
+  color:var(--text-muted) !important;
+  box-shadow:none !important;
+  transform:none;
+}
+
+/* ===================== Botones generales ===================== */
+.stApp .stButton > button{
+  border-radius:12px !important;
+  border:1px solid var(--border-strong) !important;
+  background:var(--glass-strong) !important;
+  color:var(--text) !important;
+  font-weight:600 !important;
+  transition:transform .15s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.stApp .stButton > button:hover{
+  background:var(--glass-hover) !important;
+  border-color:var(--accent) !important;
+  transform:translateY(-1px);
 }
 button[aria-label=" Iniciar proceso"],
 button[aria-label="Iniciar proceso"]{
-    background-color:#16a34a !important;
-    border-color:#16a34a !important;
-    color:#ffffff !important;
+  background:linear-gradient(135deg, #16a34a 0%, #22c55e 100%) !important;
+  border:none !important;
+  color:#ffffff !important;
+  font-weight:700 !important;
+  box-shadow:0 12px 28px rgba(34,197,94,0.32) !important;
+}
+button[aria-label=" Iniciar proceso"]:hover,
+button[aria-label="Iniciar proceso"]:hover{
+  transform:translateY(-2px);
+  filter:brightness(1.08);
+  box-shadow:0 16px 36px rgba(34,197,94,0.45) !important;
 }
 button[aria-label=" Detener proceso"],
 button[aria-label="Detener proceso"]{
-    background-color:#dc2626 !important;
-    border-color:#dc2626 !important;
-    color:#ffffff !important;
+  background:linear-gradient(135deg, #dc2626 0%, #ef4444 100%) !important;
+  border:none !important;
+  color:#ffffff !important;
+  font-weight:700 !important;
+  box-shadow:0 12px 28px rgba(239,68,68,0.30) !important;
 }
-    :root{
-        --auth-card-bg: var(--secondary-background-color, #10131a);
-        --auth-card-text: var(--text-color, #f5f5f5);
-        --auth-card-muted: rgba(255,255,255,0.65);
-    }
-    .stApp {
-        background: radial-gradient(125% 125% at 12% 12%, rgba(180, 232, 204, 0.52), transparent 54%),
-                    radial-gradient(122% 122% at 88% 18%, rgba(112, 181, 150, 0.40), transparent 55%),
-                    radial-gradient(135% 135% at 28% 84%, rgba(235, 243, 241, 0.46), transparent 60%),
-                    linear-gradient(135deg, #b7e6cf 0%, #8ec9ad 48%, #e4efed 100%);
-        background-size: 220% 220%;
-        animation: liquidShift 16s ease-in-out infinite;
-    }
-    body[data-theme="light"] .stApp div[data-testid="stForm"],
-    body[data-theme="light"] .stApp div[data-testid="stForm"] label,
-    body[data-theme="light"] .stApp div[data-testid="stForm"] p,
-    body[data-theme="light"] .stApp div[data-testid="stForm"] span,
-    body[data-theme="light"] .stApp div[data-testid="stForm"] input,
-    body[data-theme="light"] .stApp div[data-testid="stForm"] textarea {
-        color: #ffffff !important;
-    }
-    body[data-theme="dark"] [data-testid="stSidebar"] * {
-        color: #e9eef5 !important;
-    }
-    body[data-theme="dark"] [data-testid="stSidebar"] {
-        color: #e9eef5 !important;
-    }
-    body[data-theme="dark"] [data-testid="stSidebar"] p,
-    body[data-theme="dark"] [data-testid="stSidebar"] span,
-    body[data-theme="dark"] [data-testid="stSidebar"] label,
-    body[data-theme="dark"] [data-testid="stSidebar"] a,
-    body[data-theme="dark"] [data-testid="stSidebar"] div {
-        color: #e9eef5 !important;
-        opacity: 1 !important;
-    }
-    body[data-theme="dark"] [data-testid="stSidebar"] input,
-    body[data-theme="dark"] [data-testid="stSidebar"] textarea,
-    body[data-theme="dark"] [data-testid="stSidebar"] [data-baseweb="select"] div {
-        color: #e9eef5 !important;
-    }
-    body[data-theme="light"] section[data-testid="stSidebar"],
-    html[data-theme="light"] section[data-testid="stSidebar"] {
-        background: #0f172a !important;
-    }
-    body[data-theme="light"] section[data-testid="stSidebar"] *,
-    html[data-theme="light"] section[data-testid="stSidebar"] * {
-        color: #f8fafc !important;
-    }
-    section[data-testid="stSidebar"] .stMarkdown,
-    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
-    section[data-testid="stSidebar"] p {
-        text-align: center;
-    }
-    section[data-testid="stSidebar"] [data-testid="stImage"] {
-        display: flex;
-        justify-content: center;
-    }
-    section[data-testid="stSidebar"] [data-testid="stImage"] img,
-    section[data-testid="stSidebar"] img {
-        margin-left: auto !important;
-        margin-right: auto !important;
-    }
-    @keyframes liquidShift {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-    .auth-title{
-        text-align:center;
-        font-size:2.1rem;
-        font-weight:800;
-        font-family:'Manrope', sans-serif;
-        letter-spacing:0.02em;
-        color:#ffffff !important;
-        margin-bottom:1.4rem;
-    }
-    div[data-testid="stForm"]{
-        background:var(--auth-card-bg);
-        border-radius:24px;
-        padding:2.2rem 2.6rem;
-        box-shadow:0 28px 55px rgba(0,0,0,0.45);
-        border:1px solid rgba(15,18,26,0.18);
-        color:var(--auth-card-text);
-    }
-    div[data-testid="stForm"] label,
-    div[data-testid="stForm"] p,
-    div[data-testid="stForm"] span{
-        color:var(--auth-card-text);
-    }
-    div[data-testid="stForm"] div[data-baseweb="input"]{
-        background:var(--secondary-background-color, #151621);
-        border-color:rgba(255,255,255,0.15);
-    }
-    div[data-testid="stForm"] input,
-    div[data-testid="stForm"] textarea{
-        color:var(--auth-card-text) !important;
-        background:var(--secondary-background-color, #151621);
-    }
-    div[data-testid="stForm"] input::placeholder,
-    div[data-testid="stForm"] textarea::placeholder{
-        color:var(--auth-card-muted);
-        opacity:0.9;
-    }
-    div[data-testid="stForm"] div[data-baseweb="input"] button{
-        background:transparent !important;
-        box-shadow:none !important;
-    }
-    div[data-testid="stForm"] div[data-baseweb="input"] div{
-        background:transparent !important;
-    }
-    div[data-testid="stForm"] div[data-baseweb="input"] > div:last-child{
-        background:var(--secondary-background-color, #151621) !important;
-        border-left:1px solid rgba(255,255,255,0.12) !important;
-    }
-    div[data-testid="stForm"] div[data-baseweb="input"] svg{
-        color:var(--auth-card-text) !important;
-        fill:var(--auth-card-text) !important;
-    }
-    div[data-testid="stForm"] button[kind="primaryFormSubmit"],
-    div[data-testid="stForm"] button[data-testid="baseButton-primary"]{
-        background-color:#101936;
-        color:#f5f5f5;
-        border:none;
-        border-radius:12px;
-        font-weight:600;
-        box-shadow:0 12px 25px rgba(0,0,0,0.25);
-    }
-    div[data-testid="stForm"] button[kind="primaryFormSubmit"]:disabled,
-    div[data-testid="stForm"] button[data-testid="baseButton-primary"]:disabled{
-        background:rgba(16,25,54,0.3);
-        color:rgba(255,255,255,0.6);
-        border:1px solid rgba(16,25,54,0.4);
-        box-shadow:none;
-    }
-    .auth-reset-wrap{
-        display:flex;
-        justify-content:flex-end;
-        margin-top:10px;
-    }
-    .auth-reset-link{
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        padding:10px 14px;
-        border-radius:10px;
-        border:1px solid rgba(35, 84, 190, 0.55);
-        background:rgba(16, 44, 110, 0.92);
-        color:#f4f8ff !important;
-        font-size:0.92rem;
-        font-weight:700;
-        text-decoration:none !important;
-        box-shadow:0 10px 18px rgba(9, 18, 36, 0.26);
-    }
-    .auth-reset-link:hover{
-        background:rgba(24, 61, 148, 0.96);
-        color:#ffffff !important;
-        text-decoration:none !important;
-    }
-    .app-title {
-        font-size: clamp(2.1rem, 2.7vw, 2.7rem) !important;
-        font-weight: 800 !important;
-        line-height: 1.15 !important;
-    }
-    .section-title,
-    .historial-title {
-        font-size: clamp(1.45rem, 2vw, 1.9rem) !important;
-        font-weight: 750 !important;
-        line-height: 1.2 !important;
-    }
-    .st-key-btn_open_tour {
-        display: flex;
-        justify-content: flex-start;
-        align-items: center;
-        padding-top: 0.3rem;
-    }
-    .st-key-btn_open_tour button {
-        width: auto !important;
-        min-height: 2rem !important;
-        padding: 0.35rem 0.8rem !important;
-        border-radius: 999px !important;
-        border: 1px solid rgba(132, 182, 228, 0.7) !important;
-        background: linear-gradient(180deg, rgba(228, 239, 251, 0.92), rgba(211, 229, 246, 0.92)) !important;
-        color: #4e6a86 !important;
-        font-size: 0.9rem !important;
-        font-weight: 600 !important;
-        box-shadow: none !important;
-    }
-    .st-key-btn_open_tour button::before {
-        content: "";
-        display: inline-block;
-        width: 0.48rem;
-        height: 0.48rem;
-        margin-right: 0.48rem;
-        border-radius: 999px;
-        background: #8fc2f0;
-        box-shadow: 0 0 0 3px rgba(143, 194, 240, 0.18);
-        vertical-align: middle;
-    }
-    .st-key-btn_open_tour button:hover {
-        color: #36506a !important;
-        border-color: rgba(115, 166, 214, 0.95) !important;
-        background: linear-gradient(180deg, rgba(235, 244, 252, 0.98), rgba(220, 235, 248, 0.98)) !important;
-    }
-    .st-key-btn_open_tour button:focus,
-    .st-key-btn_open_tour button:focus-visible {
-        box-shadow: 0 0 0 0.2rem rgba(143, 194, 240, 0.28) !important;
-    }
-    .stApp [data-testid="stWidgetLabel"],
-    .stApp [data-testid="stWidgetLabel"] p,
-    .stApp label[data-testid="stWidgetLabel"],
-    .stApp label[data-testid="stWidgetLabel"] p,
-    .stApp div[data-testid="stWidgetLabel"] label,
-    .stApp div[data-testid="stWidgetLabel"] label p,
-    .stApp [data-baseweb="radio"] label,
-    .stApp [data-baseweb="checkbox"] label,
-    .stApp [data-baseweb="select"] label,
-    .stApp [data-baseweb="input"] label,
-    .stApp [data-baseweb="textarea"] label {
-        font-size: 1.22rem !important;
-        font-weight: 700 !important;
-        letter-spacing: 0.01em;
-    }
-    .stApp input,
-    .stApp textarea,
-    .stApp [data-baseweb="select"] div,
-    .stApp [data-baseweb="radio"] span,
-    .stApp [data-baseweb="checkbox"] span {
-        font-size: 1.08rem !important;
-    }
-    /* Light theme */
-    body[data-theme="light"] .app-title,
-    html[data-theme="light"] .app-title {
-        color: #0f4760 !important;
-    }
-    body[data-theme="light"] .section-title,
-    body[data-theme="light"] .historial-title,
-    html[data-theme="light"] .section-title,
-    html[data-theme="light"] .historial-title {
-        color: #16607a !important;
-    }
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"],
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"] p,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h1,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h2,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h3,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h4,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h5,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main h6,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main p,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main span,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main label,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"],
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"] p {
-        color: #164a61 !important;
-    }
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main input,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
-    body[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main input,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
-    html[data-theme="light"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
-        color: #0f3342 !important;
-    }
-    body[data-theme="light"] .stApp [data-baseweb="tab"],
-    html[data-theme="light"] .stApp [data-baseweb="tab"] {
-        color: #185064 !important;
-    }
-    body[data-theme="light"] .stApp [data-baseweb="tab"][aria-selected="true"],
-    html[data-theme="light"] .stApp [data-baseweb="tab"][aria-selected="true"] {
-        color: #0f4760 !important;
-    }
+button[aria-label=" Detener proceso"]:hover,
+button[aria-label="Detener proceso"]:hover{
+  transform:translateY(-2px);
+  filter:brightness(1.08);
+  box-shadow:0 16px 36px rgba(239,68,68,0.42) !important;
+}
 
-    /* Dark theme */
-    body[data-theme="dark"] .app-title,
-    html[data-theme="dark"] .app-title {
-        color: #eaf7ff !important;
-    }
-    body[data-theme="dark"] .section-title,
-    body[data-theme="dark"] .historial-title,
-    html[data-theme="dark"] .section-title,
-    html[data-theme="dark"] .historial-title {
-        color: #d8f1ff !important;
-    }
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h1,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h2,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h3,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h4,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h5,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h6,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main p,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main span,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main label,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"],
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"] p,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h1,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h2,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h3,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h4,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h5,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main h6,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main p,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main span,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main label,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stMarkdownContainer"],
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stText"],
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"],
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-testid="stWidgetLabel"] p {
-        color: #e8f6ff !important;
-    }
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main input,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
-    body[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main input,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main textarea,
-    html[data-theme="dark"] .stApp div[data-testid="stAppViewContainer"] .main [data-baseweb="select"] div {
-        color: #e8f6ff !important;
-    }
-    body[data-theme="dark"] .stApp [data-baseweb="tab"],
-    html[data-theme="dark"] .stApp [data-baseweb="tab"] {
-        color: #cde8fa !important;
-    }
-    body[data-theme="dark"] .stApp [data-baseweb="tab"][aria-selected="true"],
-    html[data-theme="dark"] .stApp [data-baseweb="tab"][aria-selected="true"] {
-        color: #ffffff !important;
-    }
-    </style>
+/* ===================== Enlace de recuperar contrasena ===================== */
+.auth-reset-wrap{
+  display:flex;
+  justify-content:flex-end;
+  margin-top:12px;
+}
+.auth-reset-link{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:9px 15px;
+  border-radius:10px;
+  border:1px solid var(--border-strong);
+  background:var(--glass-strong);
+  color:#dbe4ff !important;
+  font-size:0.9rem;
+  font-weight:600;
+  text-decoration:none !important;
+  transition:background .15s ease, border-color .15s ease, color .15s ease;
+}
+.auth-reset-link:hover{
+  background:var(--accent-soft);
+  border-color:var(--accent);
+  color:#ffffff !important;
+  text-decoration:none !important;
+}
+
+/* ===================== Tabs ===================== */
+.stApp [data-baseweb="tab-list"]{
+  gap:6px;
+  background:var(--glass);
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:6px;
+}
+.stApp [data-baseweb="tab"]{
+  border-radius:10px !important;
+  color:var(--text-muted) !important;
+  font-weight:600 !important;
+  padding:0.5rem 1rem !important;
+  transition:background .15s ease, color .15s ease;
+}
+.stApp [data-baseweb="tab"]:hover{
+  background:var(--glass-hover) !important;
+  color:var(--text) !important;
+}
+.stApp [data-baseweb="tab"][aria-selected="true"]{
+  background:linear-gradient(135deg, var(--accent-soft), rgba(139,92,246,0.16)) !important;
+  color:#ffffff !important;
+}
+.stApp [data-baseweb="tab-highlight"],
+.stApp [data-baseweb="tab-border"]{
+  display:none !important;
+}
+
+/* ===================== Sidebar ===================== */
+section[data-testid="stSidebar"]{
+  background:linear-gradient(180deg, rgba(13,18,34,0.96), rgba(8,11,22,0.96)) !important;
+  border-right:1px solid var(--border);
+  backdrop-filter:blur(12px);
+}
+section[data-testid="stSidebar"] *{
+  color:var(--text) !important;
+}
+section[data-testid="stSidebar"] .stMarkdown,
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+section[data-testid="stSidebar"] p{
+  text-align:center;
+}
+section[data-testid="stSidebar"] [data-testid="stImage"]{
+  display:flex;
+  justify-content:center;
+}
+section[data-testid="stSidebar"] [data-testid="stImage"] img,
+section[data-testid="stSidebar"] img{
+  margin-left:auto !important;
+  margin-right:auto !important;
+}
+
+/* ===================== Labels de widgets ===================== */
+.stApp [data-testid="stWidgetLabel"],
+.stApp [data-testid="stWidgetLabel"] p,
+.stApp label[data-testid="stWidgetLabel"],
+.stApp label[data-testid="stWidgetLabel"] p,
+.stApp div[data-testid="stWidgetLabel"] label,
+.stApp div[data-testid="stWidgetLabel"] label p{
+  font-size:1.0rem !important;
+  font-weight:600 !important;
+  letter-spacing:0.01em;
+  color:#cfd8ee !important;
+}
+.stApp input,
+.stApp textarea,
+.stApp [data-baseweb="select"] div,
+.stApp [data-baseweb="radio"] span,
+.stApp [data-baseweb="checkbox"] span{
+  font-size:1.0rem !important;
+}
+
+/* ===================== Divisores ===================== */
+.stApp hr{
+  border:none;
+  height:1px;
+  background:linear-gradient(90deg, transparent, var(--border-strong), transparent);
+}
+
+/* ===================== Alertas ===================== */
+.stApp div[data-testid="stAlert"]{
+  border-radius:12px;
+  border:1px solid var(--border-strong);
+  backdrop-filter:blur(8px);
+}
+
+/* ===================== Boton de tour ===================== */
+.st-key-btn_open_tour{
+  display:flex;
+  justify-content:flex-start;
+  align-items:center;
+  padding-top:0.3rem;
+}
+.st-key-btn_open_tour button{
+  width:auto !important;
+  min-height:2rem !important;
+  padding:0.35rem 0.9rem !important;
+  border-radius:999px !important;
+  border:1px solid var(--border-strong) !important;
+  background:var(--glass-strong) !important;
+  color:#cfd8ee !important;
+  font-size:0.88rem !important;
+  font-weight:600 !important;
+  box-shadow:none !important;
+}
+.st-key-btn_open_tour button::before{
+  content:"";
+  display:inline-block;
+  width:0.46rem;
+  height:0.46rem;
+  margin-right:0.5rem;
+  border-radius:999px;
+  background:var(--accent);
+  box-shadow:0 0 0 3px rgba(91,140,255,0.22);
+  vertical-align:middle;
+}
+.st-key-btn_open_tour button:hover{
+  color:#ffffff !important;
+  border-color:var(--accent) !important;
+  background:var(--accent-soft) !important;
+}
+</style>
     """,
     unsafe_allow_html=True,
 )
