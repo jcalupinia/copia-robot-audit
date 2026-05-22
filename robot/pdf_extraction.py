@@ -1051,658 +1051,419 @@ def _extraer_datos_pdf(pdf_path: Path) -> dict:
     return datos
 
 
-def _extraer_datos_pdf_retencion(pdf_path: Path) -> dict:
-    datos = {col: "" for col in RETENCION_REPORT_COLUMNS}
-    texto = _leer_texto_pdf(pdf_path)
-    if not texto:
-        return datos
-    texto_norm = _normalizar_texto_pdf(texto)
-    lineas_raw = [ln.strip() for ln in texto.splitlines() if ln.strip()]
-    lineas_norm = [_normalizar_label_simple(ln) for ln in lineas_raw]
+def _fix_replacement_chars_pdf(texto: str) -> str:
+    """Reemplaza el REPLACEMENT CHARACTER (U+FFFD) por 'O'.
 
-    def _buscar_idx(token: str) -> int | None:
-        for idx, norm in enumerate(lineas_norm):
-            if token in norm:
-                return idx
+    pdfplumber inserta `\\ufffd` cuando no logra decodificar una vocal con tilde
+    del PDF del SRI. En estos comprobantes ese carácter siempre corresponde a
+    Ó/Ú/É/Á/Í dentro de palabras tipo RETENCIÓN, AUTORIZACIÓN, EMISIÓN, DIRECCIÓN,
+    IDENTIFICACIÓN, RAZÓN; sustituirlo por 'O' permite que las regex de keywords
+    matcheen después de pasar por NFKD + ascii. No afecta los valores extraídos
+    porque para esos preservamos el texto original.
+    """
+    return (texto or "").replace("�", "O")
+
+
+def _norm_pdf_keyword(texto: str) -> str:
+    """Normaliza texto del PDF para matching de keywords: sin tildes, sin
+    REPLACEMENT CHAR, mayúsculas. Equivalente a `_normalizar_texto_pdf` pero
+    blindado contra `\\ufffd`."""
+    base = _fix_replacement_chars_pdf(texto)
+    base = unicodedata.normalize("NFKD", base).encode("ascii", "ignore").decode("ascii")
+    return base.upper()
+
+
+def _agrupar_palabras_visuales(words: list, y_tol: float = 3.5) -> list[list[dict]]:
+    """Agrupa las palabras devueltas por `page.extract_words` en líneas visuales
+    (mismo `top` ± y_tol), ordenadas por `x0` dentro de cada línea.
+
+    Útil cuando `extract_text` mezcla columnas: agrupando por coordenadas
+    podemos luego filtrar por rango de X para separar columna izquierda/derecha.
+    """
+    if not words:
+        return []
+    sw = sorted(words, key=lambda w: (float(w.get("top", 0)), float(w.get("x0", 0))))
+    lineas: list[list[dict]] = []
+    actual = [sw[0]]
+    top_actual = float(sw[0].get("top", 0))
+    for w in sw[1:]:
+        t = float(w.get("top", 0))
+        if abs(t - top_actual) <= y_tol:
+            actual.append(w)
+        else:
+            lineas.append(sorted(actual, key=lambda x: float(x.get("x0", 0))))
+            actual = [w]
+            top_actual = t
+    lineas.append(sorted(actual, key=lambda x: float(x.get("x0", 0))))
+    return lineas
+
+
+def _texto_palabras_rango(palabras: list[dict], x_min: float | None = None, x_max: float | None = None) -> str:
+    """Une el texto de las palabras dentro del rango horizontal [x_min, x_max)."""
+    partes = []
+    for w in palabras:
+        x = float(w.get("x0", 0))
+        if x_min is not None and x < x_min:
+            continue
+        if x_max is not None and x >= x_max:
+            continue
+        t = (w.get("text") or "").strip()
+        if t:
+            partes.append(t)
+    return " ".join(partes)
+
+
+def _parse_celda_impuesto_retencion(cell_imp: str | None, cell_porc_val: str | None) -> dict | None:
+    """Parsea las 2 celdas finales (base+impuesto / porcentaje+valor) de una fila
+    de la tabla de retenciones del SRI.
+
+    `cell_imp` puede venir como:
+      - "12.00 IVA"                  (formato IVA en una sola línea)
+      - "Impuesto a la\\n80.00\\nRenta"  (formato Renta en 3 líneas)
+    `cell_porc_val` es siempre "{porcentaje} {valor}".
+
+    Devuelve {impuesto: 'IVA'|'Renta', base, porcentaje, valor} o None si no parsea.
+    """
+    if not cell_imp:
         return None
+    cell_norm = _norm_pdf_keyword(cell_imp)
+    if "IVA" in cell_norm:
+        impuesto = "IVA"
+        m = re.search(r"([\d]+(?:[.,]\d+)?)\s*IVA", cell_norm)
+        if not m:
+            m = re.search(r"IVA\s+([\d]+(?:[.,]\d+)?)", cell_norm)
+        base = m.group(1) if m else ""
+    elif "RENTA" in cell_norm:
+        impuesto = "Renta"
+        nums = re.findall(r"\d+(?:[.,]\d+)?", cell_norm)
+        base = nums[0] if nums else ""
+    else:
+        return None
+    porcentaje = ""
+    valor = ""
+    if cell_porc_val:
+        nums = re.findall(r"\d+(?:[.,]\d+)?", cell_porc_val)
+        if len(nums) >= 1:
+            porcentaje = nums[0]
+        if len(nums) >= 2:
+            valor = nums[1]
+    return {"impuesto": impuesto, "base": base, "porcentaje": porcentaje, "valor": valor}
 
-    def _linea_siguiente_valor(idx: int, saltar_tokens: list[str] | None = None) -> str:
-        if idx is None:
-            return ""
-        saltar_tokens = saltar_tokens or []
-        for j in range(idx + 1, len(lineas_raw)):
-            raw = lineas_raw[j].strip()
-            norm = lineas_norm[j]
-            if not raw:
+
+def _parse_tabla_retenciones_pdf(page) -> tuple[list[dict], dict]:
+    """Lee la tabla de retenciones de la página con `page.extract_tables` y
+    devuelve `(filas_impuesto, sustento)`.
+
+    `filas_impuesto`: [{impuesto: IVA|Renta, base, porcentaje, valor}, ...].
+    `sustento`: {Comprobante_Sustento, Numero_Sustento, Fecha_Emision_Sustento, Ejercicio_Fiscal}.
+
+    Es mucho más estable que parsear el texto plano porque pdfplumber preserva
+    la estructura de columnas; los valores que el `extract_text` mezcla por
+    layout aquí quedan en celdas separadas.
+    """
+    sustento = {
+        "Comprobante_Sustento": "",
+        "Numero_Sustento": "",
+        "Fecha_Emision_Sustento": "",
+        "Ejercicio_Fiscal": "",
+    }
+    filas: list[dict] = []
+    try:
+        tablas = page.extract_tables() or []
+    except Exception:
+        return filas, sustento
+
+    for tabla in tablas:
+        if not tabla or len(tabla) < 2:
+            continue
+        header_norm = _norm_pdf_keyword(" ".join((c or "") for c in (tabla[0] or [])))
+        if "COMPROBANTE" not in header_norm:
+            continue
+        for fila in tabla[1:]:
+            if not fila:
                 continue
-            if any(t in norm for t in saltar_tokens):
-                continue
-            return raw
-        return ""
+            col0 = (fila[0] or "").strip() if len(fila) > 0 else ""
+            col1 = (fila[1] or "").strip() if len(fila) > 1 else ""
+            col2 = (fila[2] or "").strip() if len(fila) > 2 else ""
+            col3 = (fila[3] or "").strip() if len(fila) > 3 else ""
+            col4 = (fila[4] or "").strip() if len(fila) > 4 else ""
+            col5 = (fila[5] or "").strip() if len(fila) > 5 else ""
 
-    def _linea_anterior_valor(idx: int, saltar_tokens: list[str] | None = None) -> str:
-        if idx is None:
-            return ""
-        saltar_tokens = saltar_tokens or []
-        for j in range(idx - 1, -1, -1):
-            raw = lineas_raw[j].strip()
-            norm = lineas_norm[j]
-            if not raw:
-                continue
-            if any(t in norm for t in saltar_tokens):
-                continue
-            return raw
-        return ""
+            if col0 and not sustento["Comprobante_Sustento"]:
+                sustento["Comprobante_Sustento"] = re.sub(r"[ \t]+", " ", col0).strip()
+            if col1 and not sustento["Numero_Sustento"]:
+                # "0010010000047\n48" → "001001000004748" (concatenamos
+                # todos los grupos numéricos sin separador).
+                sustento["Numero_Sustento"] = "".join(re.findall(r"\d+", col1))
+            if col2 and not sustento["Fecha_Emision_Sustento"]:
+                m = re.search(r"(\d{2}/\d{2}/\d{4})", col2)
+                if m:
+                    sustento["Fecha_Emision_Sustento"] = m.group(1)
+            if col3 and not sustento["Ejercicio_Fiscal"]:
+                m = re.search(r"(\d{2}/\d{4})", col3)
+                if m:
+                    sustento["Ejercicio_Fiscal"] = m.group(1)
 
-    def _buscar_fecha(texto_src: str) -> str:
-        match = re.search(r"(\d{2}/\d{2}/\d{4})", texto_src)
-        return match.group(1) if match else ""
+            fila_imp = _parse_celda_impuesto_retencion(col4, col5)
+            if fila_imp:
+                filas.append(fila_imp)
+        # solo procesamos la primera tabla con header válido
+        break
+    return filas, sustento
 
-    def _buscar_fecha_hora(texto_src: str) -> str:
-        match = re.search(r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})", texto_src)
-        return match.group(1) if match else ""
 
-    def _limpiar_valor(valor: str) -> str:
-        if not valor:
-            return ""
-        return re.sub(r"\s+", " ", valor.strip())
+def _extraer_datos_pdf_retencion(pdf_path: Path) -> dict:
+    """Extrae los campos del PDF de comprobante de retención.
 
+    Implementación layout-aware (reescrita en 2026-05): usa `extract_words`
+    para separar la columna izquierda (datos) de la derecha (labels suffixed
+    AUTORIZACIÓN/AMBIENTE/EMISIÓN/CLAVE DE ACCESO), y `extract_tables` para
+    parsear la tabla de retenciones. La versión legacy (línea-por-línea +
+    regex con tildes) producía cruces de datos: razón social = "No. <numero>",
+    nombre comercial = clave de acceso, dirección con label de columna pegado,
+    base/porcentaje/valor de IVA tomando dígitos del número de sustento, etc.
+    """
+    datos = {col: "" for col in RETENCION_REPORT_COLUMNS}
     datos["tipoDocumento"] = "Retencion"
 
-    datos["rucEmisor"] = _extraer_regex(
-        texto_norm,
-        [r"R\.U\.C\.\s*:?(?:\s|\n)*(\d{10,13})"],
-    )
-    if not datos["rucEmisor"]:
-        idx_ruc = _buscar_idx("R U C")
-        ruc_val = _linea_siguiente_valor(idx_ruc)
-        if ruc_val and re.fullmatch(r"\d{10,13}", ruc_val):
-            datos["rucEmisor"] = ruc_val
-        else:
-            datos["rucEmisor"] = _extraer_regex(texto_norm, [r"R\.\?U\.\?C\.\?\s*[:\-]?\s*(\d{10,13})"])
+    if pdfplumber is None:
+        return datos
 
-    razon_emisor = ""
-    idx_aut = _buscar_idx("NUMERO DE AUTORIZACION")
-    if idx_aut is None:
-        idx_aut = _buscar_idx("AUTORIZACION")
-    idx_num_aut = None
-    if idx_aut is not None:
-        for j in range(idx_aut + 1, len(lineas_raw)):
-            if re.fullmatch(r"\d{10,}", lineas_raw[j].strip()):
-                idx_num_aut = j
-                break
-    if idx_num_aut is not None:
-        for j in range(idx_num_aut + 1, len(lineas_raw)):
-            raw = lineas_raw[j].strip()
-            norm = lineas_norm[j]
-            if not raw:
-                continue
-            if re.search(r"\d{2}/\d{2}/\d{4}", raw):
-                continue
-            if any(token in norm for token in ["FECHA", "AUTORIZACION", "AMBIENTE", "EMISION", "DIRECCION", "CLAVE", "OBLIGADO", "AGENTE", "COMPROBANTE", "R U C"]):
-                continue
-            razon_emisor = raw
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            if not pdf.pages:
+                return datos
+            page = pdf.pages[0]
+            words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
+            filas_imp, sustento = _parse_tabla_retenciones_pdf(page)
+    except Exception as exc:
+        logger.warning("PDF retencion: error abriendo %s: %s", pdf_path, exc)
+        return datos
+
+    if not words:
+        return datos
+
+    # Líneas visuales con tres vistas: izquierda (x<305), derecha (x>=305), completa.
+    SPLIT_X = 305.0
+    lineas_words = _agrupar_palabras_visuales(words, y_tol=3.5)
+    lineas: list[dict] = []
+    for palabras in lineas_words:
+        izq = _texto_palabras_rango(palabras, x_max=SPLIT_X)
+        der = _texto_palabras_rango(palabras, x_min=SPLIT_X)
+        full = _texto_palabras_rango(palabras)
+        lineas.append({"izq": izq, "der": der, "full": full})
+
+    der_join = "\n".join(L["der"] for L in lineas)
+    full_join = "\n".join(L["full"] for L in lineas)
+    der_norm = _norm_pdf_keyword(der_join)
+    full_norm = _norm_pdf_keyword(full_join)
+
+    def _limpiar(valor: str) -> str:
+        if not valor:
+            return ""
+        return re.sub(r"[ \t]+", " ", valor).strip()
+
+    # ---- Columna derecha: RUC, número de comprobante, clave, fecha autorización,
+    # ambiente, emisión.
+    m = re.search(r"R\.?U\.?C\.?\s*:?\s*(\d{10,13})", der_norm)
+    if m:
+        datos["rucEmisor"] = m.group(1)
+
+    m = re.search(r"No\.\s*(\d{3}-\d{3}-\d{6,9})", der_join)
+    if not m:
+        m = re.search(r"(\d{3}-\d{3}-\d{6,9})", der_join)
+    if m:
+        datos["numeroComprobante"] = m.group(1)
+        partes = datos["numeroComprobante"].split("-")
+        if len(partes) == 3:
+            datos["establecimiento"], datos["puntoEmision"], datos["secuencial"] = partes
+
+    m = re.search(r"(\d{49})", der_join)
+    if m:
+        datos["claveAcceso"] = m.group(1)
+
+    m = re.search(r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})", der_join)
+    if m:
+        datos["fechaAutorizacion"] = m.group(1)
+
+    # Ambiente/Emisión: matcheamos en der_norm (sin tildes) y luego preservamos
+    # el texto original (con Ó si la extracción lo decodificó bien).
+    if re.search(r"AMBIENTE\s*:?\s*[A-Z]+", der_norm):
+        m_orig = re.search(r"AMBIENTE\s*:?\s*(\S+)", der_join, flags=re.IGNORECASE)
+        if m_orig:
+            datos["ambiente"] = m_orig.group(1).strip().upper()
+
+    m_em = re.search(r"EMISION\s*:?\s*([A-Z]+)", der_norm)
+    if m_em:
+        datos["emision"] = m_em.group(1)
+
+    # ---- Columna izquierda parte superior: razón social emisor y nombre comercial.
+    # Están en las líneas ANTES de "Dirección Matriz:" (de 1 a 2 líneas; suelen
+    # repetirse — el reporte de referencia las guarda como duplicado si solo hay 1).
+    idx_matriz = None
+    for i, L in enumerate(lineas):
+        if "DIRECCION MATRIZ" in _norm_pdf_keyword(L["izq"]):
+            idx_matriz = i
             break
-    datos["razonSocialEmisor"] = _limpiar_valor(razon_emisor)
-    if not datos["razonSocialEmisor"]:
-        idx_fecha_alt = _buscar_idx("FECHA Y HORA")
-        if idx_fecha_alt is None:
-            idx_fecha_alt = _buscar_idx("FECHA Y HORA DE")
-        candidato = _linea_anterior_valor(
-            idx_fecha_alt, saltar_tokens=["AUTORIZACION", "FECHA", "HORA", "AMBIENTE"]
-        )
-        if candidato and re.search(r"[A-ZÁÉÍÓÚÑ]", candidato, flags=re.IGNORECASE):
-            datos["razonSocialEmisor"] = _limpiar_valor(candidato)
 
-    idx_fecha = _buscar_idx("FECHA Y HORA")
-    if idx_fecha is None:
-        idx_fecha = _buscar_idx("FECHA Y HORA DE")
-    if idx_fecha is not None:
-        for j in range(idx_fecha + 1, len(lineas_raw)):
-            fecha_hora = _buscar_fecha_hora(lineas_raw[j])
-            if fecha_hora:
-                datos["fechaAutorizacion"] = fecha_hora
-                break
-    if not datos["fechaAutorizacion"]:
-        datos["fechaAutorizacion"] = _buscar_fecha_hora(texto_norm)
-
-    idx_amb = _buscar_idx("AMBIENTE")
-    if idx_amb is not None:
-        nombre_comercial = _linea_anterior_valor(idx_amb, saltar_tokens=["AUTORIZACION", "FECHA", "HORA", "AMBIENTE"])
-        if nombre_comercial and re.search(r"[A-ZÁÉÍÓÚÑ]", nombre_comercial, flags=re.IGNORECASE):
-            if nombre_comercial != datos["razonSocialEmisor"]:
-                datos["nombreComercial"] = _limpiar_valor(nombre_comercial)
-        linea_amb = lineas_raw[idx_amb]
-        match_amb = re.search(r"(?i)AMBIENTE\s*:?\s*(PRODUCCI[ÓO]N|PRUEBAS)", linea_amb)
-        if match_amb:
-            datos["ambiente"] = _limpiar_valor(match_amb.group(1))
-        else:
-            datos["ambiente"] = _limpiar_valor(_linea_siguiente_valor(idx_amb))
-
-    idx_matriz = _buscar_idx("DIRECCION MATRIZ")
+    razones: list[str] = []
     if idx_matriz is not None:
-        tokens_ignorar = [
-            "AUTORIZACION",
-            "FECHA",
-            "HORA",
-            "AMBIENTE",
-            "EMISION",
-            "DIRECCION",
-            "CLAVE",
-            "OBLIGADO",
-            "AGENTE",
-            "COMPROBANTE",
-            "R U C",
-            "LOGO",
-        ]
-        valores_ignorar = {"PRODUCCION", "PRUEBAS", "NORMAL", "CONTINGENCIA"}
+        for i in range(idx_matriz):
+            txt = lineas[i]["izq"]
+            if not txt:
+                continue
+            # Filtra líneas sin al menos 3 letras consecutivas (descarta tokens
+            # tipo "LOGO", caracteres sueltos o solo dígitos).
+            if not re.search(r"[A-Z]{3,}", _norm_pdf_keyword(txt)):
+                continue
+            razones.append(_limpiar(txt))
 
-        def _es_candidato_emisor(raw: str, norm: str) -> bool:
-            if not raw:
-                return False
-            if any(token in norm for token in tokens_ignorar):
-                return False
-            if norm in valores_ignorar:
-                return False
-            if re.search(r"\d{2}/\d{2}/\d{4}", raw):
-                return False
-            if re.fullmatch(r"\d+", raw):
-                return False
-            return True
-
-        emisor_asignado = False
-        if idx_num_aut is not None and idx_num_aut + 1 < idx_matriz:
-            candidatos = []
-            for j in range(idx_num_aut + 1, idx_matriz):
-                raw = lineas_raw[j].strip()
-                norm = lineas_norm[j]
-                if not _es_candidato_emisor(raw, norm):
-                    continue
-                candidatos.append(raw)
-            if candidatos:
-                datos["razonSocialEmisor"] = _limpiar_valor(candidatos[0])
-                if len(candidatos) > 1 and not datos.get("nombreComercial"):
-                    cand_com = _limpiar_valor(candidatos[1])
-                    if cand_com and cand_com != datos["razonSocialEmisor"]:
-                        datos["nombreComercial"] = cand_com
-                emisor_asignado = True
-
-        if not emisor_asignado:
-            razon_idx = None
-            for j in range(idx_matriz - 1, -1, -1):
-                cand = lineas_raw[j].strip()
-                norm = lineas_norm[j]
-                if not _es_candidato_emisor(cand, norm):
-                    continue
-                razon_idx = j
-                break
-            if razon_idx is not None:
-                razon_idx_prev = None
-                for j in range(razon_idx - 1, -1, -1):
-                    cand_prev = lineas_raw[j].strip()
-                    norm_prev = lineas_norm[j]
-                    if not _es_candidato_emisor(cand_prev, norm_prev):
-                        continue
-                    razon_idx_prev = j
-                    break
-
-                if razon_idx_prev is not None:
-                    datos["razonSocialEmisor"] = _limpiar_valor(lineas_raw[razon_idx_prev])
-                    if not datos.get("nombreComercial"):
-                        cand_com = lineas_raw[razon_idx].strip()
-                        if cand_com and cand_com != datos["razonSocialEmisor"]:
-                            datos["nombreComercial"] = _limpiar_valor(cand_com)
-                else:
-                    datos["razonSocialEmisor"] = _limpiar_valor(lineas_raw[razon_idx])
-                    if not datos.get("nombreComercial"):
-                        for j in range(razon_idx + 1, idx_matriz):
-                            cand = lineas_raw[j].strip()
-                            norm = lineas_norm[j]
-                            if not _es_candidato_emisor(cand, norm):
-                                continue
-                            if cand != datos["razonSocialEmisor"]:
-                                datos["nombreComercial"] = _limpiar_valor(cand)
-                            break
-
-    if not datos.get("nombreComercial") and datos.get("razonSocialEmisor"):
-        idx_raz = None
-        for j, raw in enumerate(lineas_raw):
-            if _limpiar_valor(raw) == datos["razonSocialEmisor"]:
-                idx_raz = j
-                break
-        if idx_raz is not None:
-            for j in range(idx_raz + 1, len(lineas_raw)):
-                cand = lineas_raw[j].strip()
-                norm = lineas_norm[j]
-                if not cand:
-                    continue
-                if re.search(r"\d{2}/\d{2}/\d{4}", cand):
-                    continue
-                if any(token in norm for token in ["FECHA", "AUTORIZACION", "AMBIENTE", "EMISION", "DIRECCION", "CLAVE", "OBLIGADO", "AGENTE", "COMPROBANTE", "R U C"]):
-                    continue
-                if cand != datos["razonSocialEmisor"]:
-                    datos["nombreComercial"] = _limpiar_valor(cand)
-                break
-    if not datos.get("nombreComercial"):
+    razones_unicas: list[str] = []
+    for r in razones:
+        if r not in razones_unicas:
+            razones_unicas.append(r)
+    if razones_unicas:
+        datos["razonSocialEmisor"] = razones_unicas[0]
+        datos["nombreComercial"] = razones_unicas[1] if len(razones_unicas) > 1 else razones_unicas[0]
+    if not datos["nombreComercial"]:
         datos["nombreComercial"] = "No Disponible"
 
-    if idx_matriz is not None:
-        linea_matriz = lineas_raw[idx_matriz]
-        valor_matriz = ""
-        match_matriz = re.search(r"(?i)direcci[oó]n\s+matriz\s*:?\s*(.+)$", linea_matriz)
-        if match_matriz:
-            valor_matriz = match_matriz.group(1).strip()
-        if not valor_matriz:
-            valor_matriz = _linea_siguiente_valor(idx_matriz)
-        if valor_matriz and idx_matriz + 2 < len(lineas_raw):
-            posible_cont = lineas_raw[idx_matriz + 2].strip()
-            norm_cont = lineas_norm[idx_matriz + 2]
-            if posible_cont and not any(
-                token in norm_cont
-                for token in ["DIRECCION SUCURSAL", "OBLIGADO", "AGENTE", "EMISION", "AMBIENTE", "CLAVE DE ACCESO"]
-            ):
-                if not re.search(r"\d{2}/\d{2}/\d{4}", posible_cont):
-                    valor_matriz = f"{valor_matriz} {posible_cont}".strip()
-        if idx_matriz is not None and (not valor_matriz or valor_matriz.startswith(":") or len(valor_matriz) < 8):
-            piezas = []
-            for j in range(idx_matriz + 1, min(idx_matriz + 5, len(lineas_raw))):
-                raw = lineas_raw[j].strip()
-                norm = lineas_norm[j]
-                if not raw:
-                    continue
-                if any(
-                    token in norm
-                    for token in ["DIRECCION SUCURSAL", "OBLIGADO", "AGENTE", "EMISION", "AMBIENTE", "CLAVE DE ACCESO"]
-                ):
-                    break
-                piezas.append(raw)
-            if piezas:
-                valor_matriz = " ".join(piezas).strip()
-        datos["direccionMatrizEmisor"] = _limpiar_valor(valor_matriz)
+    # ---- Direcciones matriz/sucursal: solo el texto después de ":" en la línea
+    # con el label; ignoramos continuaciones porque el reporte de referencia las
+    # ignora.
+    def _direccion_de(label_key: str) -> str:
+        for L in lineas:
+            if label_key in _norm_pdf_keyword(L["izq"]):
+                m_dir = re.search(r":\s*(.+)$", L["izq"])
+                if m_dir:
+                    return _limpiar(m_dir.group(1))
+        return ""
 
-    idx_emision = _buscar_idx("EMISION")
-    if idx_emision is not None:
-        linea_emision = lineas_raw[idx_emision]
-        match_emision = re.search(r"(?i)EMISI[ÓO]N\s*:?\s*(NORMAL|CONTINGENCIA)", linea_emision)
-        if match_emision:
-            datos["emision"] = _limpiar_valor(match_emision.group(1))
-        else:
-            datos["emision"] = _limpiar_valor(_linea_siguiente_valor(idx_emision))
+    datos["direccionMatrizEmisor"] = _direccion_de("DIRECCION MATRIZ")
+    datos["direccionSucursalEmisor"] = _direccion_de("DIRECCION SUCURSAL")
 
-    idx_sucursal = _buscar_idx("DIRECCION SUCURSAL")
-    if idx_sucursal is not None:
-        linea_sucursal = lineas_raw[idx_sucursal]
-        valor_sucursal = ""
-        match_sucursal = re.search(r"(?i)direcci[oó]n\s+sucursal\s*:?\s*(.+)$", linea_sucursal)
-        if match_sucursal:
-            valor_sucursal = match_sucursal.group(1).strip()
-        if not valor_sucursal:
-            valor_sucursal = _linea_siguiente_valor(idx_sucursal)
-        if valor_sucursal and idx_sucursal + 2 < len(lineas_raw):
-            posible_cont = lineas_raw[idx_sucursal + 2].strip()
-            norm_cont = lineas_norm[idx_sucursal + 2]
-            if posible_cont and not any(
-                token in norm_cont
-                for token in ["DIRECCION MATRIZ", "OBLIGADO", "AGENTE", "EMISION", "AMBIENTE", "CLAVE DE ACCESO"]
-            ):
-                if not re.search(r"\d{2}/\d{2}/\d{4}", posible_cont):
-                    valor_sucursal = f"{valor_sucursal} {posible_cont}".strip()
-        if idx_sucursal is not None and (not valor_sucursal or valor_sucursal.startswith(":") or len(valor_sucursal) < 8):
-            piezas = []
-            for j in range(idx_sucursal + 1, min(idx_sucursal + 5, len(lineas_raw))):
-                raw = lineas_raw[j].strip()
-                norm = lineas_norm[j]
-                if not raw:
-                    continue
-                if any(
-                    token in norm
-                    for token in ["DIRECCION MATRIZ", "OBLIGADO", "AGENTE", "EMISION", "AMBIENTE", "CLAVE DE ACCESO"]
-                ):
-                    break
-                piezas.append(raw)
-            if piezas:
-                valor_sucursal = " ".join(piezas).strip()
-        datos["direccionSucursalEmisor"] = _limpiar_valor(valor_sucursal)
+    # ---- Obligado a Llevar Contabilidad ----
+    for L in lineas:
+        izq_n = _norm_pdf_keyword(L["izq"])
+        if "OBLIGADO A LLEVAR CONTABILIDAD" in izq_n:
+            m_ob = re.search(r"OBLIGADO A LLEVAR CONTABILIDAD\s+(SI|NO)\b", izq_n)
+            if m_ob:
+                datos["obligadoContabilidad"] = m_ob.group(1)
+            else:
+                # El "SI/NO" puede aparecer en otra X de la misma línea.
+                m2 = re.search(r"\b(SI|NO)\b", _norm_pdf_keyword(L["full"]))
+                if m2:
+                    datos["obligadoContabilidad"] = m2.group(1)
+            break
 
-    idx_obligado = _buscar_idx("OBLIGADO A LLEVAR CONTABILIDAD")
-    if idx_obligado is not None:
-        linea_obligado = lineas_raw[idx_obligado]
-        match_obligado = re.search(r"(?i)OBLIGADO A LLEVAR CONTABILIDAD\s*(SI|NO)\b", linea_obligado)
-        if match_obligado:
-            datos["obligadoContabilidad"] = match_obligado.group(1).upper()
-        else:
-            for j in range(idx_obligado + 1, len(lineas_raw)):
-                val = lineas_raw[j].strip()
-                if not val:
-                    continue
-                val_clean = re.sub(r"[^A-Z]", "", val.upper())
-                if val_clean in {"SI", "NO"}:
-                    datos["obligadoContabilidad"] = val_clean
-                    break
+    # ---- Número de agente de retención ----
+    for L in lineas:
+        if "AGENTE DE RETENCION" in _norm_pdf_keyword(L["izq"]):
+            full_line_n = _norm_pdf_keyword(L["full"])
+            nums = re.findall(r"\b(\d+)\b", full_line_n)
+            if nums:
+                # El último número es el valor (después de "Resolución No.").
+                datos["numeroAgenteRetencion"] = nums[-1]
+            break
+    if not datos["numeroAgenteRetencion"]:
+        datos["numeroAgenteRetencion"] = "No Disponible"
 
-    datos["numeroContribuyenteEspecial"] = _extraer_regex(
-        texto_norm,
-        [r"CONTRIBUYENTE\s+ESPECIAL[^0-9]*?(\d+)", r"CONTRIBUYENTE\s+ESPECIAL\s*(\d+)", r"CONTRIBUYENTE\s+ESPECIAL\s*NO\.?\s*(\d+)", r"CONTRIBUYENTE\s+ESPECIAL\s*No\.?\s*(\d+)", r"CONTRIBUYENTE\s+ESPECIAL\s*#\s*(\d+)", r"CONTRIBUYENTE\s+ESPECIAL\s*:\s*(\d+)", r"CONTRIBUYENTE\s+ESPECIAL\s*NO\s*(\d+)"],
-    )
-    if datos["numeroContribuyenteEspecial"]:
-        ce = datos["numeroContribuyenteEspecial"].strip()
-        if re.fullmatch(r"\d+", ce):
-            datos["numeroContribuyenteEspecial"] = str(int(ce))
+    # ---- Contribuyente Especial ----
+    m_ce = re.search(r"CONTRIBUYENTE\s+ESPECIAL[^0-9]*?(\d+)", full_norm)
+    if m_ce:
+        valor_ce = m_ce.group(1).lstrip("0")
+        datos["numeroContribuyenteEspecial"] = valor_ce or "0"
     else:
         datos["numeroContribuyenteEspecial"] = "No Disponible"
 
-    idx_agente = _buscar_idx("AGENTE DE RETENCION")
-    if idx_agente is not None:
-        linea_agente = lineas_raw[idx_agente]
-        match_agente = re.search(r"(?i)AGENTE DE RETENCION[^0-9]*([0-9]+)", linea_agente)
-        if match_agente:
-            datos["numeroAgenteRetencion"] = match_agente.group(1)
-        else:
-            for j in range(idx_agente + 1, len(lineas_raw)):
-                agente_val = lineas_raw[j].strip()
-                if not agente_val:
-                    continue
-                if re.fullmatch(r"\d+", agente_val):
-                    datos["numeroAgenteRetencion"] = agente_val
-                    break
-
-    if not datos.get("numeroAgenteRetencion"):
-        datos["numeroAgenteRetencion"] = "No Disponible"
-
-    datos["ambiente"] = datos.get("ambiente", "").strip()
-    if not datos["ambiente"]:
-        datos["ambiente"] = _extraer_regex(texto_norm, [r"AMBIENTE\s*[:\-]?\s*([A-Z??????]+)"])
-    if datos["ambiente"].upper() == "PRODUCCION":
-        datos["ambiente"] = "PRODUCCI?N"
-
-    if not datos.get("emision"):
-        datos["emision"] = _extraer_regex(texto_norm, [r"EMISION\s*[:\-]?\s*([A-Z??????]+)"])
-
-    datos["numeroComprobante"] = _extraer_regex(
-        texto_norm,
-        [r"No\.\s*(\d{3}-\d{3}-\d{6,9})", r"(\d{3}-\d{3}-\d{6,9})"],
-    )
-    if datos["numeroComprobante"]:
-        partes = datos["numeroComprobante"].split("-")
-        if len(partes) == 3:
-            datos["establecimiento"] = partes[0]
-            datos["puntoEmision"] = partes[1]
-            datos["secuencial"] = partes[2]
-
-    idx_razon = _buscar_idx("RAZON SOCIAL")
-    if idx_razon is not None:
-        linea_razon = lineas_raw[idx_razon]
-        match_razon = re.search(
-            r"(?i)RAZON\s+SOCIAL\s*/\s*NOMBRES\s+Y\s+APELLIDOS\s*:?\s*(.+)$",
-            linea_razon,
-        )
-        if match_razon and match_razon.group(1).strip():
-            datos["razonSocialSujetoRetenido"] = _limpiar_valor(match_razon.group(1))
-        # Extraer bloque de sujeto retenido desde la etiqueta
-        bloque = []
-        for j in range(idx_razon + 1, len(lineas_raw)):
-            norm = lineas_norm[j]
-            if any(token in norm for token in ["COMPROBANTE", "BASE IMPONIBLE", "IMPUESTO", "PORCENTAJE", "RETENCION", "VALORRETENIDO", "INFORMACION ADICIONAL"]):
-                break
-            bloque.append(lineas_raw[j].strip())
-            if len(bloque) > 12:
-                break
-
-        razon = datos.get("razonSocialSujetoRetenido", "")
-        identificacion = datos.get("identificacionSujetoRetenido", "")
-        fecha_emision = datos.get("fechaEmision", "")
-
-        for item in bloque:
-            if not item:
-                continue
-            norm_item = _normalizar_label_simple(item)
-            if "IDENTIFICACION" in norm_item or norm_item == "FECHA":
-                continue
-            fecha_val = _buscar_fecha(item)
-            if fecha_val and not fecha_emision:
-                fecha_emision = fecha_val
-                continue
-            if re.fullmatch(r"\d{10,13}", item) and not identificacion:
-                identificacion = item
-                continue
-            if not razon and re.search(r"[A-ZÁÉÍÓÚÑ]", item, flags=re.IGNORECASE):
-                razon = item
-
-        if razon:
-            datos["razonSocialSujetoRetenido"] = _limpiar_valor(razon)
-        if identificacion:
-            datos["identificacionSujetoRetenido"] = identificacion
-        if fecha_emision:
-            datos["fechaEmision"] = fecha_emision
-
-    if not datos.get("identificacionSujetoRetenido"):
-        idx_ident = _buscar_idx("IDENTIFICACION")
-        if idx_ident is not None:
-            linea_ident = lineas_raw[idx_ident]
-            match_ident = re.search(r"(?i)IDENTIFICACION\s*:?\s*(\d{5,13})", linea_ident)
-            if match_ident:
-                datos["identificacionSujetoRetenido"] = match_ident.group(1)
-            else:
-                for j in range(idx_ident + 1, len(lineas_raw)):
-                    raw = lineas_raw[j].strip()
-                    if not raw:
-                        continue
-                    if re.search(r"\d{5,13}", raw):
-                        datos["identificacionSujetoRetenido"] = re.search(r"\d{5,13}", raw).group(0)
-                        break
-
-    if not datos.get("fechaEmision"):
-        idx_fecha_suj = _buscar_idx("FECHA")
-        if idx_fecha_suj is not None:
-            linea_fecha = lineas_raw[idx_fecha_suj]
-            match_fecha = re.search(r"(\d{2}/\d{2}/\d{4})", linea_fecha)
-            if match_fecha:
-                datos["fechaEmision"] = match_fecha.group(1)
-            else:
-                for j in range(idx_fecha_suj + 1, len(lineas_raw)):
-                    fecha_val = _buscar_fecha(lineas_raw[j])
-                    if fecha_val:
-                        datos["fechaEmision"] = fecha_val
-                        break
-
-    if not datos.get("razonSocialSujetoRetenido"):
-        bloque_sujeto = re.search(
-            r"RAZON\s+SOCIAL\s*/\s*NOMBRES\s+Y\s+APELLIDOS\s*:\s*IDENTIFICACION\s*FECHA\s*([A-Z0-9 .,/\\-]+?)\s*(\d{10,13})\s*([0-3]\d/[01]\d/\d{4})",
-            texto_norm,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if bloque_sujeto:
-            datos["razonSocialSujetoRetenido"] = _limpiar_valor(bloque_sujeto.group(1))
-            if not datos.get("identificacionSujetoRetenido"):
-                datos["identificacionSujetoRetenido"] = bloque_sujeto.group(2)
-            if not datos.get("fechaEmision"):
-                datos["fechaEmision"] = bloque_sujeto.group(3)
-
-    datos["claveAcceso"] = _extraer_regex(texto_norm, [r"(\d{49})"])
-    if not datos.get("rucEmisor") and datos.get("claveAcceso") and len(datos["claveAcceso"]) == 49:
-        datos["rucEmisor"] = datos["claveAcceso"][10:23]
-
-    fecha_emision = ""
-    idx_fecha_emision = _buscar_idx("FECHA EMISION")
-    if idx_fecha_emision is None:
-        for i, norm in enumerate(lineas_norm):
-            if norm == "FECHA" and i > 0 and "IDENTIFICACION" in lineas_norm[i - 1]:
-                idx_fecha_emision = i
-                break
-    if idx_fecha_emision is not None:
-        for j in range(idx_fecha_emision + 1, len(lineas_raw)):
-            fecha_val = _buscar_fecha(lineas_raw[j])
-            if fecha_val:
-                fecha_emision = fecha_val
-                break
-    if fecha_emision:
-        datos["fechaEmision"] = fecha_emision
-
-    # Tabla de retenciones
-    tabla_inicio = None
-    tabla_fin = None
-    for idx, norm in enumerate(lineas_norm):
-        if norm == "COMPROBANTE":
-            tabla_inicio = idx + 1
-            break
-    if tabla_inicio is None:
-        for idx, norm in enumerate(lineas_norm):
-            if "COMPROBANTE" in norm and "IMPUESTO" in norm:
-                tabla_inicio = idx + 1
-                break
-    if tabla_inicio is not None:
-        for idx in range(tabla_inicio, len(lineas_norm)):
-            if "INFORMACION ADICIONAL" in lineas_norm[idx] or lineas_norm[idx].startswith("INFORMACION"):
-                tabla_fin = idx
-                break
-    tabla_lineas = lineas_raw[tabla_inicio:tabla_fin] if tabla_inicio is not None else []
-
-    comprobante_sustento = ""
-    numero_sustento = ""
-    fecha_emision_sustento = ""
-    ejercicio_fiscal = ""
-
-    tokens_header = [
-        "NUMERO",
-        "FECHA",
-        "EJERCICIO",
-        "FISCAL",
-        "BASE",
-        "IMPUESTO",
-        "PORCENTAJE",
-        "RETENCION",
-        "VALORRETENIDO",
-    ]
-    for idx, linea in enumerate(tabla_lineas):
-        norm = _normalizar_label_simple(linea)
-        if any(tok in norm for tok in tokens_header):
-            continue
-        if re.search(r"[A-ZÁÉÍÓÚÑ]", linea, flags=re.IGNORECASE):
-            comprobante_sustento = linea.strip()
-            siguiente = idx + 1
-            while siguiente < len(tabla_lineas):
-                val = tabla_lineas[siguiente].strip()
-                if re.search(r"\d{2}/\d{2}/\d{4}", val):
-                    break
-                if re.fullmatch(r"\d+", val):
-                    numero_sustento += val
-                    siguiente += 1
-                    continue
-                if numero_sustento:
-                    break
-                siguiente += 1
+    # ---- Bloque del sujeto retenido: razón social, identificación, fecha. ----
+    idx_suj = None
+    for i, L in enumerate(lineas):
+        full_n = _norm_pdf_keyword(L["full"])
+        if "RAZON SOCIAL" in full_n and "APELLIDOS" in full_n:
+            idx_suj = i
             break
 
-    for linea in tabla_lineas:
-        if not fecha_emision_sustento:
-            fecha_emision_sustento = _buscar_fecha(linea)
-        if not ejercicio_fiscal:
-            match_ej = re.search(r"(\d{2}/\d{4})", linea)
-            if match_ej:
-                ejercicio_fiscal = match_ej.group(1)
-        if fecha_emision_sustento and ejercicio_fiscal:
-            break
+    if idx_suj is not None:
+        m_raz = re.search(r"(?i)apellidos\s*:?\s*(.+)$", lineas[idx_suj]["full"])
+        if m_raz:
+            datos["razonSocialSujetoRetenido"] = _limpiar(m_raz.group(1))
 
-    datos["Comprobante_Sustento"] = _limpiar_valor(comprobante_sustento)
-    if numero_sustento:
-        numero_sustento = numero_sustento.strip()
-    datos["Numero_Sustento"] = numero_sustento
-    datos["Fecha_Emision_Sustento"] = fecha_emision_sustento
-    datos["Ejercicio_Fiscal"] = ejercicio_fiscal
-
-    def _es_numero_valor(linea: str) -> bool:
-        if "/" in linea:
-            return False
-        return re.fullmatch(r"\d+(?:[.,]\d+)?", linea.strip()) is not None
-
-    filas = []
-    usados_base = set()
-    i = 0
-    while i < len(tabla_lineas):
-        raw = tabla_lineas[i].strip()
-        norm = _normalizar_label_simple(raw)
-        impuesto = ""
-        if "IMPUESTO A LA" in norm:
-            # Puede venir en dos líneas: "Impuesto a la" + "Renta"
-            if i + 1 < len(tabla_lineas) and "RENTA" in _normalizar_label_simple(tabla_lineas[i + 1]):
-                impuesto = "Renta"
-                i += 1
-        elif "RENTA" in norm:
-            impuesto = "Renta"
-        elif norm == "IVA" or " IVA" in norm:
-            impuesto = "IVA"
-
-        if not impuesto:
-            i += 1
-            continue
-
-        base = ""
-        for j in range(i - 1, -1, -1):
-            cand = tabla_lineas[j].strip()
-            if not _es_numero_valor(cand):
+        # Las 2 líneas siguientes contienen "Identificación XXXX" y "Fecha DD/MM/YYYY"
+        # (el orden puede invertirse según el agrupamiento por y_tol).
+        for offset in (1, 2, 3):
+            i = idx_suj + offset
+            if i >= len(lineas):
+                break
+            full_L = lineas[i]["full"]
+            full_n = _norm_pdf_keyword(full_L)
+            if "IDENTIFICACION" in full_n and not datos["identificacionSujetoRetenido"]:
+                m_id = re.search(r"\b(\d{10,13})\b", full_L)
+                if m_id:
+                    datos["identificacionSujetoRetenido"] = m_id.group(1)
                 continue
-            if len(re.sub(r"[.,]", "", cand)) >= 9:
-                continue
-            if j in usados_base:
-                continue
-            base = cand
-            usados_base.add(j)
-            break
+            if full_n.startswith("FECHA") and not datos["fechaEmision"]:
+                m_fe = re.search(r"(\d{2}/\d{2}/\d{4})", full_L)
+                if m_fe:
+                    datos["fechaEmision"] = m_fe.group(1)
 
-        porcentaje = ""
-        valor = ""
-        j = i + 1
-        while j < len(tabla_lineas) and (not porcentaje or not valor):
-            cand = tabla_lineas[j].strip()
-            if _es_numero_valor(cand):
-                if not porcentaje:
-                    porcentaje = cand
-                elif not valor:
-                    valor = cand
-            j += 1
+    # ---- Tabla de retenciones (parseada al abrir el PDF) ----
+    datos["Comprobante_Sustento"] = sustento["Comprobante_Sustento"]
+    datos["Numero_Sustento"] = sustento["Numero_Sustento"]
+    datos["Fecha_Emision_Sustento"] = sustento["Fecha_Emision_Sustento"]
+    datos["Ejercicio_Fiscal"] = sustento["Ejercicio_Fiscal"]
 
-        filas.append(
-            {
-                "impuesto": impuesto,
-                "base": base,
-                "porcentaje": porcentaje,
-                "valor": valor,
-            }
-        )
-        i = j
+    iva_items = [f for f in filas_imp if f["impuesto"] == "IVA"]
+    renta_items = [f for f in filas_imp if f["impuesto"] == "Renta"]
 
-    iva_items = [r for r in filas if r["impuesto"] == "IVA"]
-    renta_items = [r for r in filas if r["impuesto"] == "Renta"]
-
-    def _asignar_retencion(items, base_key: str, imp_key: str, porc_key: str, val_key: str, imp_label: str):
+    def _asignar(items, k_base, k_imp, k_pct, k_val, label):
         if items:
-            datos[base_key] = items[0]["base"]
-            datos[imp_key] = imp_label
-            datos[porc_key] = items[0]["porcentaje"]
-            datos[val_key] = items[0]["valor"]
+            datos[k_base] = items[0]["base"]
+            datos[k_imp] = label
+            datos[k_pct] = items[0]["porcentaje"]
+            datos[k_val] = items[0]["valor"]
 
-    _asignar_retencion(iva_items, "Base_Imponible_Ret_IVA", "Impuesto_Ret_IVA", "Porcentaje_Ret_IVA", "Valor_Retenido_IVA", "IVA")
-    _asignar_retencion(renta_items, "Base_Imponible_Ret_IR", "Impuesto_Ret_IR", "Porcentaje_Ret_IR", "Valor_Retenido_IR", "Impuesto a la Renta")
+    _asignar(iva_items, "Base_Imponible_Ret_IVA", "Impuesto_Ret_IVA",
+             "Porcentaje_Ret_IVA", "Valor_Retenido_IVA", "IVA")
+    _asignar(renta_items, "Base_Imponible_Ret_IR", "Impuesto_Ret_IR",
+             "Porcentaje_Ret_IR", "Valor_Retenido_IR", "Renta")
+    if iva_items:
+        _asignar(iva_items, "Base_Imponible_Ret_IVA_1", "Impuesto_Ret_IVA_1",
+                 "Porcentaje_Ret_IVA_1", "Valor_Retenido_IVA_1", "IVA")
+    if renta_items:
+        _asignar(renta_items, "Base_Imponible_Ret_IR_1", "Impuesto_Ret_IR_1",
+                 "Porcentaje_Ret_IR_1", "Valor_Retenido_IR_1", "Renta")
 
-    if len(iva_items) > 1:
-        _asignar_retencion(iva_items[1:], "Base_Imponible_Ret_IVA_1", "Impuesto_Ret_IVA_1", "Porcentaje_Ret_IVA_1", "Valor_Retenido_IVA_1", "IVA")
-    elif len(iva_items) == 1:
-        _asignar_retencion(iva_items, "Base_Imponible_Ret_IVA_1", "Impuesto_Ret_IVA_1", "Porcentaje_Ret_IVA_1", "Valor_Retenido_IVA_1", "IVA")
-    if len(renta_items) > 1:
-        _asignar_retencion(renta_items[1:], "Base_Imponible_Ret_IR_1", "Impuesto_Ret_IR_1", "Porcentaje_Ret_IR_1", "Valor_Retenido_IR_1", "Impuesto a la Renta")
-    elif len(renta_items) == 1:
-        _asignar_retencion(renta_items, "Base_Imponible_Ret_IR_1", "Impuesto_Ret_IR_1", "Porcentaje_Ret_IR_1", "Valor_Retenido_IR_1", "Impuesto a la Renta")
+    # Si no hay items para un impuesto: marcamos 'No Aplica' en el resumen
+    # principal pero dejamos vacíos el detalle _1 (el reporte de referencia
+    # los tiene en blanco cuando no aplica).
+    if not iva_items:
+        datos["Impuesto_Ret_IVA"] = "No Aplica"
+        datos["Impuesto_Ret_IVA_1"] = ""
+    if not renta_items:
+        datos["Impuesto_Ret_IR"] = "No Aplica"
+        datos["Impuesto_Ret_IR_1"] = ""
 
-    info_idx = None
-    for idx, norm in enumerate(lineas_norm):
-        if "INFORMACION ADICIONAL" in norm:
-            info_idx = idx
-    if info_idx is not None:
-        adicionales = [ln.strip() for ln in lineas_raw[info_idx + 1:] if ln.strip()]
-        datos["informacionAdicional"] = "\n".join(adicionales)
+    # ---- Información Adicional ----
+    # En estos PDFs el label aparece 2 veces (sección + tabla interna);
+    # tomamos lo que viene DESPUÉS del último.
+    idx_info = None
+    for i, L in enumerate(lineas):
+        if "INFORMACION ADICIONAL" in _norm_pdf_keyword(L["full"]):
+            idx_info = i
+    if idx_info is not None:
+        contenido = []
+        for L in lineas[idx_info + 1:]:
+            txt = (L["full"] or "").strip()
+            if txt:
+                contenido.append(txt)
+        if contenido:
+            # Preservamos los saltos de línea — Excel los respeta con wrap-text.
+            datos["informacionAdicional"] = "\n".join(contenido)
     if not datos["informacionAdicional"]:
         datos["informacionAdicional"] = "No Disponible"
 
+    # ---- Defaults numéricos para columnas que quedan vacías ----
     campos_ceros = [
         "Base_Imponible_Ret_IVA",
         "Porcentaje_Ret_IVA",
@@ -1720,8 +1481,7 @@ def _extraer_datos_pdf_retencion(pdf_path: Path) -> dict:
     for campo in campos_ceros:
         if datos.get(campo) in ("", None):
             datos[campo] = "0"
-    if not datos["numeroContribuyenteEspecial"]:
-        datos["numeroContribuyenteEspecial"] = "No Disponible"
+
     return datos
 
 

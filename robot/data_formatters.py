@@ -249,6 +249,38 @@ def _texto_emitidos_retencion(valor, default: str = "") -> str:
     return texto or default
 
 
+def _texto_emitidos_retencion_multilinea(valor, default: str = "") -> str:
+    """Como `_texto_emitidos_retencion` pero preserva los saltos de línea.
+
+    Sólo colapsa whitespace horizontal (espacios/tabs) dentro de cada línea, sin
+    juntar líneas con espacio. Útil para `informacionAdicional`, donde la
+    referencia del SRI guarda cada bloque (eMail/Sistema/Telefono/Correo) en
+    una línea propia."""
+    if valor is None:
+        return default
+    texto = str(valor).strip()
+    if not texto:
+        return default
+    # Normaliza \r\n y \r a \n; colapsa runs de espacios/tabs pero respeta \n.
+    texto = texto.replace("\r\n", "\n").replace("\r", "\n")
+    texto = re.sub(r"[ \t]+", " ", texto)
+    # Quitamos espacios al inicio/fin de cada línea y descartamos líneas vacías
+    # consecutivas (deja una sola en blanco como separador máximo).
+    lineas = [ln.strip() for ln in texto.split("\n")]
+    # Colapsa blancos consecutivos
+    salida = []
+    blanco_previo = False
+    for ln in lineas:
+        if ln:
+            salida.append(ln); blanco_previo = False
+        elif not blanco_previo:
+            salida.append("")
+            blanco_previo = True
+    while salida and not salida[-1]:
+        salida.pop()
+    return "\n".join(salida) or default
+
+
 def _texto_emitidos_retencion_na(valor) -> str:
     """Como `_texto_emitidos_retencion` pero con default 'No Disponible'."""
     return _texto_emitidos_retencion(valor, "No Disponible")
@@ -465,7 +497,7 @@ def _map_retencion_legacy_to_emitidos_sample_row(legacy: dict | None) -> dict:
     row["Numero_Sustento"] = _texto_emitidos_retencion(legacy.get("Numero_Sustento")).replace("-", "")
     row["Fecha_Emision_Sustento"] = _texto_emitidos_retencion(legacy.get("Fecha_Emision_Sustento"))
     row["Ejercicio_Fiscal"] = _texto_emitidos_retencion(legacy.get("Ejercicio_Fiscal"))
-    row["informacionAdicional"] = _texto_emitidos_retencion(
+    row["informacionAdicional"] = _texto_emitidos_retencion_multilinea(
         legacy.get("informacionAdicional"), "No Disponible"
     )
     row["tipoDocumento"] = _texto_emitidos_retencion(legacy.get("tipoDocumento"), "Retencion")
