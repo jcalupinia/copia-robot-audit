@@ -1355,12 +1355,21 @@ button[aria-label="Detener proceso"]:hover{
 }
 
 /* ===================== Boton toggle de tema (fijo arriba a la derecha) ===================== */
+/* left:auto + width:max-content evitan que el bloque de Streamlit (que es
+   full-width) estire el contenedor y deje el boton pegado a la izquierda.
+   Todo con !important para ganar sobre los estilos por defecto de Streamlit. */
 .st-key-toggle_theme{
-  position:fixed;
-  top:14px;
-  right:18px;
-  z-index:1000;
-  width:auto !important;
+  position:fixed !important;
+  top:12px !important;
+  right:16px !important;
+  left:auto !important;
+  bottom:auto !important;
+  width:max-content !important;
+  max-width:max-content !important;
+  min-width:0 !important;
+  margin:0 !important;
+  padding:0 !important;
+  z-index:1000 !important;
 }
 .st-key-toggle_theme button{
   width:auto !important;
