@@ -1354,25 +1354,25 @@ button[aria-label="Detener proceso"]:hover{
   box-shadow:0 16px 36px rgba(239,68,68,0.42) !important;
 }
 
-/* ===================== Boton toggle de tema (fijo arriba a la derecha) ===================== */
-/* left:auto + width:max-content evitan que el bloque de Streamlit (que es
-   full-width) estire el contenedor y deje el boton pegado a la izquierda.
-   Todo con !important para ganar sobre los estilos por defecto de Streamlit. */
+/* ===================== Boton toggle de tema arriba a la derecha ===================== */
 .st-key-toggle_theme{
-  position:fixed !important;
-  top:12px !important;
-  right:16px !important;
-  left:auto !important;
-  bottom:auto !important;
-  width:max-content !important;
-  max-width:max-content !important;
+  position:static !important;
+  width:0 !important;
+  max-width:0 !important;
+  height:0 !important;
   min-width:0 !important;
   margin:0 !important;
   padding:0 !important;
-  z-index:1000 !important;
+  overflow:visible !important;
 }
 .st-key-toggle_theme button{
+  position:fixed !important;
+  top:14px !important;
+  right:18px !important;
+  left:auto !important;
+  bottom:auto !important;
   width:auto !important;
+  max-width:max-content !important;
   min-height:0 !important;
   padding:0.4rem 1rem !important;
   border-radius:999px !important;
@@ -1384,6 +1384,7 @@ button[aria-label="Detener proceso"]:hover{
   backdrop-filter:blur(14px) saturate(150%);
   -webkit-backdrop-filter:blur(14px) saturate(150%);
   box-shadow:0 8px 22px rgba(0,0,0,0.22) !important;
+  z-index:9999 !important;
 }
 .st-key-toggle_theme button:hover{
   border-color:var(--accent) !important;
