@@ -639,22 +639,48 @@ def _limpiar_locks_perfil(profile_dir: Path) -> None:
             pass
 
 
+def _navegador_responde(context, timeout_ms: int = 8000) -> bool:
+    """Confirma que el navegador está realmente vivo y responde.
+
+    `launch_persistent_context` (y `browser.new_context`) pueden devolver un
+    objeto aunque el proceso del navegador haya muerto al instante — el caso
+    típico es la colisión de instancia única con el Chrome del sistema, que
+    deja en consola un `<launched> pid=...` pero sin ventana usable.
+
+    Navegar a about:blank fuerza una interacción real con el proceso: si está
+    muerto, lanza excepción en vez de seguir con una `page` zombie.
+    """
+    try:
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto("about:blank", timeout=timeout_ms)
+        return True
+    except Exception as err:
+        logger.warning(
+            f"El navegador se lanzó pero no responde: {type(err).__name__}: {err}"
+        )
+        return False
+
+
 def _abrir_navegador(p):
     """Abre el navegador con la mejor estrategia disponible y fallbacks reales.
 
-    Devuelve `(context, browser, using_persistent_profile)`.
-    Lanza `RuntimeError` con prefijo `[NAVEGADOR]` si no se puede abrir nada,
-    para que la UI lo muestre como problema de navegador/perfil y no como un
-    error genérico de descarga.
+    Devuelve `(context, browser, using_persistent_profile)` SOLO cuando el
+    navegador quedó verificado y funcional. Lanza `RuntimeError` con prefijo
+    `[NAVEGADOR]` si no se puede abrir nada, para que la UI lo muestre como
+    problema de navegador/perfil y no como un error genérico de descarga.
+
+    Cada intento se valida con `_navegador_responde`: si el proceso se abrió
+    pero murió, se descarta y se pasa al siguiente fallback (en vez de
+    continuar con una `page` zombie).
 
     Estrategia (en orden):
-      1. Perfil persistente con el Chromium incluido en Playwright.
-         NO se usa `channel="chrome"` para perfiles persistentes: el Chrome
-         del sistema es de instancia única y, si el usuario lo tiene abierto,
-         el proceso lanzado se cierra de inmediato.
-      2. Si el perfil persistente falla (bloqueado/corrupto): perfil temporal.
-      3. Si todo lo persistente falla: contexto NO persistente (`browser.launch`),
-         probando primero el Chrome del sistema y luego el Chromium incluido.
+      1. Perfil persistente fijo (`browser_profile`) con el Chromium incluido
+         en Playwright. NO se usa `channel="chrome"`: el Chrome del sistema es
+         de instancia única y, si el usuario lo tiene abierto, el proceso
+         lanzado se cierra de inmediato.
+      2. Perfil persistente temporal (el fijo puede estar bloqueado/corrupto).
+      3. Contexto NO persistente (`browser.launch`), probando primero el Chrome
+         del sistema y luego el Chromium incluido.
     """
     base_kwargs = dict(
         headless=HEADLESS,
@@ -669,47 +695,54 @@ def _abrir_navegador(p):
 
     errores = []
 
+    def _validar(descripcion, context, browser, persistente):
+        """Valida un contexto recién abierto. Devuelve la tupla o None.
+
+        Si el navegador no responde, cierra lo que se haya abierto para no
+        dejar procesos zombie y registra el motivo.
+        """
+        if _navegador_responde(context):
+            logger.info(f"Navegador abierto y verificado: {descripcion}.")
+            return context, browser, persistente
+        errores.append(f"{descripcion}: el navegador se cerró tras abrirse")
+        for cerrable in (context, browser):
+            if cerrable is not None:
+                try:
+                    cerrable.close()
+                except Exception:
+                    pass
+        return None
+
     # --- 1 y 2. Perfil persistente (perfil fijo, luego temporal) ---
     if USE_PERSISTENT_PROFILE:
+        persistent_kwargs = dict(base_kwargs, accept_downloads=True)
+        rutas = []
+
         perfil_fijo = Path(USER_DATA_DIR).expanduser()
         if not perfil_fijo.is_absolute():
             perfil_fijo = Path.cwd() / perfil_fijo
-        persistent_kwargs = dict(base_kwargs, accept_downloads=True)
-
-        # Chromium incluido (sin channel="chrome": evita la colisión de
-        # instancia única con el Chrome del sistema del usuario).
-        intentos_persistentes = []
         try:
             perfil_fijo.mkdir(parents=True, exist_ok=True)
             _limpiar_locks_perfil(perfil_fijo)
-            intentos_persistentes.append(("perfil fijo", perfil_fijo))
+            rutas.append(("perfil fijo", perfil_fijo))
         except Exception as err:
             errores.append(f"perfil fijo no accesible: {type(err).__name__}: {err}")
 
-        for etiqueta, ruta in intentos_persistentes:
+        try:
+            rutas.append(("perfil temporal", Path(tempfile.mkdtemp(prefix="sri_robot_profile_"))))
+        except Exception as err:
+            errores.append(f"perfil temporal no creable: {type(err).__name__}: {err}")
+
+        for etiqueta, ruta in rutas:
             try:
                 context = p.chromium.launch_persistent_context(str(ruta), **persistent_kwargs)
-                logger.info(f"Navegador abierto con {etiqueta}: {ruta}")
-                return context, None, True
             except Exception as err:
-                errores.append(f"{etiqueta}: {type(err).__name__}: {err}")
-                logger.warning(
-                    f"No se pudo abrir el navegador con {etiqueta} ({err}); "
-                    "se intentará un perfil temporal."
-                )
-
-        # Perfil temporal: el perfil fijo puede estar bloqueado o corrupto.
-        try:
-            perfil_tmp = Path(tempfile.mkdtemp(prefix="sri_robot_profile_"))
-            context = p.chromium.launch_persistent_context(str(perfil_tmp), **persistent_kwargs)
-            logger.info(f"Navegador abierto con perfil temporal: {perfil_tmp}")
-            return context, None, True
-        except Exception as err:
-            errores.append(f"perfil temporal: {type(err).__name__}: {err}")
-            logger.warning(
-                f"El perfil temporal también falló ({err}); "
-                "se usará un contexto no persistente."
-            )
+                errores.append(f"{etiqueta} ({ruta}): {type(err).__name__}: {err}")
+                logger.warning(f"launch_persistent_context falló con {etiqueta}: {err}")
+                continue
+            resultado = _validar(f"{etiqueta} ({ruta})", context, None, True)
+            if resultado:
+                return resultado
 
     # --- 3. Contexto NO persistente ---
     for canal in ("chrome", "chromium"):
@@ -719,10 +752,12 @@ def _abrir_navegador(p):
         try:
             browser = p.chromium.launch(**kwargs)
             context = browser.new_context(accept_downloads=True)
-            logger.info(f"Navegador abierto en contexto no persistente ({canal}).")
-            return context, browser, False
         except Exception as err:
             errores.append(f"launch {canal}: {type(err).__name__}: {err}")
+            continue
+        resultado = _validar(f"contexto no persistente ({canal})", context, browser, False)
+        if resultado:
+            return resultado
 
     detalle = " | ".join(errores) or "sin detalle"
     raise RuntimeError(
@@ -730,6 +765,48 @@ def _abrir_navegador(p):
         "esté instalado y cierra las ventanas de Chrome del robot que puedan "
         f"haber quedado abiertas. Detalle técnico: {detalle}"
     )
+
+
+def _verificar_estado_post_login(page) -> None:
+    """Valida que, tras el login, la página esté en un estado utilizable.
+
+    Sin esta verificación, un navegador headless/zombie hace que el login
+    "pase" silenciosamente y el fallo recién aparezca mucho después, al no
+    encontrar los paneles del portal (Facturación Electrónica, Producción,
+    Consultas) — un síntoma confuso para una causa de navegador.
+
+    Lanza `RuntimeError` con un mensaje claro si:
+      - el navegador/página se cerró (no se puede leer la URL),
+      - seguimos en la pantalla de login (autenticación fallida),
+      - el portal devolvió una página de indisponibilidad.
+    """
+    # 1. ¿La página sigue viva?
+    try:
+        url_actual = page.url or ""
+    except Exception as err:
+        raise RuntimeError(
+            "[NAVEGADOR] El navegador se cerró durante el inicio de sesión. "
+            f"Detalle: {type(err).__name__}: {err}"
+        )
+
+    url_low = url_actual.lower()
+
+    # 2. ¿Seguimos en la pantalla de login de Keycloak?
+    if "auth/realms" in url_low or "openid-connect" in url_low:
+        raise RuntimeError(
+            "La autenticacion en el SRI fallo: se mantuvo en la pantalla de "
+            "login. Verifica el RUC y la clave e intenta nuevamente."
+        )
+
+    # 3. ¿El portal devolvió una página de indisponibilidad?
+    try:
+        portal_caido = _portal_indisponible(page)
+    except Exception:
+        portal_caido = False
+    if portal_caido:
+        raise RuntimeError(PORTAL_INDISPONIBLE_MENSAJE)
+
+    logger.info(f"Sesion iniciada correctamente; pagina actual: {url_actual}")
 
 
 # ============================================================
@@ -790,8 +867,9 @@ def descargar_sri(
         destino_url = PORTAL_HOME if origen in {"Recibidos", "Emitidos"} else URLS.get(origen, URLS["Recibidos"])
         _login(context, page, ruc, clave, cookies_path, destino_url, ci_adicional=ci_adicional)
         _check_cancel("post_login")
-        if "auth/realms" in page.url:
-            raise RuntimeError("La autenticacion en el SRI fallo, se mantuvo en la pantalla de login.")
+        # Valida explícitamente el estado antes de buscar paneles del portal:
+        # navegador vivo, fuera de la pantalla de login, portal disponible.
+        _verificar_estado_post_login(page)
         modulo_page = None
         if origen == "Recibidos":
             modulo_page = _abrir_modulo_consultas(page, origen)
