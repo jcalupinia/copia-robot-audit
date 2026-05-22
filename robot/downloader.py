@@ -5,6 +5,7 @@ import threading
 from urllib.parse import urlencode
 import pandas as pd
 import csv, re, json, os, time, unicodedata, html, calendar, uuid
+import tempfile
 from datetime import datetime
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -622,6 +623,116 @@ def _login(
 # ============================================================
 
 # ============================================================
+# APERTURA DEL NAVEGADOR
+# ============================================================
+def _limpiar_locks_perfil(profile_dir: Path) -> None:
+    """Elimina los archivos de lock que Chrome/Chromium deja en un perfil.
+
+    Si una corrida anterior no cerró limpio, quedan `SingletonLock` y
+    similares; sin borrarlos, el siguiente `launch_persistent_context`
+    falla con "Target page, context or browser has been closed".
+    """
+    for lock in ("SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile"):
+        try:
+            (profile_dir / lock).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _abrir_navegador(p):
+    """Abre el navegador con la mejor estrategia disponible y fallbacks reales.
+
+    Devuelve `(context, browser, using_persistent_profile)`.
+    Lanza `RuntimeError` con prefijo `[NAVEGADOR]` si no se puede abrir nada,
+    para que la UI lo muestre como problema de navegador/perfil y no como un
+    error genérico de descarga.
+
+    Estrategia (en orden):
+      1. Perfil persistente con el Chromium incluido en Playwright.
+         NO se usa `channel="chrome"` para perfiles persistentes: el Chrome
+         del sistema es de instancia única y, si el usuario lo tiene abierto,
+         el proceso lanzado se cierra de inmediato.
+      2. Si el perfil persistente falla (bloqueado/corrupto): perfil temporal.
+      3. Si todo lo persistente falla: contexto NO persistente (`browser.launch`),
+         probando primero el Chrome del sistema y luego el Chromium incluido.
+    """
+    base_kwargs = dict(
+        headless=HEADLESS,
+        args=["--no-sandbox", "--disable-setuid-sandbox",
+              "--disable-dev-shm-usage", "--disable-gpu"],
+    )
+    if SLOW_MO > 0:
+        base_kwargs["slow_mo"] = SLOW_MO
+    if DEVTOOLS:
+        base_kwargs["devtools"] = True
+        base_kwargs["headless"] = False
+
+    errores = []
+
+    # --- 1 y 2. Perfil persistente (perfil fijo, luego temporal) ---
+    if USE_PERSISTENT_PROFILE:
+        perfil_fijo = Path(USER_DATA_DIR).expanduser()
+        if not perfil_fijo.is_absolute():
+            perfil_fijo = Path.cwd() / perfil_fijo
+        persistent_kwargs = dict(base_kwargs, accept_downloads=True)
+
+        # Chromium incluido (sin channel="chrome": evita la colisión de
+        # instancia única con el Chrome del sistema del usuario).
+        intentos_persistentes = []
+        try:
+            perfil_fijo.mkdir(parents=True, exist_ok=True)
+            _limpiar_locks_perfil(perfil_fijo)
+            intentos_persistentes.append(("perfil fijo", perfil_fijo))
+        except Exception as err:
+            errores.append(f"perfil fijo no accesible: {type(err).__name__}: {err}")
+
+        for etiqueta, ruta in intentos_persistentes:
+            try:
+                context = p.chromium.launch_persistent_context(str(ruta), **persistent_kwargs)
+                logger.info(f"Navegador abierto con {etiqueta}: {ruta}")
+                return context, None, True
+            except Exception as err:
+                errores.append(f"{etiqueta}: {type(err).__name__}: {err}")
+                logger.warning(
+                    f"No se pudo abrir el navegador con {etiqueta} ({err}); "
+                    "se intentará un perfil temporal."
+                )
+
+        # Perfil temporal: el perfil fijo puede estar bloqueado o corrupto.
+        try:
+            perfil_tmp = Path(tempfile.mkdtemp(prefix="sri_robot_profile_"))
+            context = p.chromium.launch_persistent_context(str(perfil_tmp), **persistent_kwargs)
+            logger.info(f"Navegador abierto con perfil temporal: {perfil_tmp}")
+            return context, None, True
+        except Exception as err:
+            errores.append(f"perfil temporal: {type(err).__name__}: {err}")
+            logger.warning(
+                f"El perfil temporal también falló ({err}); "
+                "se usará un contexto no persistente."
+            )
+
+    # --- 3. Contexto NO persistente ---
+    for canal in ("chrome", "chromium"):
+        kwargs = dict(base_kwargs)
+        if canal == "chrome":
+            kwargs["channel"] = "chrome"
+        try:
+            browser = p.chromium.launch(**kwargs)
+            context = browser.new_context(accept_downloads=True)
+            logger.info(f"Navegador abierto en contexto no persistente ({canal}).")
+            return context, browser, False
+        except Exception as err:
+            errores.append(f"launch {canal}: {type(err).__name__}: {err}")
+
+    detalle = " | ".join(errores) or "sin detalle"
+    raise RuntimeError(
+        "[NAVEGADOR] No se pudo abrir el navegador. Verifica que Google Chrome "
+        "esté instalado y cierra las ventanas de Chrome del robot que puedan "
+        f"haber quedado abiertas. Detalle técnico: {detalle}"
+    )
+
+
+# ============================================================
 # FUNCIoN PRINCIPAL
 # ============================================================
 def descargar_sri(
@@ -669,56 +780,10 @@ def descargar_sri(
         _mark_download_checkpoint_running(checkpoint_path_str)
 
     with sync_playwright() as p:
-        launch_kwargs = dict(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-        )
-        # Prefer Chrome channel when available (local), fallback to bundled Chromium (Render)
-        launch_kwargs["channel"] = "chrome"
-        if SLOW_MO > 0:
-            launch_kwargs["slow_mo"] = SLOW_MO
-        if DEVTOOLS:
-            launch_kwargs["devtools"] = True
-            launch_kwargs["headless"] = False
-
-        browser = None
-        using_persistent_profile = False
-        context = None
-        if USE_PERSISTENT_PROFILE:
-            persistent_profile_dir = Path(USER_DATA_DIR).expanduser()
-            if not persistent_profile_dir.is_absolute():
-                persistent_profile_dir = Path.cwd() / persistent_profile_dir
-            try:
-                persistent_profile_dir.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
-            persistent_kwargs = dict(launch_kwargs)
-            persistent_kwargs["accept_downloads"] = True
-            try:
-                context = p.chromium.launch_persistent_context(
-                    str(persistent_profile_dir),
-                    **persistent_kwargs,
-                )
-                using_persistent_profile = True
-            except Exception as err:
-                logger.warning(f"No se pudo usar perfil persistente; fallback a contexto normal: {err}")
-                persistent_kwargs.pop("channel", None)
-                try:
-                    context = p.chromium.launch_persistent_context(
-                        str(persistent_profile_dir),
-                        **persistent_kwargs,
-                    )
-                    using_persistent_profile = True
-                except Exception:
-                    context = None
-
-        if context is None:
-            try:
-                browser = p.chromium.launch(**launch_kwargs)
-            except Exception:
-                launch_kwargs.pop("channel", None)
-                browser = p.chromium.launch(**launch_kwargs)
-            context = browser.new_context(accept_downloads=True)
+        # Apertura del navegador con fallbacks reales (perfil persistente →
+        # perfil temporal → contexto no persistente). Si nada funciona,
+        # _abrir_navegador lanza RuntimeError con prefijo [NAVEGADOR].
+        context, browser, using_persistent_profile = _abrir_navegador(p)
 
         page = context.pages[0] if context.pages else context.new_page()
 

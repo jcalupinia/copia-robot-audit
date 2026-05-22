@@ -962,6 +962,20 @@ def _friendly_download_error_message(raw_error: str, origen: str | None = None) 
     if "proceso cancelado por el usuario" in low:
         return "warning", "Proceso cancelado por el usuario."
 
+    if (
+        "[navegador]" in low
+        or "no se pudo abrir el navegador" in low
+        or "target page, context or browser has been closed" in low
+        or "launch_persistent_context" in low
+    ):
+        return (
+            "error",
+            "No se pudo abrir el navegador. Verifica que Google Chrome esté "
+            "instalado y cierra todas las ventanas de Chrome abiertas (incluido "
+            "cualquier navegador que el robot haya dejado abierto). Si el "
+            "problema persiste, reinicia el equipo e intenta nuevamente.",
+        )
+
     if "no se pudo abrir el formulario de emitidos" in low or ("emitidos" in low and "timeout" in low):
         return (
             "warning",

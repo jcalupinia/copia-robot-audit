@@ -18,6 +18,7 @@ mantener compatible la API previa.
 from __future__ import annotations
 
 import os
+import sys
 
 
 # --------------------------------------------------------------------------- #
@@ -38,7 +39,17 @@ else:
 # --------------------------------------------------------------------------- #
 # Flags de Playwright (headless, slowmo, devtools, persistent profile)
 # --------------------------------------------------------------------------- #
-DEFAULT_HEADLESS = "1" if (os.getenv("RENDER") or not os.getenv("DISPLAY")) else "0"
+# Default de headless según plataforma:
+# - Windows / macOS: SIEMPRE hay entorno gráfico → default visible ("0").
+#   La heurística `not DISPLAY` NO sirve acá: DISPLAY es una variable de X11
+#   que nunca existe en Windows, así que daría headless por error.
+# - Linux: headless si es un servidor (RENDER) o no hay servidor gráfico
+#   (DISPLAY ausente). En un escritorio Linux con X corre visible.
+# Siempre se puede forzar con la env var PLAYWRIGHT_HEADLESS.
+if sys.platform in ("win32", "darwin"):
+    DEFAULT_HEADLESS = "0"
+else:
+    DEFAULT_HEADLESS = "1" if (os.getenv("RENDER") or not os.getenv("DISPLAY")) else "0"
 HEADLESS_ENV = os.getenv("PLAYWRIGHT_HEADLESS", DEFAULT_HEADLESS).strip().lower()
 HEADLESS = HEADLESS_ENV not in {"0", "false", "no", "off"}
 
