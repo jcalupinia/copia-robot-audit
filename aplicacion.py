@@ -1027,33 +1027,100 @@ st.set_page_config(
 )
 _auto_update_ui()
 _render_update_modal()
-st.markdown(
-    """
-    <style>
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
-
-/* ===================== Design tokens ===================== */
-:root{
-  --bg-0:#070a14;
-  --bg-1:#0b1020;
-  --glass:rgba(255,255,255,0.045);
-  --glass-strong:rgba(255,255,255,0.07);
-  --glass-hover:rgba(255,255,255,0.11);
-  --border:rgba(255,255,255,0.10);
-  --border-strong:rgba(255,255,255,0.17);
-  --text:#e9edf6;
-  --text-muted:rgba(233,237,246,0.60);
-  --accent:#5b8cff;
-  --accent-2:#8b5cf6;
-  --accent-soft:rgba(91,140,255,0.16);
-  --success:#22c55e;
-  --danger:#ef4444;
-  --radius:14px;
-  --radius-lg:22px;
-  --shadow:0 24px 60px rgba(0,0,0,0.55);
-  --ring:0 0 0 3px rgba(91,140,255,0.28);
+# --- Tema de la interfaz (claro / oscuro) -----------------------------------
+_THEME_TOKENS = {
+    "dark": {
+        "--bg": ("radial-gradient(900px 620px at 10% -8%, rgba(91,140,255,0.20), transparent 60%),"
+                 "radial-gradient(820px 620px at 94% 6%, rgba(139,92,246,0.17), transparent 60%),"
+                 "radial-gradient(760px 760px at 50% 118%, rgba(34,197,94,0.08), transparent 60%),"
+                 "linear-gradient(180deg, #070a14 0%, #0b1020 100%)"),
+        "--text": "#e9edf6",
+        "--text-strong": "#ffffff",
+        "--text-muted": "rgba(233,237,246,0.60)",
+        "--text-label": "#cfd8ee",
+        "--glass": "rgba(255,255,255,0.045)",
+        "--glass-strong": "rgba(255,255,255,0.07)",
+        "--glass-hover": "rgba(255,255,255,0.11)",
+        "--border": "rgba(255,255,255,0.10)",
+        "--border-strong": "rgba(255,255,255,0.17)",
+        "--input-bg": "rgba(255,255,255,0.04)",
+        "--input-bg-hover": "rgba(255,255,255,0.06)",
+        "--input-bg-focus": "rgba(91,140,255,0.06)",
+        "--shadow": "0 24px 60px rgba(0,0,0,0.55)",
+        "--sidebar-bg": "linear-gradient(180deg, rgba(13,18,34,0.96), rgba(8,11,22,0.96))",
+        "--title-grad": "linear-gradient(120deg, #ffffff 0%, #b9c8ee 55%, #5b8cff 100%)",
+        "--table-head": "linear-gradient(135deg, rgba(91,140,255,0.22), rgba(139,92,246,0.18))",
+        "--table-row": "rgba(255,255,255,0.025)",
+        "--table-row-alt": "rgba(255,255,255,0.045)",
+        "--table-hover": "rgba(91,140,255,0.14)",
+    },
+    "light": {
+        "--bg": ("radial-gradient(900px 620px at 10% -8%, rgba(91,140,255,0.16), transparent 60%),"
+                 "radial-gradient(820px 620px at 94% 6%, rgba(139,92,246,0.13), transparent 60%),"
+                 "radial-gradient(760px 760px at 50% 118%, rgba(34,197,94,0.07), transparent 60%),"
+                 "linear-gradient(180deg, #eef1f8 0%, #e4e9f5 100%)"),
+        "--text": "#1f2a44",
+        "--text-strong": "#0d1426",
+        "--text-muted": "rgba(31,42,68,0.62)",
+        "--text-label": "#34416a",
+        "--glass": "rgba(255,255,255,0.55)",
+        "--glass-strong": "rgba(255,255,255,0.72)",
+        "--glass-hover": "rgba(255,255,255,0.92)",
+        "--border": "rgba(15,23,42,0.10)",
+        "--border-strong": "rgba(15,23,42,0.17)",
+        "--input-bg": "rgba(255,255,255,0.78)",
+        "--input-bg-hover": "rgba(255,255,255,0.92)",
+        "--input-bg-focus": "rgba(91,140,255,0.12)",
+        "--shadow": "0 20px 45px rgba(30,42,80,0.16)",
+        "--sidebar-bg": "linear-gradient(180deg, rgba(255,255,255,0.86), rgba(235,239,250,0.86))",
+        "--title-grad": "linear-gradient(120deg, #1d2b50 0%, #3a5bb8 55%, #5b8cff 100%)",
+        "--table-head": "linear-gradient(135deg, rgba(91,140,255,0.18), rgba(139,92,246,0.13))",
+        "--table-row": "rgba(255,255,255,0.62)",
+        "--table-row-alt": "rgba(255,255,255,0.40)",
+        "--table-hover": "rgba(91,140,255,0.15)",
+    },
 }
 
+# Tokens fijos (no dependen del tema): acentos, radios, anillo de foco.
+_THEME_TOKENS_FIJOS = {
+    "--accent": "#5b8cff",
+    "--accent-2": "#8b5cf6",
+    "--accent-soft": "rgba(91,140,255,0.16)",
+    "--success": "#22c55e",
+    "--danger": "#ef4444",
+    "--radius": "14px",
+    "--radius-lg": "22px",
+    "--ring": "0 0 0 3px rgba(91,140,255,0.28)",
+}
+
+
+def _build_global_css(theme: str) -> str:
+    """Construye el bloque <style> global para el tema indicado.
+
+    Todo el CSS usa var(--token); solo cambia el bloque :root segun el tema,
+    de modo que claro y oscuro comparten EXACTAMENTE el mismo diseno.
+    """
+    tokens = dict(_THEME_TOKENS_FIJOS)
+    tokens.update(_THEME_TOKENS.get(theme, _THEME_TOKENS["dark"]))
+    root = ":root{" + "".join(f"{k}:{v};" for k, v in tokens.items()) + "}"
+    return "<style>\n" + _CSS_IMPORT + "\n" + root + "\n" + _CSS_REGLAS + "\n</style>"
+
+
+def _render_theme_toggle() -> None:
+    """Boton fijo arriba a la derecha para alternar tema claro/oscuro."""
+    tema = st.session_state.get("ui_theme", "dark")
+    if tema == "dark":
+        etiqueta = "☀️  Modo claro"
+    else:
+        etiqueta = "\U0001f319  Modo oscuro"
+    if st.button(etiqueta, key="toggle_theme", help="Cambiar entre tema claro y oscuro"):
+        st.session_state["ui_theme"] = "light" if tema == "dark" else "dark"
+        st.rerun()
+
+
+_CSS_IMPORT = "@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');"
+
+_CSS_REGLAS = """
 /* ===================== Ocultar UI de Streamlit ===================== */
 header[data-testid="stHeader"],
 div[data-testid="stToolbar"],
@@ -1073,11 +1140,7 @@ div[data-testid="stDecoration"]{
 
 /* ===================== Fondo y tipografia base ===================== */
 .stApp{
-  background:
-    radial-gradient(900px 620px at 10% -8%, rgba(91,140,255,0.20), transparent 60%),
-    radial-gradient(820px 620px at 94% 6%, rgba(139,92,246,0.17), transparent 60%),
-    radial-gradient(760px 760px at 50% 118%, rgba(34,197,94,0.08), transparent 60%),
-    linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+  background:var(--bg);
   background-attachment:fixed;
   color:var(--text);
   font-family:'Manrope', system-ui, sans-serif;
@@ -1106,7 +1169,7 @@ div[data-testid="stDecoration"]{
   font-weight:800 !important;
   line-height:1.14 !important;
   letter-spacing:-0.02em;
-  background:linear-gradient(120deg, #ffffff 0%, #b9c8ee 55%, var(--accent) 100%);
+  background:var(--title-grad);
   -webkit-background-clip:text;
   background-clip:text;
   -webkit-text-fill-color:transparent;
@@ -1116,7 +1179,7 @@ div[data-testid="stDecoration"]{
   font-size:clamp(1.4rem, 2vw, 1.85rem) !important;
   font-weight:700 !important;
   line-height:1.2 !important;
-  color:#f3f6ff !important;
+  color:var(--text-strong) !important;
   letter-spacing:-0.01em;
 }
 .auth-title{
@@ -1124,7 +1187,7 @@ div[data-testid="stDecoration"]{
   font-size:1.95rem;
   font-weight:800;
   letter-spacing:-0.01em;
-  color:#ffffff !important;
+  color:var(--text-strong) !important;
   margin-bottom:1.5rem;
 }
 
@@ -1157,7 +1220,7 @@ div[data-testid="stForm"] span{
 .stApp div[data-baseweb="input"],
 .stApp div[data-baseweb="textarea"],
 .stApp div[data-baseweb="select"] > div{
-  background:rgba(255,255,255,0.04) !important;
+  background:var(--input-bg) !important;
   border:1px solid var(--border) !important;
   border-radius:var(--radius) !important;
   transition:border-color .18s ease, box-shadow .18s ease, background .18s ease;
@@ -1165,7 +1228,7 @@ div[data-testid="stForm"] span{
 .stApp div[data-baseweb="input"]:hover,
 .stApp div[data-baseweb="textarea"]:hover,
 .stApp div[data-baseweb="select"] > div:hover{
-  background:rgba(255,255,255,0.06) !important;
+  background:var(--input-bg-hover) !important;
   border-color:var(--border-strong) !important;
 }
 .stApp div[data-baseweb="input"]:focus-within,
@@ -1173,7 +1236,7 @@ div[data-testid="stForm"] span{
 .stApp div[data-baseweb="select"] > div:focus-within{
   border-color:var(--accent) !important;
   box-shadow:var(--ring) !important;
-  background:rgba(91,140,255,0.06) !important;
+  background:var(--input-bg-focus) !important;
 }
 .stApp input,
 .stApp textarea{
@@ -1218,7 +1281,7 @@ div[data-testid="stForm"] button[data-testid="baseButton-primary"]:hover{
 }
 div[data-testid="stForm"] button[kind="primaryFormSubmit"]:disabled,
 div[data-testid="stForm"] button[data-testid="baseButton-primary"]:disabled{
-  background:rgba(255,255,255,0.08) !important;
+  background:var(--glass-hover) !important;
   color:var(--text-muted) !important;
   box-shadow:none !important;
   transform:none;
@@ -1267,6 +1330,34 @@ button[aria-label="Detener proceso"]:hover{
   box-shadow:0 16px 36px rgba(239,68,68,0.42) !important;
 }
 
+/* ===================== Boton toggle de tema (fijo arriba a la derecha) ===================== */
+.st-key-toggle_theme{
+  position:fixed;
+  top:14px;
+  right:18px;
+  z-index:1000;
+  width:auto !important;
+}
+.st-key-toggle_theme button{
+  width:auto !important;
+  min-height:0 !important;
+  padding:0.4rem 1rem !important;
+  border-radius:999px !important;
+  background:var(--glass-strong) !important;
+  border:1px solid var(--border-strong) !important;
+  color:var(--text) !important;
+  font-size:0.86rem !important;
+  font-weight:600 !important;
+  backdrop-filter:blur(14px) saturate(150%);
+  -webkit-backdrop-filter:blur(14px) saturate(150%);
+  box-shadow:0 8px 22px rgba(0,0,0,0.22) !important;
+}
+.st-key-toggle_theme button:hover{
+  border-color:var(--accent) !important;
+  background:var(--glass-hover) !important;
+  transform:translateY(-1px);
+}
+
 /* ===================== Enlace de recuperar contrasena ===================== */
 .auth-reset-wrap{
   display:flex;
@@ -1281,7 +1372,7 @@ button[aria-label="Detener proceso"]:hover{
   border-radius:10px;
   border:1px solid var(--border-strong);
   background:var(--glass-strong);
-  color:#dbe4ff !important;
+  color:var(--accent) !important;
   font-size:0.9rem;
   font-weight:600;
   text-decoration:none !important;
@@ -1290,7 +1381,7 @@ button[aria-label="Detener proceso"]:hover{
 .auth-reset-link:hover{
   background:var(--accent-soft);
   border-color:var(--accent);
-  color:#ffffff !important;
+  color:var(--accent) !important;
   text-decoration:none !important;
 }
 
@@ -1315,7 +1406,7 @@ button[aria-label="Detener proceso"]:hover{
 }
 .stApp [data-baseweb="tab"][aria-selected="true"]{
   background:linear-gradient(135deg, var(--accent-soft), rgba(139,92,246,0.16)) !important;
-  color:#ffffff !important;
+  color:var(--text-strong) !important;
 }
 .stApp [data-baseweb="tab-highlight"],
 .stApp [data-baseweb="tab-border"]{
@@ -1324,7 +1415,7 @@ button[aria-label="Detener proceso"]:hover{
 
 /* ===================== Sidebar ===================== */
 section[data-testid="stSidebar"]{
-  background:linear-gradient(180deg, rgba(13,18,34,0.96), rgba(8,11,22,0.96)) !important;
+  background:var(--sidebar-bg) !important;
   border-right:1px solid var(--border);
   backdrop-filter:blur(12px);
 }
@@ -1356,7 +1447,7 @@ section[data-testid="stSidebar"] img{
   font-size:1.0rem !important;
   font-weight:600 !important;
   letter-spacing:0.01em;
-  color:#cfd8ee !important;
+  color:var(--text-label) !important;
 }
 .stApp input,
 .stApp textarea,
@@ -1394,7 +1485,7 @@ section[data-testid="stSidebar"] img{
   border-radius:999px !important;
   border:1px solid var(--border-strong) !important;
   background:var(--glass-strong) !important;
-  color:#cfd8ee !important;
+  color:var(--text-label) !important;
   font-size:0.88rem !important;
   font-weight:600 !important;
   box-shadow:none !important;
@@ -1411,14 +1502,18 @@ section[data-testid="stSidebar"] img{
   vertical-align:middle;
 }
 .st-key-btn_open_tour button:hover{
-  color:#ffffff !important;
+  color:var(--text-strong) !important;
   border-color:var(--accent) !important;
   background:var(--accent-soft) !important;
 }
-</style>
-    """,
-    unsafe_allow_html=True,
-)
+"""
+
+
+if "ui_theme" not in st.session_state:
+    st.session_state["ui_theme"] = "dark"
+st.markdown(_build_global_css(st.session_state["ui_theme"]), unsafe_allow_html=True)
+_render_theme_toggle()
+
 
 _init_download_state()
 _drain_download_queue()
@@ -3518,10 +3613,9 @@ with tab2:
         st.markdown(
             """
             <style>
-            /* Tabla de historial — tema oscuro fijo, coherente con el
-               rediseno glassmorphism. No usa prefers-color-scheme: ese
-               depende del tema del SO, no de la app, y producia una tabla
-               blanca sobre el fondo oscuro. */
+            /* Tabla de historial — usa las variables de tema (var --table-*)
+               definidas en el :root global, asi acompana el toggle
+               claro/oscuro sin CSS condicional. */
             .historial-table { width: 100%; overflow-x: auto; }
             .historial-table table {
                 width: 100%;
@@ -3530,33 +3624,33 @@ with tab2:
                 border-radius: 12px;
                 overflow: hidden;
                 font-size: 0.88rem;
-                border: 1px solid rgba(255, 255, 255, 0.10);
+                border: 1px solid var(--border);
             }
             .historial-table th,
             .historial-table td {
                 text-align: center;
                 padding: 9px 12px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-                border-right: 1px solid rgba(255, 255, 255, 0.05);
+                border-bottom: 1px solid var(--border);
+                border-right: 1px solid var(--border);
                 vertical-align: middle;
                 white-space: nowrap;
-                color: #e9edf6;
+                color: var(--text);
             }
             .historial-table thead th {
                 font-weight: 700;
                 letter-spacing: 0.2px;
-                color: #ffffff;
-                background: linear-gradient(135deg, rgba(91, 140, 255, 0.22), rgba(139, 92, 246, 0.18));
-                border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+                color: var(--text-strong);
+                background: var(--table-head);
+                border-bottom: 1px solid var(--border-strong);
             }
             .historial-table tbody td {
-                background: rgba(255, 255, 255, 0.025);
+                background: var(--table-row);
             }
             .historial-table tbody tr:nth-child(even) td {
-                background: rgba(255, 255, 255, 0.045);
+                background: var(--table-row-alt);
             }
             .historial-table tbody tr:hover td {
-                background: rgba(91, 140, 255, 0.14);
+                background: var(--table-hover);
             }
             </style>
             """,
