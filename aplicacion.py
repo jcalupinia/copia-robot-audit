@@ -3518,46 +3518,45 @@ with tab2:
         st.markdown(
             """
             <style>
+            /* Tabla de historial — tema oscuro fijo, coherente con el
+               rediseno glassmorphism. No usa prefers-color-scheme: ese
+               depende del tema del SO, no de la app, y producia una tabla
+               blanca sobre el fondo oscuro. */
             .historial-table { width: 100%; overflow-x: auto; }
             .historial-table table {
                 width: 100%;
                 border-collapse: separate;
                 border-spacing: 0;
-                border-radius: 10px;
+                border-radius: 12px;
                 overflow: hidden;
                 font-size: 0.88rem;
+                border: 1px solid rgba(255, 255, 255, 0.10);
             }
             .historial-table th,
             .historial-table td {
                 text-align: center;
-                padding: 8px 10px;
-                border: 1px solid rgba(120, 120, 120, 0.35);
+                padding: 9px 12px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+                border-right: 1px solid rgba(255, 255, 255, 0.05);
                 vertical-align: middle;
                 white-space: nowrap;
+                color: #e9edf6;
             }
             .historial-table thead th {
-                font-weight: 600;
-                text-transform: none;
+                font-weight: 700;
                 letter-spacing: 0.2px;
+                color: #ffffff;
+                background: linear-gradient(135deg, rgba(91, 140, 255, 0.22), rgba(139, 92, 246, 0.18));
+                border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+            }
+            .historial-table tbody td {
+                background: rgba(255, 255, 255, 0.025);
+            }
+            .historial-table tbody tr:nth-child(even) td {
+                background: rgba(255, 255, 255, 0.045);
             }
             .historial-table tbody tr:hover td {
-                background: rgba(30, 74, 168, 0.10);
-            }
-            @media (prefers-color-scheme: dark) {
-                .historial-table thead th {
-                    background: rgba(30, 74, 168, 0.25);
-                }
-                .historial-table td {
-                    background: rgba(12, 15, 22, 0.35);
-                }
-            }
-            @media (prefers-color-scheme: light) {
-                .historial-table thead th {
-                    background: rgba(30, 74, 168, 0.12);
-                }
-                .historial-table td {
-                    background: rgba(255, 255, 255, 0.9);
-                }
+                background: rgba(91, 140, 255, 0.14);
             }
             </style>
             """,
