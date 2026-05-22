@@ -1216,36 +1216,60 @@ div[data-testid="stForm"] span{
   color:var(--text);
 }
 
-/* ===================== Inputs ===================== */
+/* ===================== Inputs de texto / numero / area ===================== */
+/* El fondo se aplica al contenedor BaseWeb, a sus divs internos Y al input
+   real: BaseWeb pinta un fondo propio en una capa interna que el contenedor
+   exterior no cubre. Antes el input quedaba transparent y en modo claro se
+   veia el fondo oscuro nativo (campos negros). */
 .stApp div[data-baseweb="input"],
+.stApp div[data-baseweb="base-input"],
 .stApp div[data-baseweb="textarea"],
-.stApp div[data-baseweb="select"] > div{
+.stApp div[data-baseweb="input"] > div,
+.stApp div[data-baseweb="base-input"] > div,
+.stApp [data-testid="stTextInput"] input,
+.stApp [data-testid="stNumberInput"] input,
+.stApp [data-testid="stTextArea"] textarea,
+.stApp input,
+.stApp textarea{
   background:var(--input-bg) !important;
+  color:var(--text) !important;
+}
+.stApp div[data-baseweb="input"],
+.stApp div[data-baseweb="base-input"],
+.stApp div[data-baseweb="textarea"]{
   border:1px solid var(--border) !important;
   border-radius:var(--radius) !important;
-  transition:border-color .18s ease, box-shadow .18s ease, background .18s ease;
+  transition:border-color .18s ease, box-shadow .18s ease;
 }
 .stApp div[data-baseweb="input"]:hover,
-.stApp div[data-baseweb="textarea"]:hover,
-.stApp div[data-baseweb="select"] > div:hover{
-  background:var(--input-bg-hover) !important;
+.stApp div[data-baseweb="base-input"]:hover,
+.stApp div[data-baseweb="textarea"]:hover{
   border-color:var(--border-strong) !important;
 }
 .stApp div[data-baseweb="input"]:focus-within,
-.stApp div[data-baseweb="textarea"]:focus-within,
-.stApp div[data-baseweb="select"] > div:focus-within{
+.stApp div[data-baseweb="base-input"]:focus-within,
+.stApp div[data-baseweb="textarea"]:focus-within{
   border-color:var(--accent) !important;
   box-shadow:var(--ring) !important;
-  background:var(--input-bg-focus) !important;
-}
-.stApp input,
-.stApp textarea{
-  color:var(--text) !important;
-  background:transparent !important;
 }
 .stApp input::placeholder,
 .stApp textarea::placeholder{
   color:var(--text-muted) !important;
+}
+
+/* ===================== Selects ===================== */
+.stApp div[data-baseweb="select"] > div{
+  background:var(--input-bg) !important;
+  border:1px solid var(--border) !important;
+  border-radius:var(--radius) !important;
+  transition:border-color .18s ease, box-shadow .18s ease;
+}
+.stApp div[data-baseweb="select"] > div:hover{
+  border-color:var(--border-strong) !important;
+}
+.stApp div[data-baseweb="select"] > div:focus-within{
+  border-color:var(--accent) !important;
+  box-shadow:var(--ring) !important;
 }
 .stApp [data-baseweb="select"] div{
   color:var(--text) !important;
