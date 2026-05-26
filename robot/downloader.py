@@ -30,13 +30,6 @@ from robot.download_resume import (
 
 from typing import Callable
 
-from robot.captcha_solver import (
-    CaptchaSolverError,
-    MAX_ATTEMPTS as CAPTCHA_MAX_ATTEMPTS,
-    is_enabled as captcha_solver_enabled,
-    solve_image as solve_captcha_image,
-)
-
 from robot._logging import get_logger
 
 logger = get_logger(__name__)
@@ -62,6 +55,7 @@ from robot.signals import (
 from robot.captcha import (
     CAPTCHA_INPUT_QUERY,
     CAPTCHA_INPUT_SELECTORS,
+    CAPTCHA_MAX_ATTEMPTS,
     _captcha_visible,
     _espera_captcha,
     _esperar_captcha_manual_input,

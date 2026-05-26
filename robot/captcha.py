@@ -1,33 +1,40 @@
-"""Detección y resolución de captchas del portal del SRI.
+"""Detección y manejo de captchas del portal del SRI.
+
+Política actual (2026-05): **NO usamos servicios externos** (2Captcha u otros)
+para resolver captchas. Todo se resuelve manualmente por el usuario.
 
 Cubre dos tipos:
 
-- **Captcha de imagen** (input numérico): se resuelve con `robot.captcha_solver`
-  (2Captcha) si está activado, o se le pide al usuario que lo ingrese a mano.
-- **reCAPTCHA** (Google v2): siempre lo resuelve el usuario; el bot solo
-  espera a que el desafío desaparezca.
+- **Captcha de imagen** (input numérico): se notifica al usuario y se espera
+  a que escriba el código en el input visible.
+- **reCAPTCHA** (Google v2/Enterprise/invisible): se notifica al usuario y se
+  espera a que Google emita un token válido o el desafío visual desaparezca.
 
 En ambos casos, si la UI tiene callback configurado (`robot.signals.notify`),
 se le manda un mensaje pidiendo intervención.
 
 Originalmente vivía dentro de `robot/downloader.py`; se extrajo en la
-Sub-fase 2b del refactor.
+Sub-fase 2b del refactor. La integración con 2Captcha se eliminó por
+completo en 2026-05 (ya no se usa el servicio).
 """
 from __future__ import annotations
 
 import time
 
 from robot._logging import get_logger
-from robot.captcha_solver import (
-    CaptchaSolverError,
-    MAX_ATTEMPTS as CAPTCHA_MAX_ATTEMPTS,
-    is_enabled as captcha_solver_enabled,
-    solve_image as solve_captcha_image,
-)
 from robot.signals import _notificar_usuario_captcha
 
 
 logger = get_logger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# Reintentos
+# --------------------------------------------------------------------------- #
+# Cantidad de veces que el flujo de login puede reintentar tras detectar un
+# captcha residual (cuando el usuario ingresó el código pero el portal lo
+# rechaza). Sirve como tope global; no implica resolución automática.
+CAPTCHA_MAX_ATTEMPTS = 3
 
 
 # --------------------------------------------------------------------------- #
@@ -107,7 +114,7 @@ def _esperar_captcha_manual_input(page, timeout: int = 300000) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# reCAPTCHA (Google v2)
+# reCAPTCHA (Google v2 / Enterprise / invisible)
 # --------------------------------------------------------------------------- #
 def _recaptcha_presente(page) -> bool:
     """True si hay un widget de reCAPTCHA en la página."""
@@ -157,21 +164,21 @@ def _esperar_recaptcha_resuelto(page, timeout: int = 300000) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Resolución orquestada
+# Resolución orquestada — siempre manual
 # --------------------------------------------------------------------------- #
 def _resolver_captcha(page, contexto: str) -> bool:
-    """Intenta resolver el captcha de la página actual.
+    """Notifica al usuario y espera resolución manual del captcha.
 
-    Estrategia:
-    1. Si hay reCAPTCHA, notifica al usuario y espera que lo resuelva.
-    2. Si hay captcha de imagen y 2Captcha está deshabilitado, espera manual.
-    3. Si 2Captcha está habilitado, intenta hasta `CAPTCHA_MAX_ATTEMPTS` veces.
-    4. Si todos los intentos automáticos fallan, cae a espera manual.
+    Estrategia (sin resolvers externos):
+      1. Si hay reCAPTCHA, notifica al usuario y espera a que el desafío
+         desaparezca (Google emite token o el usuario lo resuelve a mano).
+      2. Si hay captcha de imagen, notifica al usuario y espera a que la
+         imagen sea reemplazada (cuando el portal recibe la respuesta).
+      3. Si no hay captcha visible, devuelve False.
 
-    Devuelve True si el captcha fue resuelto (automática o manualmente),
-    False si no había captcha o no se pudo resolver.
+    Devuelve True si se considera resuelto, False si no había captcha
+    detectable.
     """
-    recaptcha_detectado = False
     try:
         recaptcha_detectado = _recaptcha_presente(page)
     except Exception:
@@ -179,6 +186,7 @@ def _resolver_captcha(page, contexto: str) -> bool:
 
     if recaptcha_detectado:
         _notificar_usuario_captcha("reCAPTCHA", contexto)
+        logger.info(f"reCAPTCHA detectado ({contexto}); esperando resolucion manual.")
         _esperar_recaptcha_resuelto(page, timeout=300000)
         return True
 
@@ -188,60 +196,23 @@ def _resolver_captcha(page, contexto: str) -> bool:
     except Exception:
         return False
 
-    if not captcha_solver_enabled():
-        _notificar_usuario_captcha("captcha de imagen", contexto)
-        _espera_captcha(page)
-        return False
-
-    for intento in range(1, CAPTCHA_MAX_ATTEMPTS + 1):
-        try:
-            if not _captcha_visible(page, timeout=1000):
-                return False
-        except Exception:
-            return False
-
-        input_captcha = _localizar_input_captcha(page)
-        if input_captcha is None:
-            logger.warning(
-                f"Campo de texto para captcha no encontrado ({contexto}); "
-                "esperando resolucion manual."
-            )
-            _notificar_usuario_captcha("captcha de imagen", contexto)
-            _espera_captcha(page)
-            return False
-
-        try:
-            imagen = page.locator("img[alt='captcha']").screenshot(type="png")
-        except Exception as err:
-            logger.warning(
-                f"No se pudo capturar la imagen del captcha "
-                f"(intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}"
-            )
-            break
-
-        try:
-            codigo = solve_captcha_image(imagen)
-        except CaptchaSolverError as err:
-            logger.warning(
-                f"Fallo al resolver captcha con 2Captcha "
-                f"(intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}"
-            )
-            continue
-
-        try:
-            input_captcha.fill("")
-            input_captcha.fill(codigo)
-            return True
-        except Exception as err:
-            logger.warning(
-                f"No se pudo escribir el captcha resuelto "
-                f"(intento {intento}/{CAPTCHA_MAX_ATTEMPTS}): {err}"
-            )
-
-    logger.warning(
-        "Se agotaron los intentos automaticos de captcha; "
-        "esperando resolucion manual."
-    )
     _notificar_usuario_captcha("captcha de imagen", contexto)
+    logger.info(f"Captcha de imagen detectado ({contexto}); esperando resolucion manual.")
+    _esperar_captcha_manual_input(page, timeout=300000)
     _espera_captcha(page)
-    return False
+    return True
+
+
+__all__ = [
+    "CAPTCHA_MAX_ATTEMPTS",
+    "CAPTCHA_INPUT_SELECTORS",
+    "CAPTCHA_INPUT_QUERY",
+    "_espera_captcha",
+    "_captcha_visible",
+    "_localizar_input_captcha",
+    "_esperar_captcha_manual_input",
+    "_recaptcha_presente",
+    "_recaptcha_challenge_activo",
+    "_esperar_recaptcha_resuelto",
+    "_resolver_captcha",
+]

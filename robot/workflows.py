@@ -467,8 +467,44 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         return ""
 
     def _es_alerta_captcha(texto: str) -> bool:
-        texto_norm = (texto or "").strip().lower()
-        return "captcha incorrect" in texto_norm or "captcha inval" in texto_norm
+        """True si el portal rechazó el captcha (cualquier variante conocida)."""
+        if not texto:
+            return False
+        texto_norm = texto.strip().lower()
+        # Variantes observadas:
+        #   "Captcha incorrecto"
+        #   "Captcha inválido"
+        #   "No se pudo validar el captcha en google" (reCAPTCHA rechazado)
+        #   "Captcha de google inválido"
+        return (
+            "captcha incorrect" in texto_norm
+            or "captcha inval" in texto_norm
+            or "no se pudo validar el captcha" in texto_norm
+            or "captcha en google" in texto_norm
+            or "captcha de google" in texto_norm
+            or "recaptcha" in texto_norm
+        )
+
+    def _diagnostico_recaptcha_apis() -> dict:
+        """Devuelve qué APIs de reCAPTCHA están disponibles en la página.
+
+        Útil para logs: nos dice si el portal cargó executeRecaptcha,
+        grecaptcha.enterprise.execute o rcBuscar antes de cada intento.
+        """
+        try:
+            return page.evaluate(
+                """() => ({
+                    hasExecuteRecaptcha: typeof window.executeRecaptcha === 'function',
+                    hasEnterpriseExecute: !!(window.grecaptcha
+                        && grecaptcha.enterprise
+                        && typeof grecaptcha.enterprise.execute === 'function'),
+                    hasGrecaptchaExecute: !!(window.grecaptcha
+                        && typeof grecaptcha.execute === 'function'),
+                    hasRcBuscar: typeof window.rcBuscar === 'function',
+                })"""
+            ) or {}
+        except Exception:
+            return {}
 
     def _leer_token_recaptcha() -> str:
         try:
@@ -761,13 +797,20 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                     time.sleep(espera)
             return False
         token_previo = _leer_token_recaptcha()
+        ultima_alerta_captcha = ""
         for intento in range(1, intentos + 1):
             inicio_intento = time.perf_counter()
-            if intento > 1:
-                _limpiar_estado_consulta()
+            # Limpiamos estado SIEMPRE (no solo en reintentos): así el token
+            # anterior nunca se reutiliza y Google emite uno fresco.
+            _limpiar_estado_consulta()
+            rehidratado = False
             if RECIBIDOS_REHIDRATAR_ON_CAPTCHA and intento >= RECIBIDOS_REHIDRATAR_DESDE_INTENTO:
-                _rehidratar_consulta_recibidos()
-            _esperar_api_recaptcha_lista(timeout=7000)
+                rehidratado = _rehidratar_consulta_recibidos()
+                if rehidratado:
+                    # Tras recargar, el token previo deja de ser válido.
+                    token_previo = ""
+            api_lista = _esperar_api_recaptcha_lista(timeout=7000)
+            apis_diag = _diagnostico_recaptcha_apis()
             if RECIBIDOS_AUTO_PRE_EXECUTE_MS > 0:
                 try:
                     page.wait_for_timeout(RECIBIDOS_AUTO_PRE_EXECUTE_MS)
@@ -783,10 +826,30 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 timeout=RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
                 token_previo=token_previo,
             )
+            token_cambio = bool(token_actual) and token_actual != (token_previo or "")
+            # Diagnóstico por intento. NO logueamos el token completo por seguridad,
+            # solo longitud + si cambió respecto al previo.
+            logger.info(
+                "Recibidos intento %d/%d | modo=%s | api_lista=%s | "
+                "executeRecaptcha=%s | enterprise.execute=%s | rcBuscar=%s | "
+                "rehidratado=%s | token_ok=%s | token_len=%d | token_cambio=%s",
+                intento,
+                intentos,
+                modo_disparo or "desconocido",
+                api_lista,
+                apis_diag.get("hasExecuteRecaptcha", False),
+                apis_diag.get("hasEnterpriseExecute", False),
+                apis_diag.get("hasRcBuscar", False),
+                rehidratado,
+                token_ok,
+                len(token_actual or ""),
+                token_cambio,
+            )
             print(
                 f"[INFO] Recibidos intento {intento}/{intentos}: "
                 f"modo={modo_disparo or 'desconocido'}, token_ok={token_ok}, "
-                f"token_len={len(token_actual or '')}"
+                f"token_len={len(token_actual or '')}, token_cambio={token_cambio}, "
+                f"rehidratado={rehidratado}"
             )
             if not modo_disparo:
                 try:
@@ -803,11 +866,19 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             alerta_post = _texto_alerta()
             if alerta_post and _es_alerta_captcha(alerta_post):
                 dur = time.perf_counter() - inicio_intento
-                print(
-                    f"[WARN] Captcha incorrecto en intento {intento}/{intentos} "
-                    f"({dur:.2f}s)."
+                logger.warning(
+                    "Captcha rechazado por SRI/Google (intento %d/%d, %.2fs). Alerta: %s",
+                    intento, intentos, dur, alerta_post,
                 )
-                token_previo = token_actual or token_previo
+                print(
+                    f"[WARN] Captcha rechazado por SRI/Google en intento {intento}/{intentos} "
+                    f"({dur:.2f}s). Alerta: {alerta_post!r}"
+                )
+                ultima_alerta_captcha = alerta_post
+                # Limpiamos token y reseteamos para que el siguiente intento
+                # use uno fresco; no reutilizamos el token rechazado.
+                _limpiar_estado_consulta()
+                token_previo = ""
                 if intento < intentos and RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
                     espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
                     logger.info(f"Esperando {espera:.1f}s antes de reintentar Recibidos.")
@@ -816,6 +887,10 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             try:
                 if tabla_datos.is_visible():
                     dur = time.perf_counter() - inicio_intento
+                    logger.info(
+                        "Recibidos intento %d/%d exitoso (%.2fs).",
+                        intento, intentos, dur,
+                    )
                     print(
                         f"[INFO] Recibidos intento {intento}/{intentos} exitoso "
                         f"({dur:.2f}s)."
@@ -824,12 +899,32 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             except Exception:
                 pass
             if alerta_post:
+                # Alerta NO captcha (e.g. sin resultados): subimos para que
+                # la capa superior la procese.
                 return True
             token_previo = token_actual or token_previo
             if intento < intentos and RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
                 espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
                 logger.info(f"Sin tabla tras intento {intento}/{intentos}. Espera {espera:.1f}s.")
                 time.sleep(espera)
+        # Agotamos todos los intentos. Si el motivo fue captcha rechazado,
+        # damos un mensaje claro al usuario.
+        if ultima_alerta_captcha:
+            mensaje_final = (
+                f"El SRI/Google rechazó el captcha tras {intentos} intentos. "
+                f"Espera unos minutos y vuelve a intentar, o activa "
+                f"RECIBIDOS_MANUAL_CONSULTA=1 para resolverlo manualmente. "
+                f"Última alerta del portal: {ultima_alerta_captcha!r}"
+            )
+            logger.error(mensaje_final)
+            print(f"[ERROR] {mensaje_final}")
+            try:
+                _notificar_usuario_accion(
+                    "[CAPTCHA] El SRI/Google rechazó el captcha. "
+                    "Espera unos minutos o realiza la consulta manualmente."
+                )
+            except Exception:
+                pass
         return False
 
     resultado_listo = _intentar_consulta_recibidos(intentos=RECIBIDOS_CONSULTA_INTENTOS)
