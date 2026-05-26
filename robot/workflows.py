@@ -442,6 +442,107 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
     mensaje_vacio = page.locator(".ui-datatable-empty-message")
     alerta_parametros = page.locator(".ui-messages-info, .ui-messages-warn, .ui-messages-error")
 
+    # --------------------------------------------------------------------- #
+    # Tracker de responses POST a comprobantesRecibidos.jsf
+    # --------------------------------------------------------------------- #
+    # Por cada clic en "Consultar", el SRI dispara 2 requests AJAX al mismo
+    # endpoint (confirmado en DevTools del portal):
+    #   #1: source=frmPrincipal:btnBuscar, g-recaptcha-response VACÍO,
+    #       disparado por el `PrimeFaces.ab(...)` del onclick — devuelve la
+    #       alerta "No se pudo validar el captcha en google" (es normal,
+    #       lo ignoramos).
+    #   #2: source=frmPrincipal:j_idtNN, g-recaptcha-response con TOKEN,
+    #       disparado por `rcBuscar()` tras el callback de Google — trae
+    #       el render de `tablaCompRecibidos`. ESTE es el resultado real.
+    #
+    # Capturamos cada response para distinguir el #1 del #2 y decidir si
+    # esperamos más o si ya tenemos un resultado válido. Guardamos los
+    # handles y leemos el cuerpo solo cuando hace falta (es caro).
+    #
+    # Cacheamos el listener en la página para evitar duplicarlo cuando se
+    # llama varias veces dentro de la misma sesión (otro mes, otro tipo).
+    listener_attr = "_recibidos_response_listener"
+    eventos_attr = "_recibidos_response_eventos"
+    if not getattr(page, listener_attr, None):
+        eventos_pagina: list[dict] = []
+
+        def _on_response_recibidos(response, _eventos=eventos_pagina) -> None:
+            try:
+                if "comprobantesRecibidos.jsf" not in (response.url or ""):
+                    return
+                req = response.request
+                if req.method != "POST":
+                    return
+                _eventos.append({
+                    "response": response,
+                    "request": req,
+                    "ts": time.time(),
+                })
+            except Exception:
+                pass
+
+        page.on("response", _on_response_recibidos)
+        setattr(page, listener_attr, _on_response_recibidos)
+        setattr(page, eventos_attr, eventos_pagina)
+
+    recibidos_eventos: list[dict] = getattr(page, eventos_attr)
+
+    def _resumir_eventos_recibidos() -> list[dict]:
+        """Inspecciona cada response capturada para extraer (source, has_token,
+        tiene_render_tabla, tiene_alerta_captcha). Solo se llama bajo demanda
+        para no parsear cuerpos innecesariamente.
+        """
+        from urllib.parse import unquote
+        resumen: list[dict] = []
+        for ev in recibidos_eventos:
+            post = ""
+            try:
+                post = ev["request"].post_data or ""
+            except Exception:
+                post = ""
+            source = ""
+            has_token = False
+            for kv in post.split("&"):
+                if kv.startswith("javax.faces.source="):
+                    try:
+                        source = unquote(kv.split("=", 1)[1])
+                    except Exception:
+                        source = kv.split("=", 1)[1]
+                elif kv.startswith("g-recaptcha-response="):
+                    try:
+                        valor = kv.split("=", 1)[1]
+                    except Exception:
+                        valor = ""
+                    has_token = len(valor) > 50
+            tiene_render = False
+            tiene_alerta_captcha = False
+            status = 0
+            try:
+                status = int(ev["response"].status or 0)
+            except Exception:
+                pass
+            try:
+                # Solo leemos el cuerpo si la response ya terminó (status>0).
+                if status:
+                    text = ev["response"].text() or ""
+                    tiene_render = "tablaCompRecibidos" in text
+                    text_low = text.lower()
+                    tiene_alerta_captcha = (
+                        "validar el captcha" in text_low
+                        or "captcha en google" in text_low
+                        or "no se pudo validar" in text_low
+                    )
+            except Exception:
+                pass
+            resumen.append({
+                "source": source or "?",
+                "has_token": has_token,
+                "tiene_render_tabla": tiene_render,
+                "tiene_alerta_captcha": tiene_alerta_captcha,
+                "status": status,
+            })
+        return resumen
+
     def _resultado_sin_datos(texto: str = "") -> dict:
         texto = (texto or "No se encontraron comprobantes para los filtros seleccionados.").strip()
         return {
@@ -543,6 +644,18 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             token = _leer_token_recaptcha()
             return False, token
 
+    # ----- Constantes del flujo nativo del portal (descubiertas en DevTools) ----- #
+    # El botón "Consultar" tiene onclick:
+    #   deshabilitarBoton(this);
+    #   executeRecaptcha('consulta_cel_recibidos','SI');
+    #   PrimeFaces.ab({source:'frmPrincipal:btnBuscar'});
+    #   return false;
+    # Y el reset del reCAPTCHA del SRI se hace con resetarRecaptcha() (función
+    # global del portal), NO con grecaptcha.enterprise.reset() (esa última solo
+    # existe para reCAPTCHA v2 checkbox y no aplica al invisible/Enterprise).
+    RECAPTCHA_ACTION = "consulta_cel_recibidos"
+    RECAPTCHA_FLAG = "SI"
+
     def _limpiar_estado_consulta() -> None:
         try:
             close_btn = alerta_parametros.locator(
@@ -553,24 +666,27 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         except Exception:
             pass
         try:
+            # Usamos resetarRecaptcha() del SRI (función nativa del portal) en
+            # vez de grecaptcha.enterprise.reset() porque esta última no existe
+            # para reCAPTCHA invisible/Enterprise.
             page.evaluate(
-                "() => {"
-                "  const campos = document.querySelectorAll("
-                "    'textarea[name=\"g-recaptcha-response\"], input[name=\"g-recaptcha-response\"],"
-                " textarea[id*=\"g-recaptcha-response\"], input[id*=\"g-recaptcha-response\"]'"
-                "  );"
-                "  campos.forEach((el) => {"
-                "    el.value = '';"
-                "    try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}"
-                "    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}"
-                "  });"
-                "  try {"
-                "    if (window.grecaptcha && grecaptcha.enterprise && typeof grecaptcha.enterprise.reset === 'function') {"
-                "      grecaptcha.enterprise.reset();"
-                "    }"
-                "  } catch (e) {}"
-                "  try { window.__auditRecibidosSubmitting = false; } catch (e) {}"
-                "}"
+                """() => {
+                    try {
+                        const campos = document.querySelectorAll(
+                            'textarea[name="g-recaptcha-response"], input[name="g-recaptcha-response"], textarea[id*="g-recaptcha-response"], input[id*="g-recaptcha-response"]'
+                        );
+                        campos.forEach((el) => {
+                            el.value = '';
+                            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+                            try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+                        });
+                    } catch (e) {}
+                    try {
+                        if (typeof window.resetarRecaptcha === 'function') {
+                            window.resetarRecaptcha();
+                        }
+                    } catch (e) {}
+                }"""
             )
         except Exception:
             pass
@@ -583,151 +699,138 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         except Exception:
             pass
 
-    def _forzar_submit_unico_recibidos() -> None:
-        """
-        Evita doble envio al consultar Recibidos.
-        El portal dispara un submit inmediato y otro tras reCAPTCHA.
-        Interceptamos el click para ejecutar solo el flujo con token.
-        """
-        try:
-            ok = page.evaluate(
-                """() => {
-                    const btn = document.getElementById('frmPrincipal:btnBuscar');
-                    if (!btn) return false;
-                    if (btn.dataset.auditSingleSubmit === '1') return true;
-
-                    const actionName = 'consulta_recibidos';
-                    btn.dataset.auditSingleSubmit = '1';
-                    try {
-                        btn.setAttribute('onclick', 'return false;');
-                    } catch (e) {}
-
-                    const handler = function(ev) {
-                        try {
-                            if (ev) {
-                                ev.preventDefault();
-                                ev.stopPropagation();
-                                if (typeof ev.stopImmediatePropagation === 'function') {
-                                    ev.stopImmediatePropagation();
-                                }
-                            }
-                        } catch (e) {}
-
-                        try {
-                            if (window.__auditRecibidosSubmitting) {
-                                return false;
-                            }
-                            window.__auditRecibidosSubmitting = true;
-                            window.setTimeout(() => { window.__auditRecibidosSubmitting = false; }, 2500);
-                        } catch (e) {}
-
-                        try { if (typeof deshabilitarBoton === 'function') deshabilitarBoton(btn); } catch (e) {}
-
-                        try {
-                            if (typeof executeRecaptcha === 'function') {
-                                executeRecaptcha(actionName);
-                                return false;
-                            }
-                        } catch (e) {}
-
-                        try {
-                            if (typeof rcBuscar === 'function') {
-                                rcBuscar();
-                            }
-                        } catch (e) {}
-                        return false;
-                    };
-                    btn.addEventListener('click', handler, true);
-                    try {
-                        btn.onclick = handler;
-                    } catch (e) {}
-                    return true;
-                }"""
-            )
-            if ok:
-                logger.info("Recibidos configurado en modo submit unico (evita doble XHR por clic).")
-        except Exception as err:
-            logger.warning(f"No se pudo configurar submit unico en Recibidos: {err}")
-
     def _esperar_api_recaptcha_lista(timeout: int = 8000) -> bool:
+        """Espera a que `executeRecaptcha` del SRI (wrapper de Google) esté lista."""
         try:
             page.wait_for_function(
-                """() => {
-                    return !!(
-                        window.grecaptcha &&
-                        grecaptcha.enterprise &&
-                        typeof grecaptcha.enterprise.execute === 'function' &&
-                        typeof window.executeRecaptcha === 'function'
-                    );
-                }""",
+                """() => typeof window.executeRecaptcha === 'function'""",
                 timeout=timeout,
             )
             return True
         except Exception:
             return False
 
-    def _disparar_consulta_recibidos_automatica() -> str:
-        try:
-            modo = page.evaluate(
-                """() => {
-                    const actionName = 'consulta_recibidos';
-                    try {
-                        const campos = document.querySelectorAll(
-                            'textarea[name="g-recaptcha-response"], input[name="g-recaptcha-response"], textarea[id*="g-recaptcha-response"], input[id*="g-recaptcha-response"]'
-                        );
-                        campos.forEach((el) => {
-                            el.value = '';
-                            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
-                            try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
-                        });
-                    } catch (e) {}
-                    try { window.__auditRecibidosSubmitting = false; } catch (e) {}
-                    try {
-                        if (window.grecaptcha && grecaptcha.enterprise && typeof grecaptcha.enterprise.reset === 'function') {
-                            grecaptcha.enterprise.reset();
-                        }
-                    } catch (e) {}
-                    try {
-                        if (typeof window.executeRecaptcha === 'function') {
-                            window.executeRecaptcha(actionName);
-                            return 'executeRecaptcha';
-                        }
-                    } catch (e) {}
-                    try {
-                        if (typeof window.rcBuscar === 'function') {
-                            window.rcBuscar();
-                            return 'rcBuscar';
-                        }
-                    } catch (e) {}
-                    try {
-                        const btn = document.getElementById('frmPrincipal:btnBuscar');
-                        if (btn) {
-                            btn.click();
-                            return 'btn.click';
-                        }
-                    } catch (e) {}
-                    return '';
-                }"""
-            )
-            return str(modo or "").strip()
-        except Exception:
-            return ""
+    def _disparar_consulta_recibidos_automatica(action: str, flag: str) -> dict:
+        """Dispara la consulta haciendo click NATURAL sobre el botón.
 
-    def _esperar_resultado_consulta(timeout: int = 300000) -> bool:
+        Confirmado por inspección en DevTools del portal del SRI:
+
+          function executeRecaptcha(accion, validaRecaptcha) {
+              if (validaRecaptcha === "SI") {
+                  grecaptcha.enterprise.ready(function() {
+                      grecaptcha.enterprise.execute({ action: accion });
+                  });
+              } else { rcBuscar(); }
+          }
+
+        `executeRecaptcha` NO devuelve nada (no Promise). Es fire-and-forget:
+        encola el execute para cuando reCAPTCHA esté listo. El token llega
+        ASÍNCRONAMENTE; Google lo entrega al callback que internamente llama
+        `rcBuscar()`, y `rcBuscar()` dispara un segundo `PrimeFaces.ab` que
+        ESE SÍ va con el token correcto. Antes hacíamos un PrimeFaces.ab
+        adicional manual — eso solo agregaba ruido.
+
+        Por lo tanto: click natural. El onclick original genera 2 requests:
+          #1: source=frmPrincipal:btnBuscar     g-recaptcha-response=""
+              (alerta "No se pudo validar el captcha" — normal, lo ignoramos)
+          #2: source=frmPrincipal:j_idtNN       g-recaptcha-response=<token>
+              (render de tablaCompRecibidos — éxito)
+
+        Devuelve {modo, action, flag} para logging. `modo` es siempre
+        'click-nativo' (o '' si el click falló).
+        """
+        # `action` y `flag` se aceptan solo para logging consistente — no
+        # los reusamos para forzar nada, el onclick original ya los conoce.
+        del action, flag  # solo para los logs del caller
+        try:
+            boton_consultar.first.scroll_into_view_if_needed()
+        except Exception:
+            pass
+        try:
+            boton_consultar.first.click(delay=80)
+            return {"modo": "click-nativo", "click_ok": True}
+        except Exception as err:
+            logger.warning(f"Recibidos: no se pudo hacer click nativo en Consultar: {err}")
+            return {"modo": "", "click_ok": False}
+
+    def _esperar_resultado_consulta(timeout: int = 300000) -> tuple[str, str]:
+        """Espera el resultado válido de la consulta de Recibidos.
+
+        Respeta el flujo de 2 requests del SRI:
+          - Si llega request #2 con render de `tablaCompRecibidos` → ÉXITO.
+          - Si llega alerta NO captcha (e.g. "sin resultados") → resultado final.
+          - La alerta "No se pudo validar el captcha" (del request #1) se
+            IGNORA mientras todavía podamos recibir el #2.
+
+        Devuelve un tuple (estado, mensaje):
+          ('tabla',    '')            → tabla rendereada
+          ('alerta',   '<texto>')     → alerta NO captcha (sin resultados, etc.)
+          ('captcha',  '<texto>')     → captcha rechazado de verdad
+                                        (no llegó render del #2 o el #2 trajo
+                                        la alerta de captcha)
+          ('timeout',  '<texto>')     → ni tabla ni alerta no-captcha
+        """
         limite = time.time() + (timeout / 1000)
         while time.time() < limite:
+            # (a) Tabla visible en el DOM → éxito directo
             try:
                 if tabla_datos.is_visible():
-                    return True
+                    return ("tabla", "")
             except Exception:
                 pass
+
+            eventos = _resumir_eventos_recibidos()
+
+            # (b) Algún response trajo render de tablaCompRecibidos → éxito
+            #     (incluso si la tabla todavía no se pintó, llega en ms)
+            if any(e.get("tiene_render_tabla") for e in eventos):
+                try:
+                    page.wait_for_timeout(250)
+                except Exception:
+                    pass
+                try:
+                    if tabla_datos.is_visible():
+                        return ("tabla", "")
+                except Exception:
+                    pass
+                # El #2 trajo render pero el DOM todavía no actualizó →
+                # seguimos esperando un poco más.
+
+            # (c) Si llegó el response #2 (has_token=True) y trajo alerta de
+            #     captcha (no render), es captcha rechazado de verdad.
+            eventos_con_token = [e for e in eventos if e.get("has_token")]
+            if eventos_con_token:
+                ultimo_token = eventos_con_token[-1]
+                if (
+                    ultimo_token.get("tiene_alerta_captcha")
+                    and not ultimo_token.get("tiene_render_tabla")
+                ):
+                    return ("captcha", _texto_alerta() or "Captcha rechazado por SRI/Google.")
+
+            # (d) Alerta NO captcha visible → resultado final no-error
             texto = _texto_alerta()
-            if texto:
-                return True
+            if texto and not _es_alerta_captcha(texto):
+                return ("alerta", texto)
+
             time.sleep(0.2)
-        return False
+
+        # Timeout: lo que haya en pantalla
+        texto_final = _texto_alerta()
+        eventos_finales = _resumir_eventos_recibidos()
+        if any(e.get("tiene_render_tabla") for e in eventos_finales):
+            try:
+                if tabla_datos.is_visible():
+                    return ("tabla", "")
+            except Exception:
+                pass
+        if texto_final and _es_alerta_captcha(texto_final):
+            return ("captcha", texto_final)
+        if texto_final:
+            return ("alerta", texto_final)
+        return ("timeout", "")
 
     def _rehidratar_consulta_recibidos() -> bool:
+        """Recarga la pantalla de Recibidos para regenerar el entorno reCAPTCHA."""
         try:
             page.goto(RECIBIDOS_DIRECT_URL, wait_until="domcontentloaded", timeout=5000)
             page.wait_for_selector(selector_ano_css, state="visible", timeout=10000)
@@ -738,10 +841,10 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         if not ok:
             logger.warning("No se pudieron reaplicar filtros de Recibidos al reintentar captcha.")
             return False
-        _forzar_submit_unico_recibidos()
+        # NOTA: no tocamos el onclick original del botón. El flujo nativo del
+        # SRI corre cuando hagamos click natural, o nosotros replicamos
+        # paso a paso en _disparar_consulta_recibidos_automatica.
         return ok
-
-    _forzar_submit_unico_recibidos()
 
     def _intentar_consulta_recibidos(intentos: int = RECIBIDOS_CONSULTA_INTENTOS) -> bool:
         if PAUSE_BEFORE_CONSULTAR_SECONDS > 0:
@@ -754,23 +857,43 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 input("[INFO] Abre DevTools (F12) y presiona Enter para continuar...")
             except Exception:
                 pass
+        def _resumen_eventos_log(eventos: list[dict]) -> str:
+            """String corto con un resumen de los 2 requests para logs."""
+            partes = []
+            for i, ev in enumerate(eventos, 1):
+                partes.append(
+                    f"#{i}(source={ev.get('source','?')} "
+                    f"has_token={ev.get('has_token', False)} "
+                    f"render_tabla={ev.get('tiene_render_tabla', False)} "
+                    f"alerta_captcha={ev.get('tiene_alerta_captcha', False)} "
+                    f"status={ev.get('status', 0)})"
+                )
+            return " | ".join(partes) if partes else "sin-requests"
+
         if MANUAL_CONSULTA_RECIBIDOS:
             for intento in range(1, intentos + 1):
+                recibidos_eventos.clear()
                 _notificar_usuario_accion(
                     f"[ACCION] Da clic manual en 'Consultar' (Recibidos). "
                     f"Intento {intento}/{intentos}."
                 )
-                ok_manual = _esperar_resultado_consulta(timeout=300000)
-                alerta_manual = _texto_alerta()
-                if ok_manual:
+                estado, mensaje = _esperar_resultado_consulta(timeout=300000)
+                eventos_log = _resumen_eventos_log(_resumir_eventos_recibidos())
+                logger.info(
+                    "Recibidos MANUAL intento %d/%d | estado=%s | requests=%s | mensaje=%r",
+                    intento, intentos, estado, eventos_log, mensaje,
+                )
+                if estado == "tabla":
                     return True
-                if alerta_manual and _es_alerta_captcha(alerta_manual):
+                if estado == "alerta":
+                    return True
+                if estado == "captcha":
                     print(
                         f"[WARN] Captcha incorrecto tras clic manual "
-                        f"({intento}/{intentos})."
+                        f"({intento}/{intentos}): {mensaje!r}"
                     )
                     if intento >= intentos:
-                        return ok_manual
+                        return False
                     _limpiar_estado_consulta()
                     if RECIBIDOS_REHIDRATAR_ON_CAPTCHA and intento + 1 >= RECIBIDOS_REHIDRATAR_DESDE_INTENTO:
                         _rehidratar_consulta_recibidos()
@@ -779,9 +902,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                         logger.info(f"Esperando {espera:.1f}s antes de reintento manual.")
                         time.sleep(espera)
                     continue
-                if alerta_manual:
-                    # Hay mensaje del portal (ej. sin resultados), salir para que lo procese la capa superior.
-                    return True
+                # timeout sin resultado
                 print(
                     f"[WARN] Recibidos sin tabla ni alerta tras clic manual "
                     f"({intento}/{intentos})."
@@ -796,19 +917,22 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                     logger.info(f"Esperando {espera:.1f}s antes de reintento manual.")
                     time.sleep(espera)
             return False
-        token_previo = _leer_token_recaptcha()
+
+        # ===================== Modo automático ===================== #
         ultima_alerta_captcha = ""
         for intento in range(1, intentos + 1):
             inicio_intento = time.perf_counter()
-            # Limpiamos estado SIEMPRE (no solo en reintentos): así el token
-            # anterior nunca se reutiliza y Google emite uno fresco.
+            # Limpiamos eventos del tracker para este intento.
+            recibidos_eventos.clear()
+            # Limpieza de estado SIEMPRE (no solo en reintentos): así el
+            # token anterior nunca se reutiliza, y resetarRecaptcha() del SRI
+            # le pide a Google un score nuevo en el próximo execute.
             _limpiar_estado_consulta()
             rehidratado = False
             if RECIBIDOS_REHIDRATAR_ON_CAPTCHA and intento >= RECIBIDOS_REHIDRATAR_DESDE_INTENTO:
                 rehidratado = _rehidratar_consulta_recibidos()
                 if rehidratado:
-                    # Tras recargar, el token previo deja de ser válido.
-                    token_previo = ""
+                    recibidos_eventos.clear()  # los responses post-recarga ya no aplican
             api_lista = _esperar_api_recaptcha_lista(timeout=7000)
             apis_diag = _diagnostico_recaptcha_apis()
             if RECIBIDOS_AUTO_PRE_EXECUTE_MS > 0:
@@ -816,96 +940,82 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                     page.wait_for_timeout(RECIBIDOS_AUTO_PRE_EXECUTE_MS)
                 except Exception:
                     pass
-            modo_disparo = _disparar_consulta_recibidos_automatica()
+            # Click natural sobre el botón. El onclick original del SRI hace
+            # executeRecaptcha → Google → rcBuscar → PrimeFaces.ab con token.
+            # Genera 2 requests; nosotros sólo escuchamos.
+            disparo = _disparar_consulta_recibidos_automatica(
+                RECAPTCHA_ACTION, RECAPTCHA_FLAG
+            )
+            modo_disparo = disparo.get("modo", "")
+            click_ok = bool(disparo.get("click_ok"))
             if RECIBIDOS_AUTO_POST_EXECUTE_MS > 0:
                 try:
                     page.wait_for_timeout(RECIBIDOS_AUTO_POST_EXECUTE_MS)
                 except Exception:
                     pass
-            token_ok, token_actual = _esperar_token_recaptcha(
-                timeout=RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
-                token_previo=token_previo,
+
+            estado, mensaje = _esperar_resultado_consulta(
+                timeout=RECIBIDOS_AUTO_RESULT_TIMEOUT_MS
             )
-            token_cambio = bool(token_actual) and token_actual != (token_previo or "")
-            # Diagnóstico por intento. NO logueamos el token completo por seguridad,
-            # solo longitud + si cambió respecto al previo.
+
+            eventos = _resumir_eventos_recibidos()
+            eventos_log = _resumen_eventos_log(eventos)
+            n_requests = len(eventos)
+            algun_token = any(e.get("has_token") for e in eventos)
+            algun_render = any(e.get("tiene_render_tabla") for e in eventos)
+
+            dur = time.perf_counter() - inicio_intento
             logger.info(
-                "Recibidos intento %d/%d | modo=%s | api_lista=%s | "
-                "executeRecaptcha=%s | enterprise.execute=%s | rcBuscar=%s | "
-                "rehidratado=%s | token_ok=%s | token_len=%d | token_cambio=%s",
-                intento,
-                intentos,
-                modo_disparo or "desconocido",
+                "Recibidos intento %d/%d | action=%s flag=%s | modo=%s click_ok=%s | "
+                "api_lista=%s executeRecaptcha=%s enterprise.execute=%s rcBuscar=%s | "
+                "rehidratado=%s | n_requests=%d algun_token=%s render_tabla=%s | "
+                "estado=%s mensaje=%r | requests=%s | dur=%.2fs",
+                intento, intentos,
+                RECAPTCHA_ACTION, RECAPTCHA_FLAG,
+                modo_disparo or "desconocido", click_ok,
                 api_lista,
                 apis_diag.get("hasExecuteRecaptcha", False),
                 apis_diag.get("hasEnterpriseExecute", False),
                 apis_diag.get("hasRcBuscar", False),
                 rehidratado,
-                token_ok,
-                len(token_actual or ""),
-                token_cambio,
+                n_requests, algun_token, algun_render,
+                estado, mensaje,
+                eventos_log,
+                dur,
             )
             print(
                 f"[INFO] Recibidos intento {intento}/{intentos}: "
-                f"modo={modo_disparo or 'desconocido'}, token_ok={token_ok}, "
-                f"token_len={len(token_actual or '')}, token_cambio={token_cambio}, "
-                f"rehidratado={rehidratado}"
+                f"action={RECAPTCHA_ACTION!r}, modo={modo_disparo or 'desconocido'}, "
+                f"n_requests={n_requests}, algun_token={algun_token}, "
+                f"render_tabla={algun_render}, estado={estado}, "
+                f"rehidratado={rehidratado}, dur={dur:.2f}s"
             )
-            if not modo_disparo:
-                try:
-                    boton_consultar.first.scroll_into_view_if_needed()
-                    boton_consultar.first.click(delay=80)
-                    modo_disparo = "fallback-click"
-                except Exception:
-                    pass
-            try:
-                page.wait_for_load_state("networkidle", timeout=1000)
-            except Exception:
-                pass
-            _esperar_resultado_consulta(timeout=RECIBIDOS_AUTO_RESULT_TIMEOUT_MS)
-            alerta_post = _texto_alerta()
-            if alerta_post and _es_alerta_captcha(alerta_post):
-                dur = time.perf_counter() - inicio_intento
+
+            if estado == "tabla":
+                return True
+            if estado == "alerta":
+                # Alerta no-captcha (e.g. sin resultados): la capa superior la procesa.
+                return True
+            if estado == "captcha":
+                ultima_alerta_captcha = mensaje or "Captcha rechazado por SRI/Google."
                 logger.warning(
-                    "Captcha rechazado por SRI/Google (intento %d/%d, %.2fs). Alerta: %s",
-                    intento, intentos, dur, alerta_post,
+                    "Captcha rechazado de verdad en intento %d/%d "
+                    "(n_requests=%d, algun_token=%s, render_tabla=%s).",
+                    intento, intentos, n_requests, algun_token, algun_render,
                 )
-                print(
-                    f"[WARN] Captcha rechazado por SRI/Google en intento {intento}/{intentos} "
-                    f"({dur:.2f}s). Alerta: {alerta_post!r}"
-                )
-                ultima_alerta_captcha = alerta_post
-                # Limpiamos token y reseteamos para que el siguiente intento
-                # use uno fresco; no reutilizamos el token rechazado.
                 _limpiar_estado_consulta()
-                token_previo = ""
                 if intento < intentos and RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
                     espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
                     logger.info(f"Esperando {espera:.1f}s antes de reintentar Recibidos.")
                     time.sleep(espera)
                 continue
-            try:
-                if tabla_datos.is_visible():
-                    dur = time.perf_counter() - inicio_intento
-                    logger.info(
-                        "Recibidos intento %d/%d exitoso (%.2fs).",
-                        intento, intentos, dur,
-                    )
-                    print(
-                        f"[INFO] Recibidos intento {intento}/{intentos} exitoso "
-                        f"({dur:.2f}s)."
-                    )
-                    return True
-            except Exception:
-                pass
-            if alerta_post:
-                # Alerta NO captcha (e.g. sin resultados): subimos para que
-                # la capa superior la procese.
-                return True
-            token_previo = token_actual or token_previo
+            # estado == "timeout"
             if intento < intentos and RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC > 0:
                 espera = RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC * intento
-                logger.info(f"Sin tabla tras intento {intento}/{intentos}. Espera {espera:.1f}s.")
+                logger.info(
+                    f"Sin tabla ni alerta tras intento {intento}/{intentos}. "
+                    f"Espera {espera:.1f}s."
+                )
                 time.sleep(espera)
         # Agotamos todos los intentos. Si el motivo fue captcha rechazado,
         # damos un mensaje claro al usuario.
