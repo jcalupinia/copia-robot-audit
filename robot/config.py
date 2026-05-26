@@ -149,6 +149,22 @@ RECIBIDOS_REHIDRATAR_ON_CAPTCHA = (
 MANUAL_CONSULTA_RECIBIDOS_ENV = os.getenv("RECIBIDOS_MANUAL_CONSULTA", "0").strip().lower()
 MANUAL_CONSULTA_RECIBIDOS = MANUAL_CONSULTA_RECIBIDOS_ENV in {"1", "true", "yes", "on"}
 
+# Humanizar la interacción antes de "Consultar" en Recibidos. El reCAPTCHA
+# Enterprise asigna score por trayectoria de mouse, pausas y tiempo en página;
+# sin estos eventos el score baja a ~0.0 y el SRI rechaza con "Captcha
+# incorrecta". Generamos mouse moves con `steps` intermedios, pausas
+# aleatorias y hover sobre el botón antes del click.
+RECIBIDOS_HUMANIZAR_PRE_CLICK = (
+    os.getenv("RECIBIDOS_HUMANIZAR_PRE_CLICK", "1").strip().lower()
+    in {"1", "true", "yes", "on", "si"}
+)
+try:
+    RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS = max(
+        0, int(os.getenv("RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS", "1800"))
+    )
+except ValueError:
+    RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS = 1800
+
 
 # --------------------------------------------------------------------------- #
 # Robot SRI — Emitidos

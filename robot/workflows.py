@@ -12,6 +12,7 @@ Extraido de `robot/downloader.py` en la Fase 4 del refactor.
 from __future__ import annotations
 
 import os
+import random
 import re
 import time
 import unicodedata
@@ -68,6 +69,8 @@ from robot.config import (
     RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC,
     RECIBIDOS_CONSULTA_INTENTOS,
     RECIBIDOS_DIRECT_URL,
+    RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS,
+    RECIBIDOS_HUMANIZAR_PRE_CLICK,
     RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
     RECIBIDOS_REHIDRATAR_DESDE_INTENTO,
     RECIBIDOS_REHIDRATAR_ON_CAPTCHA,
@@ -710,6 +713,83 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         except Exception:
             return False
 
+    def _humanizar_pre_consultar() -> dict:
+        """Genera trayectoria de mouse e interacciones suaves para subir el
+        score de reCAPTCHA Enterprise antes de hacer click en "Consultar".
+
+        Confirmación empírica del usuario: si hace 6 clics rápidos en una zona
+        blanca de la pantalla antes de presionar Consultar, el SRI acepta el
+        captcha y devuelve la tabla. Sin esa interacción, Google rechaza el
+        score (Playwright teleporta el cursor y deja score ≈ 0.0).
+
+        Estrategia:
+          1) Pausa inicial corta (~1.5-2s) para "tiempo en página".
+          2) Mouse moves en 3 puntos con `steps` intermedios (cada move genera
+             múltiples eventos `mousemove`, lo que cuenta como trayectoria
+             humana en el modelo de reCAPTCHA).
+          3) Pequeñas pausas aleatorias entre 150-400 ms (ritmo humano).
+          4) Hover final SOBRE el botón antes del click (genera mouseover +
+             mouseout + mouseover, también suma score).
+
+        NO hacemos clicks en controles intermedios para evitar disparar
+        handlers del portal por accidente. Sólo movemos el cursor.
+
+        Devuelve {aplicado, puntos, duracion_ms} para logging.
+        """
+        out = {"aplicado": False, "puntos": 0, "duracion_ms": 0}
+        if not RECIBIDOS_HUMANIZAR_PRE_CLICK:
+            return out
+        inicio = time.perf_counter()
+        try:
+            # (1) Pausa inicial: "tiempo en la página" antes de submitear.
+            if RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS > 0:
+                try:
+                    page.wait_for_timeout(RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS)
+                except Exception:
+                    pass
+
+            # (2) Trayectoria de mouse en zonas seguras (lejos de controles).
+            vp = page.viewport_size or {"width": 1280, "height": 720}
+            ancho = max(800, int(vp.get("width") or 1280))
+            alto = max(600, int(vp.get("height") or 720))
+            # Tres puntos relativos al viewport, en zonas donde el SRI suele
+            # tener padding/headers vacíos: arriba-izquierda, centro-arriba
+            # y arriba-derecha.
+            puntos = [
+                (max(80, ancho // 6), max(70, alto // 7)),
+                (ancho // 2, max(90, alto // 5)),
+                (min(ancho - 80, ancho - ancho // 5), max(80, alto // 6)),
+            ]
+            for x, y in puntos:
+                try:
+                    page.mouse.move(int(x), int(y), steps=random.randint(8, 14))
+                except Exception:
+                    pass
+                try:
+                    page.wait_for_timeout(random.randint(180, 380))
+                except Exception:
+                    pass
+            out["puntos"] = len(puntos)
+
+            # (3) Hover final sobre el botón "Consultar". Esto genera el
+            # mouseover + mouseenter que el modelo de reCAPTCHA espera antes
+            # de un click humano.
+            try:
+                box = boton_consultar.first.bounding_box()
+                if box:
+                    cx = int(box["x"] + box["width"] / 2)
+                    cy = int(box["y"] + box["height"] / 2)
+                    page.mouse.move(cx, cy, steps=random.randint(8, 12))
+                    page.wait_for_timeout(random.randint(180, 320))
+            except Exception:
+                pass
+
+            out["aplicado"] = True
+        except Exception as err:
+            logger.warning(f"Recibidos: humanizar pre-click falló: {err}")
+        out["duracion_ms"] = int((time.perf_counter() - inicio) * 1000)
+        return out
+
     def _disparar_consulta_recibidos_automatica(action: str, flag: str) -> dict:
         """Dispara la consulta haciendo click NATURAL sobre el botón.
 
@@ -736,22 +816,29 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
           #2: source=frmPrincipal:j_idtNN       g-recaptcha-response=<token>
               (render de tablaCompRecibidos — éxito)
 
-        Devuelve {modo, action, flag} para logging. `modo` es siempre
+        Antes del click hacemos pre-interacción humana (mouse moves) para
+        que reCAPTCHA Enterprise suba el score. Sin esto, Google rechaza
+        con "Captcha incorrecta" (score ≈ 0.0 por bot detection).
+
+        Devuelve {modo, click_ok, humanizar} para logging. `modo` es siempre
         'click-nativo' (o '' si el click falló).
         """
         # `action` y `flag` se aceptan solo para logging consistente — no
         # los reusamos para forzar nada, el onclick original ya los conoce.
         del action, flag  # solo para los logs del caller
+        humanizar_info = _humanizar_pre_consultar()
         try:
             boton_consultar.first.scroll_into_view_if_needed()
         except Exception:
             pass
         try:
-            boton_consultar.first.click(delay=80)
-            return {"modo": "click-nativo", "click_ok": True}
+            # `delay=` añade tiempo entre mousedown/mouseup. Lo subimos a
+            # ~120ms (vs 80 previo) para parecer más humano.
+            boton_consultar.first.click(delay=random.randint(100, 160))
+            return {"modo": "click-nativo", "click_ok": True, "humanizar": humanizar_info}
         except Exception as err:
             logger.warning(f"Recibidos: no se pudo hacer click nativo en Consultar: {err}")
-            return {"modo": "", "click_ok": False}
+            return {"modo": "", "click_ok": False, "humanizar": humanizar_info}
 
     def _esperar_resultado_consulta(timeout: int = 300000) -> tuple[str, str]:
         """Espera el resultado válido de la consulta de Recibidos.
@@ -948,6 +1035,10 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             )
             modo_disparo = disparo.get("modo", "")
             click_ok = bool(disparo.get("click_ok"))
+            humanizar_info = disparo.get("humanizar") or {}
+            humanizar_aplicado = bool(humanizar_info.get("aplicado"))
+            humanizar_dur = int(humanizar_info.get("duracion_ms") or 0)
+            humanizar_puntos = int(humanizar_info.get("puntos") or 0)
             if RECIBIDOS_AUTO_POST_EXECUTE_MS > 0:
                 try:
                     page.wait_for_timeout(RECIBIDOS_AUTO_POST_EXECUTE_MS)
@@ -967,12 +1058,14 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             dur = time.perf_counter() - inicio_intento
             logger.info(
                 "Recibidos intento %d/%d | action=%s flag=%s | modo=%s click_ok=%s | "
+                "humanizar=%s (puntos=%d, dur=%dms) | "
                 "api_lista=%s executeRecaptcha=%s enterprise.execute=%s rcBuscar=%s | "
                 "rehidratado=%s | n_requests=%d algun_token=%s render_tabla=%s | "
                 "estado=%s mensaje=%r | requests=%s | dur=%.2fs",
                 intento, intentos,
                 RECAPTCHA_ACTION, RECAPTCHA_FLAG,
                 modo_disparo or "desconocido", click_ok,
+                humanizar_aplicado, humanizar_puntos, humanizar_dur,
                 api_lista,
                 apis_diag.get("hasExecuteRecaptcha", False),
                 apis_diag.get("hasEnterpriseExecute", False),
@@ -986,6 +1079,7 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             print(
                 f"[INFO] Recibidos intento {intento}/{intentos}: "
                 f"action={RECAPTCHA_ACTION!r}, modo={modo_disparo or 'desconocido'}, "
+                f"humanizar={humanizar_aplicado} ({humanizar_puntos}p/{humanizar_dur}ms), "
                 f"n_requests={n_requests}, algun_token={algun_token}, "
                 f"render_tabla={algun_render}, estado={estado}, "
                 f"rehidratado={rehidratado}, dur={dur:.2f}s"
