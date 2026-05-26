@@ -2450,7 +2450,16 @@ def _map_factura_legada_a_emitidos_row(legacy: dict | None) -> dict:
     row["Plazo Pago"] = "No Disponible"
     row["Unidad Tiempo Pago"] = "No Disponible"
     row["Descripciones"] = _texto_emitidos_retencion(legacy.get("descripcionesProductos"))
-    row["Forma Pago"] = "No Disponible - No Disponible"
+    # Forma Pago: combinamos código/descripción + monto del legacy
+    # (e.g., "20 - OTROS CON UTILIZACION DEL SISTEMA - 2070.00").
+    forma_legacy = _texto_emitidos_retencion(legacy.get("formaPago"))
+    monto_legacy = _texto_emitidos_retencion(legacy.get("formaPagoMonto"))
+    if forma_legacy and monto_legacy:
+        row["Forma Pago"] = f"{forma_legacy} - {monto_legacy}"
+    elif forma_legacy:
+        row["Forma Pago"] = f"{forma_legacy} - No Disponible"
+    else:
+        row["Forma Pago"] = "No Disponible - No Disponible"
     total_sin_imp = _numero_emitidos_retencion(legacy.get("subtotalSinImpuestos"))
     row["Total Sin Impuestos"] = total_sin_imp
     row["Base Gravada"] = 0
@@ -2466,102 +2475,47 @@ def _map_factura_legada_a_emitidos_row(legacy: dict | None) -> dict:
     row["Propina"] = _numero_emitidos_retencion(legacy.get("propina"))
     row["Importe Total"] = _numero_emitidos_retencion(legacy.get("valorTotal"))
     row["Total Pago"] = 0
-    row["Campos Adicionales"] = _texto_emitidos_retencion_na(legacy.get("informacionAdicional"))
+    # Campos Adicionales: el formato EMITIDOS usa "; " como separador entre
+    # cada item (eMail:, Vendedor:, Telefono:, etc.), no "\n" como el legacy.
+    info_adic = legacy.get("informacionAdicional")
+    if info_adic:
+        # Convertimos newlines del legacy a "; ", colapsamos espacios sobrantes.
+        info_adic = re.sub(r"\s*\n\s*", "; ", str(info_adic).strip())
+        info_adic = re.sub(r"[ \t]+", " ", info_adic)
+        row["Campos Adicionales"] = info_adic
+    else:
+        row["Campos Adicionales"] = "No Disponible"
     row["Base No Gravada 0%"] = total_sin_imp
     return row
 
 
 def _extraer_datos_pdf_factura_emitido(pdf_path: Path) -> dict:
-    lineas = _extraer_lineas_layout_pdf(pdf_path)
-    legacy = _map_factura_legada_a_emitidos_row(_extraer_datos_pdf_por_tipo_layout_first(pdf_path))
-    if not lineas:
-        return legacy
+    """Devuelve la fila de Emitidos para una factura PDF.
 
-    row = _factura_emitidos_default_row()
+    Reescrito en 2026-05: ahora confía en `_extraer_datos_pdf_factura` (legacy)
+    + `_map_factura_legada_a_emitidos_row` (mapping) y sólo añade los 3 campos
+    EMITIDOS-específicos que el mapping no cubre: Estado, Número de
+    Autorización y Fecha de Autorización en formato ISO.
+
+    Antes hacía una capa overlay con extracciones propias por layout/regex que
+    cruzaba columnas (Dirección Matriz tomaba el valor de Sucursal,
+    Descripciones desordenaba campos, Campos Adicionales quedaba como
+    "No Disponible"). Con el nuevo `_extraer_datos_pdf_factura` el legacy ya
+    sale correcto y el mapping cubre todas las columnas EMITIDOS que tienen
+    contraparte en el legacy.
+    """
+    legacy = _extraer_datos_pdf_por_tipo_layout_first(pdf_path)
+    row = _map_factura_legada_a_emitidos_row(legacy)
+
     row["Estado"] = "AUTORIZADO"
-    row["Código del Documento"] = "01 - FACTURA"
-    row["Contribuyente RIMPE"] = "No Disponible"
-    row["Moneda"] = "DOLAR"
-    row["Plazo Pago"] = "No Disponible"
-    row["Unidad Tiempo Pago"] = "No Disponible"
-    row["Forma Pago"] = "No Disponible - No Disponible"
+    auth = _texto_emitidos_retencion(legacy.get("claveAcceso"))
+    if auth:
+        row["Número de Autorización"] = auth
+    fecha_auth = _texto_emitidos_retencion(legacy.get("fechaAutorizacion"))
+    if fecha_auth:
+        row["Fecha de Autorización"] = _fecha_hora_pdf_a_iso(fecha_auth) or fecha_auth
 
-    texto = _leer_texto_pdf(pdf_path)
-    texto_norm = _normalizar_texto_pdf(texto)
-    auth = _extraer_regex(texto_norm, [r"(\d{49})"])
-    numero = _extraer_regex(texto_norm, [r"No\.\s*(\d{3}-\d{3}-\d{9})"])
-    ruc = _extraer_regex(texto_norm, [r"R\.U\.C\.\s*:?\s*(\d{13})"])
-    fecha_hora_auth = _extraer_regex(texto_norm, [r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})"])
-    row["Número de Autorización"] = auth or "No Disponible"
-    row["Clave de Acceso"] = auth or "No Disponible"
-    row["Fecha de Autorización"] = _fecha_hora_pdf_a_iso(fecha_hora_auth)
-    row["RUC Emisor"] = ruc or "No Disponible"
-    if numero:
-        row["Establecimiento"], row["Punto de Emisión"], row["Secuencial"] = numero.split("-")
-    if auth and len(auth) == 49:
-        row["Ambiente"] = _label_ambiente_emitidos_retencion(auth[23])
-        row["Tipo Emisión"] = _label_emision_emitidos_retencion(auth[47])
-
-    idx_num_aut = _buscar_indice_linea_layout(lineas, "NUMERO DE AUTORIZACION")
-    if idx_num_aut is not None:
-        row["Razón Social Emisor"] = _texto_emitidos_retencion_na(
-            _siguiente_linea_layout_no_vacia(lineas, idx_num_aut + 1, max_x=260)
-        )
-    row["Nombre Comercial"] = row["Razón Social Emisor"]
-
-    idx_matriz = _buscar_indice_linea_layout(lineas, "MATRIZ")
-    direccion = _extraer_bloque_direccion_layout(lineas, idx_matriz)
-    if direccion:
-        row["Dirección Matriz"] = _texto_emitidos_retencion_na(direccion)
-        row["Dir. Establecimiento"] = _texto_emitidos_retencion_na(direccion)
-    obligado = _extraer_regex(texto_norm, [r"OBLIGADO\s+A\s+LLEVAR\s+CONTABILIDAD\s*(SI|NO)"])
-    row["Obligado Contabilidad"] = obligado or "No Disponible"
-
-    idx_razon = _buscar_indice_linea_layout(lineas, "RAZON SOCIAL / NOMBRES Y APELLIDOS")
-    if idx_razon is not None:
-        row["Razón Social Comprador"] = _texto_emitidos_retencion_na(_texto_linea_layout(lineas[idx_razon], min_x=180))
-    identificacion = _extraer_regex(texto_norm, [r"IDENTIFICACION\s*:?\s*(\d{10,13})"])
-    row["Identificación Comprador"] = _texto_emitidos_retencion_na(identificacion)
-    row["Tipo Identificación Comprador"] = _label_tipo_ident_emitidos_nota_credito(
-        _codigo_tipo_identificacion_desde_numero(identificacion)
-    )
-    row["Fecha de Emisión"] = _texto_emitidos_retencion_na(_extraer_regex(texto_norm, [r"FECHA\s+(\d{2}/\d{2}/\d{4})"]))
-    idx_direccion_comprador = _buscar_indice_linea_layout(lineas, "DIRECCION:", start=(idx_razon or 0))
-    if idx_direccion_comprador is not None:
-        row["Dirección Comprador"] = _texto_emitidos_retencion_na(
-            _texto_linea_layout(lineas[idx_direccion_comprador], min_x=80)
-        )
-
-    idx_info = _buscar_indice_linea_layout(lineas, "INFORMACION ADICIONAL")
-    top_info = float(lineas[idx_info].get("top", 0.0)) if idx_info is not None else 9999.0
-    idx_detalle = _buscar_indice_linea_layout(lineas, "CANTIDAD DESCRIPCION")
-    top_inicio = float(lineas[idx_detalle].get("top", 0.0)) if idx_detalle is not None else 450.0
-    items = _extraer_items_emitidos_layout(lineas, top_inicio=top_inicio, top_fin=top_info)
-    if items:
-        row["Descripciones"] = _formatear_descripciones_emitidos(items)
-    row["Campos Adicionales"] = _texto_emitidos_retencion_na(_extraer_campos_adicionales_emitidos_desde_texto(texto))
-
-    row["Total Sin Impuestos"] = _numero_emitidos_retencion(
-        _extraer_regex(texto_norm, [r"SUBTOTAL\s+SIN\s+IMPUESTOS\s*([0-9.,]+)"])
-    )
-    row["Base Gravada"] = 0
-    row["Base No Gravada"] = row["Total Sin Impuestos"]
-    row["Base No Gravada 0%"] = row["Total Sin Impuestos"]
-    row["Tarifas IVA"] = "0%"
-    row["Monto IVA"] = (
-        _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+15%\s*([0-9.,]+)"]))
-        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+12%\s*([0-9.,]+)"]))
-        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+8%\s*([0-9.,]+)"]))
-        or _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"IVA\s+5%\s*([0-9.,]+)"]))
-    )
-    row["Total Descuento"] = _numero_emitidos_retencion(
-        _extraer_regex(texto_norm, [r"TOTAL\s+DESCUENTO\s*([0-9.,]+)"])
-    )
-    row["Propina"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"PROPINA\s*([0-9.,]+)"]))
-    row["Importe Total"] = _numero_emitidos_retencion(_extraer_regex(texto_norm, [r"VALOR\s+TOTAL\s*([0-9.,]+)"]))
-    row["Total Pago"] = 0
-
-    return _combinar_rows_emitidos_especificos(row, legacy)
+    return row
 
 
 def _extraer_datos_xml_liquidacion_compra_emitido(xml_path: Path) -> dict:
@@ -3151,6 +3105,398 @@ def _combinar_datos_reporte_emitidos(*fuentes: dict | None) -> dict:
     return datos
 
 
+def _extraer_datos_pdf_factura(pdf_path: Path) -> dict:
+    """Extrae los campos de una factura desde PDF (PDF_REPORT_COLUMNS).
+
+    Implementación layout-aware (escrita en 2026-05): usa `page.extract_words`
+    para separar columna izquierda (datos del emisor / información adicional)
+    de la derecha (labels suffixed: AUTORIZACIÓN, AMBIENTE, EMISIÓN, CLAVE DE
+    ACCESO; y la columna de subtotales/IVA/totales). Usa `page.extract_tables`
+    para la tabla de productos y la de Forma de pago.
+
+    Reemplaza al parser legacy basado en `extract_text` linea-por-linea, que
+    cruzaba datos con labels en facturas-solo-PDF (`razonSocialEmisor` salia
+    como "FACTURA", `direccionMatrizEmisor` cortado, `descripcionesProductos`
+    incluía el subheader "Principal Auxiliar Subsidio" y desordenaba columnas,
+    `informacionAdicional` no se detectaba, etc.).
+    """
+    datos = {col: "" for col in PDF_REPORT_COLUMNS}
+    datos["tipoDocumento"] = "Factura"
+
+    if pdfplumber is None:
+        return datos
+
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            if not pdf.pages:
+                return datos
+            page = pdf.pages[0]
+            words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
+            tables = page.extract_tables() or []
+    except Exception as exc:
+        logger.warning("PDF factura: error abriendo %s: %s", pdf_path, exc)
+        return datos
+
+    if not words:
+        return datos
+
+    # Threshold entre columna izquierda (datos) y derecha (labels/totales).
+    # En la factura SRI: derecha arranca ~x=291, izquierda llega ~x=250.
+    SPLIT_X = 270.0
+    lineas_words = _agrupar_palabras_visuales(words, y_tol=3.5)
+    lineas: list[dict] = []
+    for ws in lineas_words:
+        if not ws:
+            continue
+        izq = _texto_palabras_rango(ws, x_max=SPLIT_X)
+        der = _texto_palabras_rango(ws, x_min=SPLIT_X)
+        full = _texto_palabras_rango(ws)
+        lineas.append({"izq": izq, "der": der, "full": full, "words": ws})
+
+    der_join = "\n".join(L["der"] for L in lineas)
+    full_join = "\n".join(L["full"] for L in lineas)
+    der_norm = _norm_pdf_keyword(der_join)
+    full_norm = _norm_pdf_keyword(full_join)
+
+    def _limpiar(valor: str) -> str:
+        if not valor:
+            return ""
+        return re.sub(r"[ \t]+", " ", valor).strip()
+
+    # ---- Columna derecha: RUC, número, clave, fecha autorización, ambiente, emisión.
+    m = re.search(r"R\.?U\.?C\.?\s*:?\s*(\d{10,13})", der_norm)
+    if m:
+        datos["rucEmisor"] = m.group(1)
+    m = re.search(r"No\.\s*(\d{3}-\d{3}-\d{6,9})", der_join)
+    if not m:
+        m = re.search(r"(\d{3}-\d{3}-\d{6,9})", der_join)
+    if m:
+        datos["numeroComprobante"] = m.group(1)
+        partes = m.group(1).split("-")
+        if len(partes) == 3:
+            datos["establecimiento"], datos["puntoEmision"], datos["secuencial"] = partes
+    m = re.search(r"(\d{49})", der_join)
+    if m:
+        datos["claveAcceso"] = m.group(1)
+    m = re.search(r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})", der_join)
+    if m:
+        datos["fechaAutorizacion"] = m.group(1)
+    if re.search(r"AMBIENTE\s*:?\s*[A-Z]+", der_norm):
+        m_amb = re.search(r"AMBIENTE\s*:?\s*(\S+)", der_join, flags=re.IGNORECASE)
+        if m_amb:
+            datos["ambiente"] = m_amb.group(1).strip().upper()
+    m_em = re.search(r"EMISION\s*:?\s*([A-Z]+)", der_norm)
+    if m_em:
+        datos["emision"] = m_em.group(1)
+
+    # ---- Razón social emisor / Nombre comercial ----
+    # Líneas de la zona superior izquierda con texto en mayúsculas, ANTES de
+    # cualquier label "Dirección".
+    idx_dir_primer = None
+    for i, L in enumerate(lineas):
+        if "DIRECCION" in _norm_pdf_keyword(L["izq"]):
+            idx_dir_primer = i
+            break
+    razones: list[str] = []
+    if idx_dir_primer is not None:
+        for i in range(idx_dir_primer):
+            txt = lineas[i]["izq"]
+            if not txt:
+                continue
+            if not re.search(r"[A-Z]{3,}", _norm_pdf_keyword(txt)):
+                continue
+            razones.append(_limpiar(txt))
+    razones_unicas: list[str] = []
+    for r in razones:
+        if r not in razones_unicas:
+            razones_unicas.append(r)
+    if razones_unicas:
+        datos["razonSocialEmisor"] = razones_unicas[0]
+        datos["nombreComercial"] = razones_unicas[1] if len(razones_unicas) > 1 else razones_unicas[0]
+
+    # ---- Direcciones matriz/sucursal ----
+    # Layout del SRI:
+    #   "Dirección {valor matriz línea 1}"   ← label + valor pegado
+    #   "{valor matriz línea 2}"             ← continuación (wrap)
+    #   "Matriz:"                            ← sub-label sin valor
+    #   "{valor sucursal línea 1}"
+    #   "Dirección"                          ← label "Dirección" SOLO
+    #   "{valor sucursal línea 2}"
+    #   "Sucursal:"                          ← sub-label
+    # Máquina de estados para no confundir las 2 ocurrencias de "Dirección".
+    matriz_partes: list[str] = []
+    pre_suc: list[str] = []
+    post_suc: list[str] = []
+    estado = 0  # 0=buscando 1ª Dir; 1=entre Dir y Matriz:; 2=entre Matriz: y 2ª Dir; 3=entre 2ª Dir y Sucursal:; 4=done
+    for L in lineas:
+        izq = L["izq"]
+        if not izq:
+            continue
+        m_dir = re.match(r"(?i)Direcci[oó]n\b\s*(.*)$", izq)
+        m_mat = re.match(r"(?i)Matriz\s*:?\s*(.*)$", izq)
+        m_suc = re.match(r"(?i)Sucursal\s*:?\s*(.*)$", izq)
+        if estado == 0:
+            if m_dir:
+                resto = m_dir.group(1).strip()
+                if resto:
+                    matriz_partes.append(resto)
+                estado = 1
+            continue
+        if estado == 1:
+            if m_mat:
+                resto = m_mat.group(1).strip()
+                if resto:
+                    matriz_partes.append(resto)
+                estado = 2
+                continue
+            if m_dir and not m_dir.group(1).strip():
+                estado = 3
+                continue
+            matriz_partes.append(izq.strip())
+            continue
+        if estado == 2:
+            if m_dir and not m_dir.group(1).strip():
+                estado = 3
+                continue
+            if m_suc:
+                estado = 4
+                break
+            pre_suc.append(izq.strip())
+            continue
+        if estado == 3:
+            if m_suc:
+                estado = 4
+                break
+            post_suc.append(izq.strip())
+            continue
+    datos["direccionMatrizEmisor"] = _limpiar(" ".join(matriz_partes))
+    datos["direccionSucursalEmisor"] = _limpiar(" ".join(pre_suc + post_suc))
+
+    # ---- Obligado a Llevar Contabilidad ----
+    for L in lineas:
+        n = _norm_pdf_keyword(L["izq"])
+        if "OBLIGADO A LLEVAR CONTABILIDAD" in n:
+            m_ob = re.search(r"\b(SI|NO)\b", n)
+            if m_ob:
+                datos["obligadoContabilidad"] = m_ob.group(1)
+            break
+    if not datos["obligadoContabilidad"]:
+        datos["obligadoContabilidad"] = "No Disponible"
+
+    # ---- Agente de Retención: "Resolución No. X" (preservando tildes) ----
+    for L in lineas:
+        n = _norm_pdf_keyword(L["izq"])
+        if "AGENTE DE RETENCION" in n:
+            m_age = re.search(r"(?i)Retenci[oó]n\s+(.+)$", L["izq"])
+            if m_age:
+                datos["agenteRetencion"] = _limpiar(m_age.group(1))
+            break
+    if not datos["agenteRetencion"]:
+        datos["agenteRetencion"] = "No Disponible"
+
+    # ---- Contribuyente Especial / Tipo RIMPE ----
+    m_ce = re.search(r"CONTRIBUYENTE\s+ESPECIAL[^0-9]*?(\d+)", full_norm)
+    if m_ce:
+        valor_ce = m_ce.group(1).lstrip("0")
+        datos["contribuyenteEspecial"] = valor_ce or "0"
+    else:
+        datos["contribuyenteEspecial"] = "No Disponible"
+    datos["tipoContribuyenteRIMPE"] = "No Disponible"
+
+    # ---- Bloque del comprador ----
+    idx_raz_comp = None
+    for i, L in enumerate(lineas):
+        n = _norm_pdf_keyword(L["full"])
+        if "RAZON SOCIAL" in n and "APELLIDOS" in n:
+            idx_raz_comp = i
+            break
+    if idx_raz_comp is not None:
+        # Razón social: en la MISMA línea visual (después de "Apellidos:") o en
+        # la línea anterior (caso visto: nombre a y=390, label a y=393 → la
+        # agrupación por y_tol puede ponerlos en líneas separadas).
+        m_raz = re.search(r"(?i)apellidos\s*:?\s*(.+)$", lineas[idx_raz_comp]["full"])
+        if m_raz and m_raz.group(1).strip():
+            datos["razonSocialComprador"] = _limpiar(m_raz.group(1))
+        elif idx_raz_comp - 1 >= 0:
+            ws_prev = lineas[idx_raz_comp - 1]["words"]
+            cand = _texto_palabras_rango(ws_prev, x_min=200)
+            if cand:
+                datos["razonSocialComprador"] = _limpiar(cand)
+
+        for offset in range(1, 6):
+            j = idx_raz_comp + offset
+            if j >= len(lineas):
+                break
+            full_j = lineas[j]["full"]
+            n_j = _norm_pdf_keyword(full_j)
+            if "IDENTIFICACION" in n_j and not datos["identificacionComprador"]:
+                m_id = re.search(r"\b(\d{10,13})\b", full_j)
+                if m_id:
+                    datos["identificacionComprador"] = m_id.group(1)
+                continue
+            if n_j.startswith("FECHA") and not datos["fechaEmision"]:
+                m_fe = re.search(r"(\d{2}/\d{2}/\d{4})", full_j)
+                if m_fe:
+                    datos["fechaEmision"] = m_fe.group(1)
+                # Placa/Matrícula y Guía: si no tienen valor explícito en la
+                # línea (solo aparecen como labels), quedan vacíos por default.
+                continue
+            if n_j.startswith("DIRECCION") and not datos["direccionComprador"]:
+                m_d = re.search(r"(?i)Direccion\s*:?\s*(.+)$", full_j)
+                if m_d:
+                    datos["direccionComprador"] = _limpiar(m_d.group(1))
+                break
+
+    # ---- Tabla de productos ----
+    descripciones: list[str] = []
+    for tabla in tables:
+        if not tabla or len(tabla) < 2:
+            continue
+        header_idx = None
+        for i, fila in enumerate(tabla):
+            if fila and any("Cod." in (c or "") and "Principal" in (c or "") for c in fila):
+                header_idx = i
+                break
+            if fila and any("Cantidad" in (c or "") for c in fila):
+                header_idx = i
+                break
+        if header_idx is None:
+            continue
+        for fila in tabla[header_idx + 1:]:
+            if not fila:
+                continue
+            cols = [(c or "") for c in fila]
+            no_vacios = sum(1 for c in cols[:4] if c.strip())
+            if no_vacios < 3:
+                # Fila de totales colando: cols 0-3 vacías → saltar.
+                continue
+            cod = cols[0].strip()
+            aux = cols[1].strip()
+            cant = cols[2].strip()
+            desc = " ".join(cols[3].split()) if cols[3] else ""
+            col4 = cols[4].strip() if len(cols) > 4 else ""
+            col5 = cols[5].strip() if len(cols) > 5 else ""
+            nums = re.findall(r"\d+(?:[.,]\d+)?", col4) + re.findall(r"\d+(?:[.,]\d+)?", col5)
+            # Esperamos 5 números: P.Unit, Subsidio, P.s/Sub, Descuento, P.Total.
+            p_unit = nums[0] if len(nums) > 0 else "0.00"
+            subsidio = nums[1] if len(nums) > 1 else "0.00"
+            psub = nums[2] if len(nums) > 2 else "0.00"
+            descu = nums[3] if len(nums) > 3 else "0.00"
+            ptot = nums[4] if len(nums) > 4 else "0.00"
+            descripciones.append(
+                f"Código: {cod}, Aux: {aux}, Cant: {cant}, Desc: {desc}, "
+                f"P.Unit: {p_unit}, Subsidio: {subsidio}, P. s/Sub: {psub}, "
+                f"Descuento: {descu}, P.Total: {ptot}"
+            )
+        break  # solo procesamos la primera tabla con header válido
+    datos["descripcionesProductos"] = (
+        " | ".join(descripciones) if descripciones else "No Disponible"
+    )
+
+    # ---- Totales (columna derecha, líneas con label + último número) ----
+    def _capturar_total(label_regex: str) -> str:
+        for L in lineas:
+            n = _norm_pdf_keyword(L["der"])
+            if re.search(label_regex, n):
+                nums = re.findall(r"-?\d+(?:[.,]\d+)?", L["der"])
+                if nums:
+                    return nums[-1]
+        return ""
+
+    datos["subtotalTarifaEspecial"] = _capturar_total(r"^SUBTOTAL\s+TARIFA\s+ESPECIAL\b") or "0"
+    datos["subtotal15"] = _capturar_total(r"^SUBTOTAL\s+15\s*%") or "0"
+    datos["subtotal12"] = _capturar_total(r"^SUBTOTAL\s+12\s*%") or "0"
+    datos["subtotal8"] = _capturar_total(r"^SUBTOTAL\s+8\s*%") or "0"
+    datos["subtotal5"] = _capturar_total(r"^SUBTOTAL\s+5\s*%") or "0"
+    datos["subtotal0"] = _capturar_total(r"^SUBTOTAL\s+0\s*%") or "0"
+    datos["subtotalNoObjetoIVA"] = _capturar_total(r"SUBTOTAL\s+NO\s+OBJETO\s+DE\s+IVA") or "0"
+    datos["subtotalExentoIVA"] = _capturar_total(r"SUBTOTAL\s+EXENTO\s+DE\s+IVA") or "0"
+    datos["subtotalSinImpuestos"] = _capturar_total(r"SUBTOTAL\s+SIN\s+IMPUESTOS") or "0"
+    datos["totalDescuento"] = _capturar_total(r"TOTAL\s+DESCUENTO") or "0"
+    datos["ivaTarifaEspecial"] = _capturar_total(r"IVA\s+TARIFA\s+ESPECIAL") or "0"
+    datos["iva15"] = _capturar_total(r"^IVA\s+15\s*%") or "0"
+    datos["iva12"] = _capturar_total(r"^IVA\s+12\s*%") or "0"
+    datos["iva8"] = _capturar_total(r"^IVA\s+8\s*%") or "0"
+    datos["iva5"] = _capturar_total(r"^IVA\s+5\s*%") or "0"
+    datos["ice"] = _capturar_total(r"^ICE\b") or "0"
+    datos["irbpnr"] = _capturar_total(r"^IRBPNR\b") or "0"
+    datos["propina"] = _capturar_total(r"^PROPINA\b") or "0"
+    datos["valorTotal"] = (
+        _capturar_total(r"^VALOR\s+TOTAL\s*$") or _capturar_total(r"^VALOR\s+TOTAL\b") or "0"
+    )
+    datos["valorTotalSinSubsidio"] = _capturar_total(r"VALOR\s+TOTAL\s+SIN\s+SUBSIDIO") or "0"
+
+    # ---- Forma de pago (tabla "Forma de pago / Valor") ----
+    for tabla in tables:
+        if not tabla:
+            continue
+        is_fp = False
+        data_idx = None
+        for i, fila in enumerate(tabla):
+            if not fila:
+                continue
+            row_join = " ".join((c or "") for c in fila)
+            if "FORMA DE PAGO" in _norm_pdf_keyword(row_join):
+                is_fp = True
+                data_idx = i + 1
+                break
+        if is_fp and data_idx is not None and data_idx < len(tabla):
+            fila_fp = tabla[data_idx]
+            if fila_fp and len(fila_fp) >= 2:
+                col_fp = (fila_fp[0] or "").strip()
+                col_val = (fila_fp[1] or "").strip()
+                # El código viene con \n separando "20 - OTROS..." de "FINANCIERO";
+                # tomamos solo la primera línea.
+                primera_linea = col_fp.split("\n")[0].strip()
+                datos["formaPago"] = primera_linea or "No Disponible"
+                nums_v = re.findall(r"\d+(?:[.,]\d+)?", col_val)
+                datos["formaPagoMonto"] = nums_v[-1] if nums_v else "0"
+                break
+    if not datos["formaPago"]:
+        datos["formaPago"] = "No Disponible"
+    if not datos["formaPagoMonto"]:
+        datos["formaPagoMonto"] = "0"
+
+    # ---- Información Adicional ----
+    # Bloque de la columna izquierda después de la línea "Información Adicional",
+    # cortado al llegar al header "Forma de pago Valor".
+    idx_info = None
+    for i, L in enumerate(lineas):
+        if "INFORMACION ADICIONAL" in _norm_pdf_keyword(L["izq"]) \
+                or "INFORMACION ADICIONAL" in _norm_pdf_keyword(L["full"]):
+            idx_info = i
+            break
+    if idx_info is not None:
+        bloque = []
+        for L in lineas[idx_info + 1:]:
+            txt = (L["izq"] or "").strip()
+            if not txt:
+                continue
+            n_txt = _norm_pdf_keyword(txt)
+            if "FORMA DE PAGO" in n_txt and "VALOR" in n_txt:
+                break
+            bloque.append(txt)
+        if bloque:
+            datos["informacionAdicional"] = "\n".join(bloque)
+    if not datos["informacionAdicional"]:
+        datos["informacionAdicional"] = "No Disponible"
+
+    # ---- Defaults para columnas que quedan vacías ----
+    for k in (
+        "razonSocialComprador",
+        "identificacionComprador",
+        "direccionComprador",
+        "comprobanteModificado",
+        "fechaEmisionModificado",
+        "razonModificacion",
+        "valorModificacion",
+    ):
+        if not datos[k]:
+            datos[k] = "No Disponible"
+
+    return datos
+
+
 def _extraer_datos_pdf_por_tipo_layout_first(
     pdf_path: Path,
     *,
@@ -3172,7 +3518,8 @@ def _extraer_datos_pdf_por_tipo_layout_first(
     elif es_nota_debito:
         legacy_data = _extraer_datos_pdf_nota_debito(pdf_path)
     else:
-        legacy_data = _extraer_datos_pdf(pdf_path)
+        # Facturas (y fallback genérico): nuevo parser layout-aware.
+        legacy_data = _extraer_datos_pdf_factura(pdf_path)
     if not layout_data:
         return legacy_data
     return _combinar_datos_reporte_emitidos(layout_data, legacy_data)
