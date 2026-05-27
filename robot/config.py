@@ -165,6 +165,52 @@ try:
 except ValueError:
     RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS = 1800
 
+# Clics reales en una zona "blanca" segura del viewport (lejos de inputs/
+# selects/botones) antes de presionar Consultar. El reCAPTCHA Enterprise
+# valora positivamente eventos `click` reales con timing humano. Test manual
+# del usuario: 6 clics rápidos en una zona vacía sí hacen que el captcha
+# pase, donde solo mover el mouse no era suficiente.
+try:
+    RECIBIDOS_HUMANIZAR_CLICKS = max(
+        0, int(os.getenv("RECIBIDOS_HUMANIZAR_CLICKS", "6"))
+    )
+except ValueError:
+    RECIBIDOS_HUMANIZAR_CLICKS = 6
+
+try:
+    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN = max(
+        0, int(os.getenv("RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN", "80"))
+    )
+except ValueError:
+    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN = 80
+
+try:
+    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MAX = max(
+        RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN,
+        int(os.getenv("RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MAX", "180")),
+    )
+except ValueError:
+    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MAX = max(
+        RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN, 180
+    )
+
+# Coordenadas relativas al viewport (0.0-1.0) donde caen los clicks blancos.
+# Default 0.82 / 0.48 → lado derecho-medio del viewport, donde el SRI suele
+# tener espacio en blanco (el formulario está alineado a la izquierda).
+try:
+    RECIBIDOS_HUMANIZAR_CLICK_X_RATIO = max(
+        0.05, min(0.95, float(os.getenv("RECIBIDOS_HUMANIZAR_CLICK_X_RATIO", "0.82")))
+    )
+except ValueError:
+    RECIBIDOS_HUMANIZAR_CLICK_X_RATIO = 0.82
+
+try:
+    RECIBIDOS_HUMANIZAR_CLICK_Y_RATIO = max(
+        0.05, min(0.95, float(os.getenv("RECIBIDOS_HUMANIZAR_CLICK_Y_RATIO", "0.48")))
+    )
+except ValueError:
+    RECIBIDOS_HUMANIZAR_CLICK_Y_RATIO = 0.48
+
 
 # --------------------------------------------------------------------------- #
 # Robot SRI — Emitidos
