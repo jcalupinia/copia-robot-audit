@@ -678,14 +678,80 @@ def _abrir_navegador(p):
     """
     base_kwargs = dict(
         headless=HEADLESS,
-        args=["--no-sandbox", "--disable-setuid-sandbox",
-              "--disable-dev-shm-usage", "--disable-gpu"],
+        args=[
+            "--no-sandbox", "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage", "--disable-gpu",
+            # Quita el flag de "controlado por automatización" de Blink. Sin
+            # esto, `navigator.webdriver=true` y Chrome muestra el infobar
+            # "Un software de prueba automatizado está controlando Chrome",
+            # que reCAPTCHA Enterprise usa como señal fuerte de bot.
+            "--disable-blink-features=AutomationControlled",
+        ],
+        # Suprime el switch `--enable-automation` que Playwright añade por
+        # defecto. Es el que pinta el infobar y setea webdriver=true en
+        # Chrome ≥ 89.
+        ignore_default_args=["--enable-automation"],
     )
     if SLOW_MO > 0:
         base_kwargs["slow_mo"] = SLOW_MO
     if DEVTOOLS:
         base_kwargs["devtools"] = True
         base_kwargs["headless"] = False
+
+    # Script `init` que se inyecta en CADA frame de CADA contexto: oculta los
+    # fingerprints más obvios que reCAPTCHA Enterprise usa para decidir el
+    # score base. NO salta el captcha — solo evita que Google nos arranque
+    # con score ≈ 0.0 por las defaults de Playwright/Chromium.
+    _STEALTH_INIT_SCRIPT = r"""
+        // 1. navigator.webdriver: ocultar (Playwright lo deja en true)
+        try {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        } catch (e) {}
+
+        // 2. navigator.plugins: una lista vacía es señal clásica de bot.
+        try {
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [
+                    { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                    { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
+                    { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
+                ],
+            });
+        } catch (e) {}
+
+        // 3. navigator.languages: Playwright suele dejar ['en-US'] solamente.
+        try {
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['es-EC', 'es', 'en-US', 'en'],
+            });
+        } catch (e) {}
+
+        // 4. chrome.runtime: en Chrome real existe; en Playwright a veces no.
+        try {
+            window.chrome = window.chrome || {};
+            window.chrome.runtime = window.chrome.runtime || { id: undefined };
+        } catch (e) {}
+
+        // 5. Permissions API: en Chrome bot, query('notifications') devuelve
+        //    'denied' incluso si el permiso es 'default'. Lo igualamos.
+        try {
+            const origQuery = navigator.permissions && navigator.permissions.query;
+            if (origQuery) {
+                navigator.permissions.query = (params) =>
+                    params && params.name === 'notifications'
+                        ? Promise.resolve({ state: Notification.permission })
+                        : origQuery.call(navigator.permissions, params);
+            }
+        } catch (e) {}
+    """
+
+    def _aplicar_stealth(context):
+        """Inyecta el init script en el contexto. No falla la apertura si por
+        algún motivo el script no aplica."""
+        try:
+            context.add_init_script(_STEALTH_INIT_SCRIPT)
+        except Exception as err:
+            logger.warning(f"No se pudo aplicar stealth al contexto: {err}")
 
     errores = []
 
@@ -734,6 +800,7 @@ def _abrir_navegador(p):
                 errores.append(f"{etiqueta} ({ruta}): {type(err).__name__}: {err}")
                 logger.warning(f"launch_persistent_context falló con {etiqueta}: {err}")
                 continue
+            _aplicar_stealth(context)
             resultado = _validar(f"{etiqueta} ({ruta})", context, None, True)
             if resultado:
                 return resultado
@@ -749,6 +816,7 @@ def _abrir_navegador(p):
         except Exception as err:
             errores.append(f"launch {canal}: {type(err).__name__}: {err}")
             continue
+        _aplicar_stealth(context)
         resultado = _validar(f"contexto no persistente ({canal})", context, browser, False)
         if resultado:
             return resultado
