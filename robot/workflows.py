@@ -533,12 +533,24 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 # Solo leemos el cuerpo si la response ya terminó (status>0).
                 if status:
                     text = ev["response"].text() or ""
-                    tiene_render = "tablaCompRecibidos" in text
+                    # Render de la tabla: la presencia del ID del componente
+                    # más signos de paginación (totalRecords/rowCount) son
+                    # señal más fiel que solo el ID del form.
+                    tiene_render = (
+                        "tablaCompRecibidos" in text
+                        and (
+                            "totalRecords" in text
+                            or "rowCount" in text
+                            or "currentPage" in text
+                        )
+                    )
                     text_low = text.lower()
                     tiene_alerta_captcha = (
                         "validar el captcha" in text_low
                         or "captcha en google" in text_low
                         or "no se pudo validar" in text_low
+                        or "captcha incorrecta" in text_low
+                        or "captcha incorrecto" in text_low
                     )
             except Exception:
                 pass
@@ -977,77 +989,143 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
     def _esperar_resultado_consulta(timeout: int = 300000) -> tuple[str, str]:
         """Espera el resultado válido de la consulta de Recibidos.
 
-        Respeta el flujo de 2 requests del SRI:
-          - Si llega request #2 con render de `tablaCompRecibidos` → ÉXITO.
-          - Si llega alerta NO captcha (e.g. "sin resultados") → resultado final.
-          - La alerta "No se pudo validar el captcha" (del request #1) se
-            IGNORA mientras todavía podamos recibir el #2.
+        Respeta el flujo de 2 requests del SRI y prioriza el partial-response
+        sobre el estado del DOM (porque una alerta vieja del request #1 puede
+        seguir visible cuando el #2 con token ya trajo el render correcto):
 
-        Devuelve un tuple (estado, mensaje):
-          ('tabla',    '')            → tabla rendereada
-          ('alerta',   '<texto>')     → alerta NO captcha (sin resultados, etc.)
-          ('captcha',  '<texto>')     → captcha rechazado de verdad
-                                        (no llegó render del #2 o el #2 trajo
-                                        la alerta de captcha)
-          ('timeout',  '<texto>')     → ni tabla ni alerta no-captcha
+          PRIORIDAD MÁXIMA: si CUALQUIER response trajo
+          `tiene_render_tabla=True` (con status=200) → ('tabla', '').
+          Esto siempre gana, sin importar el estado del DOM ni alertas
+          residuales visibles.
+
+          DESPUÉS: si el response #2 (has_token=True) trajo alerta de captcha
+          en su BODY y NO trajo render → ('captcha', mensaje).
+
+          DESPUÉS: alerta NO captcha visible (sin resultados, etc.) → ('alerta', texto).
+
+          DESPUÉS: tabla pintada en DOM → ('tabla', '').
+
+          TIMEOUT: si aún así hay render_tabla en eventos → ('tabla', '').
         """
         limite = time.time() + (timeout / 1000)
-        while time.time() < limite:
-            # (a) Tabla visible en el DOM → éxito directo
-            try:
-                if tabla_datos.is_visible():
-                    return ("tabla", "")
-            except Exception:
-                pass
 
-            eventos = _resumir_eventos_recibidos()
-
-            # (b) Algún response trajo render de tablaCompRecibidos → éxito
-            #     (incluso si la tabla todavía no se pintó, llega en ms)
-            if any(e.get("tiene_render_tabla") for e in eventos):
+        def _decidir(eventos: list[dict]) -> tuple[str, str] | None:
+            """Aplica la lógica de decisión. None = seguir esperando."""
+            # (1) PRIORIDAD MÁXIMA: render_tabla en CUALQUIER response con
+            # status 200. Si esto es True, el backend del SRI aceptó el
+            # captcha y nos devolvió la tabla, sin importar qué muestre el DOM.
+            eventos_con_render = [
+                e for e in eventos
+                if e.get("tiene_render_tabla") and (e.get("status") or 0) == 200
+            ]
+            if eventos_con_render:
+                # Pequeña espera para que PrimeFaces termine de pintar (no
+                # bloqueante: si no pinta, devolvemos tabla igual).
                 try:
-                    page.wait_for_timeout(250)
+                    page.wait_for_function(
+                        """() => {
+                            const t = document.getElementById('frmPrincipal:tablaCompRecibidos_data');
+                            return !!(t && t.children && t.children.length >= 0);
+                        }""",
+                        timeout=1500,
+                    )
                 except Exception:
                     pass
-                try:
-                    if tabla_datos.is_visible():
-                        return ("tabla", "")
-                except Exception:
-                    pass
-                # El #2 trajo render pero el DOM todavía no actualizó →
-                # seguimos esperando un poco más.
+                logger.info(
+                    "Recibidos: tabla rendereada en partial-response "
+                    "(eventos_con_render=%d). Decisión final: tabla.",
+                    len(eventos_con_render),
+                )
+                return ("tabla", "")
 
-            # (c) Si llegó el response #2 (has_token=True) y trajo alerta de
-            #     captcha (no render), es captcha rechazado de verdad.
+            # (2) Captcha rechazado de VERDAD: response #2 con token trajo
+            # alerta_captcha en su body Y no trajo render.
             eventos_con_token = [e for e in eventos if e.get("has_token")]
             if eventos_con_token:
                 ultimo_token = eventos_con_token[-1]
                 if (
                     ultimo_token.get("tiene_alerta_captcha")
                     and not ultimo_token.get("tiene_render_tabla")
+                    and (ultimo_token.get("status") or 0) == 200
                 ):
-                    return ("captcha", _texto_alerta() or "Captcha rechazado por SRI/Google.")
+                    texto_alerta_dom = _texto_alerta()
+                    logger.info(
+                        "Recibidos: response #2 con token trajo alerta de "
+                        "captcha en body y NO render. Decisión final: captcha. "
+                        "Alerta DOM: %r",
+                        texto_alerta_dom,
+                    )
+                    return ("captcha", texto_alerta_dom or "Captcha rechazado por SRI/Google.")
 
-            # (d) Alerta NO captcha visible → resultado final no-error
+            # (3) Alerta NO captcha visible → resultado final no-error.
+            #     Pero SOLO si NO hay request con token todavía (porque la
+            #     alerta podría ser intermedia del request #1).
             texto = _texto_alerta()
             if texto and not _es_alerta_captcha(texto):
-                return ("alerta", texto)
+                # Si hay token en algún request, esperamos al render antes
+                # de aceptar la alerta no-captcha. Si no hay token todavía,
+                # es probable resultado real.
+                if not eventos_con_token:
+                    logger.info(
+                        "Recibidos: alerta NO captcha visible y sin request "
+                        "con token aún. Decisión: alerta. Texto: %r", texto,
+                    )
+                    return ("alerta", texto)
 
-            time.sleep(0.2)
-
-        # Timeout: lo que haya en pantalla
-        texto_final = _texto_alerta()
-        eventos_finales = _resumir_eventos_recibidos()
-        if any(e.get("tiene_render_tabla") for e in eventos_finales):
+            # (4) Tabla pintada en DOM (sin response capturado) → éxito.
+            #     Caso raro: el listener no capturó el response pero el DOM
+            #     se actualizó. Confiamos en el DOM.
             try:
                 if tabla_datos.is_visible():
+                    logger.info(
+                        "Recibidos: tabla visible en DOM (sin render_tabla en "
+                        "eventos). Decisión final: tabla."
+                    )
                     return ("tabla", "")
             except Exception:
                 pass
+
+            return None  # seguir esperando
+
+        # Loop principal
+        while time.time() < limite:
+            eventos = _resumir_eventos_recibidos()
+            decision = _decidir(eventos)
+            if decision is not None:
+                return decision
+            time.sleep(0.2)
+
+        # ===== Timeout =====
+        # Reevaluamos con la lista final de eventos. NUNCA devolvemos captcha
+        # si hay un render en partial-response — el DOM puede tener una alerta
+        # vieja pero el backend ya aceptó.
+        eventos_finales = _resumir_eventos_recibidos()
+        if any(
+            e.get("tiene_render_tabla") and (e.get("status") or 0) == 200
+            for e in eventos_finales
+        ):
+            logger.info(
+                "Recibidos: timeout pero hay render_tabla en partial-response. "
+                "Decisión final: tabla (alerta del DOM ignorada)."
+            )
+            return ("tabla", "")
+
+        texto_final = _texto_alerta()
+        # Solo aceptamos captcha en timeout si NO hubo render Y la alerta
+        # del DOM coincide con captcha conocido.
         if texto_final and _es_alerta_captcha(texto_final):
+            logger.info(
+                "Recibidos: timeout sin render. Alerta del DOM coincide con "
+                "captcha. Decisión final: captcha. Texto: %r", texto_final,
+            )
             return ("captcha", texto_final)
         if texto_final:
+            logger.info(
+                "Recibidos: timeout sin render. Alerta del DOM NO captcha. "
+                "Decisión final: alerta. Texto: %r", texto_final,
+            )
             return ("alerta", texto_final)
+        logger.info("Recibidos: timeout sin render ni alerta. Decisión final: timeout.")
         return ("timeout", "")
 
     def _rehidratar_consulta_recibidos() -> bool:
