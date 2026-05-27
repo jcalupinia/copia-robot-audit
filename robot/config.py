@@ -159,11 +159,14 @@ RECIBIDOS_HUMANIZAR_PRE_CLICK = (
     in {"1", "true", "yes", "on", "si"}
 )
 try:
+    # Default subido a 5000 ms (5s): el test manual del usuario confirmó que
+    # con ~1.8s no alcanza para que reCAPTCHA Enterprise considere humano al
+    # bot; con tiempo de página más largo (rango 4-7s) sí pasa.
     RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS = max(
-        0, int(os.getenv("RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS", "1800"))
+        0, int(os.getenv("RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS", "5000"))
     )
 except ValueError:
-    RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS = 1800
+    RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS = 5000
 
 # Clics reales en una zona "blanca" segura del viewport (lejos de inputs/
 # selects/botones) antes de presionar Consultar. El reCAPTCHA Enterprise

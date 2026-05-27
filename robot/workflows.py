@@ -789,53 +789,86 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             out["coordenadas"] = (click_x, click_y)
 
             # Verificación de seguridad: que el elemento en (click_x, click_y)
-            # NO sea interactivo. Si lo es, saltamos los clicks (logueamos para
-            # que el usuario ajuste los ratios).
+            # NO sea interactivo. Logueamos también el outerHTML truncado y el
+            # rect del elemento, para debug si el portal cambia layout.
             zona_segura = False
             elemento_diag = ""
+            elemento_html = ""
             if RECIBIDOS_HUMANIZAR_CLICKS > 0:
                 try:
                     diag = page.evaluate(
                         """({x, y}) => {
                             const el = document.elementFromPoint(x, y);
-                            if (!el) return { segura: true, tag: 'NONE', motivo: 'fuera-de-pagina' };
+                            if (!el) return { segura: true, tag: 'NONE', motivo: 'fuera-de-pagina', html: '' };
                             const tag = (el.tagName || '').toUpperCase();
                             const role = el.getAttribute ? (el.getAttribute('role') || '') : '';
+                            const id = el.id ? '#' + el.id : '';
+                            const cls = el.className && typeof el.className === 'string'
+                                ? '.' + el.className.trim().split(/\\s+/).slice(0,3).join('.') : '';
+                            const html = (el.outerHTML || '').slice(0, 120);
+                            const desc = tag + id + cls;
                             const noSegurosTag = ['INPUT','SELECT','TEXTAREA','BUTTON','A','LABEL','OPTION','IFRAME'];
                             if (noSegurosTag.includes(tag)) {
-                                return { segura: false, tag, motivo: 'tag-interactivo' };
+                                return { segura: false, tag: desc, motivo: 'tag-interactivo', html };
                             }
                             if (role === 'button' || role === 'link' || role === 'tab') {
-                                return { segura: false, tag, motivo: 'role-' + role };
+                                return { segura: false, tag: desc, motivo: 'role-' + role, html };
                             }
                             if (typeof el.onclick === 'function' && el.onclick !== null) {
-                                return { segura: false, tag, motivo: 'tiene-onclick' };
+                                return { segura: false, tag: desc, motivo: 'tiene-onclick', html };
                             }
                             // Subimos por ancestros buscando button/a clickeable
                             let cur = el;
                             for (let i = 0; cur && i < 4; i++) {
                                 const t = (cur.tagName || '').toUpperCase();
                                 if (['BUTTON','A','INPUT','SELECT'].includes(t)) {
-                                    return { segura: false, tag, motivo: 'ancestor-' + t };
+                                    return { segura: false, tag: desc, motivo: 'ancestor-' + t, html };
                                 }
                                 cur = cur.parentElement;
                             }
-                            return { segura: true, tag, motivo: 'ok' };
+                            return { segura: true, tag: desc, motivo: 'ok', html };
                         }""",
                         arg={"x": click_x, "y": click_y},
                     ) or {}
                     zona_segura = bool(diag.get("segura"))
                     elemento_diag = f"{diag.get('tag','?')}/{diag.get('motivo','?')}"
+                    elemento_html = str(diag.get("html") or "")
                 except Exception:
                     zona_segura = False
                     elemento_diag = "eval-error"
             out["zona_segura"] = zona_segura
 
             # (4) Clicks reales en la zona blanca (si es segura).
+            # Cambios para parecer más humano (test manual del usuario lo confirma):
+            #   - Antes de cada click hacemos `mouse.move(x, y, steps=N)` para
+            #     que el cursor viaje (no teleporte) entre puntos. Esto genera
+            #     N eventos `mousemove` por trayecto.
+            #   - Pausa pre-click (60-140ms) y post-click (220-420ms) más
+            #     largas que antes (80-180ms total).
+            #   - Jitter de ±30 px (era ±15) para que los clicks no caigan en
+            #     la misma columna de pixels.
             if zona_segura and RECIBIDOS_HUMANIZAR_CLICKS > 0:
+                logger.info(
+                    "Recibidos: humanizar -> intentando %d clicks blancos en "
+                    "(%d,%d) sobre %s | html=%r",
+                    RECIBIDOS_HUMANIZAR_CLICKS, click_x, click_y, elemento_diag,
+                    elemento_html,
+                )
                 for _ in range(RECIBIDOS_HUMANIZAR_CLICKS):
-                    jx = click_x + random.randint(-15, 15)
-                    jy = click_y + random.randint(-15, 15)
+                    jx = click_x + random.randint(-30, 30)
+                    jy = click_y + random.randint(-30, 30)
+                    # Viaje gradual hacia la nueva coordenada (genera mousemoves
+                    # intermedios, no teleporte).
+                    try:
+                        page.mouse.move(jx, jy, steps=random.randint(5, 12))
+                    except Exception:
+                        pass
+                    # Pausa breve antes del click (humano se "asienta" sobre el
+                    # punto antes de presionar).
+                    try:
+                        page.wait_for_timeout(random.randint(60, 140))
+                    except Exception:
+                        pass
                     delay = random.randint(
                         RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN,
                         RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MAX,
@@ -845,27 +878,31 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                         out["clicks_blancos"] += 1
                     except Exception:
                         pass
+                    # Pausa más larga entre clicks (era 80-180ms; subido a
+                    # 220-420 porque la prueba manual del usuario tiene ritmo
+                    # más lento).
                     try:
-                        page.wait_for_timeout(random.randint(80, 180))
+                        page.wait_for_timeout(random.randint(220, 420))
                     except Exception:
                         pass
                 logger.info(
-                    "Recibidos: humanizar -> %d clicks blancos en (%d,%d) "
-                    "sobre %s.",
-                    out["clicks_blancos"], click_x, click_y, elemento_diag,
+                    "Recibidos: humanizar -> %d clicks blancos completados.",
+                    out["clicks_blancos"],
                 )
             elif RECIBIDOS_HUMANIZAR_CLICKS > 0:
                 logger.warning(
                     "Recibidos: coords humanizar (%d,%d) caen sobre control "
-                    "interactivo (%s). Saltando clicks blancos. Ajustá "
-                    "RECIBIDOS_HUMANIZAR_CLICK_X_RATIO/Y_RATIO si querés "
-                    "forzar los clicks.",
-                    click_x, click_y, elemento_diag,
+                    "interactivo (%s) | html=%r. Saltando clicks blancos. "
+                    "Ajustá RECIBIDOS_HUMANIZAR_CLICK_X_RATIO/Y_RATIO si querés "
+                    "forzar los clicks en otra zona.",
+                    click_x, click_y, elemento_diag, elemento_html,
                 )
 
-            # (5) Pausa post-clicks.
+            # (5) Pausa post-clicks (era 300-700ms; subida a 700-1500 para
+            # que el modelo de reCAPTCHA vea más "thinking time" antes del
+            # click definitivo).
             try:
-                page.wait_for_timeout(random.randint(300, 700))
+                page.wait_for_timeout(random.randint(700, 1500))
             except Exception:
                 pass
 
@@ -929,8 +966,9 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             pass
         try:
             # `delay=` añade tiempo entre mousedown/mouseup. Lo subimos a
-            # ~120ms (vs 80 previo) para parecer más humano.
-            boton_consultar.first.click(delay=random.randint(100, 160))
+            # 150-300ms (vs 100-160 previo) para parecer más humano. Un
+            # mousedown/mouseup tan rápido como 100ms se ve sintético.
+            boton_consultar.first.click(delay=random.randint(150, 300))
             return {"modo": "click-nativo", "click_ok": True, "humanizar": humanizar_info}
         except Exception as err:
             logger.warning(f"Recibidos: no se pudo hacer click nativo en Consultar: {err}")
