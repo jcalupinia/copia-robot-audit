@@ -339,6 +339,7 @@ from robot.config import (
     RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
     RECIBIDOS_REHIDRATAR_DESDE_INTENTO,
     RECIBIDOS_REHIDRATAR_ON_CAPTCHA,
+    PREFER_SYSTEM_CHROME,
     RECUPERAR_COMPROBANTES_URL,
     SLOW_MO,
     TIPOS_MAP,
@@ -698,49 +699,27 @@ def _abrir_navegador(p):
         base_kwargs["devtools"] = True
         base_kwargs["headless"] = False
 
-    # Script `init` que se inyecta en CADA frame de CADA contexto: oculta los
-    # fingerprints más obvios que reCAPTCHA Enterprise usa para decidir el
-    # score base. NO salta el captcha — solo evita que Google nos arranque
-    # con score ≈ 0.0 por las defaults de Playwright/Chromium.
+    # Init script minimalista. Comparando con la app de referencia del
+    # usuario (la que pasa el captcha sin problemas):
+    #   - webdriver: false       ← solo viene del flag de Blink + no --enable-automation
+    #   - plugins: 5 reales      ← NO sobreescritos, valores reales del Chrome 148
+    #   - languages: ['es-419', 'es']  ← reales del SO Windows
+    #   - chrome.runtime: NO existe (hasChromeRuntime: false)
+    #   - cdc_* keys presentes (típico Selenium, reCAPTCHA los IGNORA)
+    #
+    # Por eso quitamos las sobreescrituras de plugins/languages/chrome.runtime:
+    # solo lograban INCONSISTENCIA con el Chrome real y eran 100% innecesarias.
+    # Dejamos solo un fallback defensivo de `navigator.webdriver`, que sólo
+    # se aplica si por algún edge case Chrome no honró el flag de Blink.
     _STEALTH_INIT_SCRIPT = r"""
-        // 1. navigator.webdriver: ocultar (Playwright lo deja en true)
         try {
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        } catch (e) {}
-
-        // 2. navigator.plugins: una lista vacía es señal clásica de bot.
-        try {
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [
-                    { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-                    { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
-                    { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
-                ],
-            });
-        } catch (e) {}
-
-        // 3. navigator.languages: Playwright suele dejar ['en-US'] solamente.
-        try {
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['es-EC', 'es', 'en-US', 'en'],
-            });
-        } catch (e) {}
-
-        // 4. chrome.runtime: en Chrome real existe; en Playwright a veces no.
-        try {
-            window.chrome = window.chrome || {};
-            window.chrome.runtime = window.chrome.runtime || { id: undefined };
-        } catch (e) {}
-
-        // 5. Permissions API: en Chrome bot, query('notifications') devuelve
-        //    'denied' incluso si el permiso es 'default'. Lo igualamos.
-        try {
-            const origQuery = navigator.permissions && navigator.permissions.query;
-            if (origQuery) {
-                navigator.permissions.query = (params) =>
-                    params && params.name === 'notifications'
-                        ? Promise.resolve({ state: Notification.permission })
-                        : origQuery.call(navigator.permissions, params);
+            // Solo cinturón y tirantes: el flag
+            // `--disable-blink-features=AutomationControlled` ya pone webdriver
+            // en `false`. Si por alguna razón Chrome lo dejó en `true`, lo
+            // forzamos. Apuntamos a `false` (no `undefined`) para coincidir
+            // con lo que reporta un Chrome real con el mismo flag.
+            if (navigator.webdriver === true) {
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
             }
         } catch (e) {}
     """
@@ -793,17 +772,31 @@ def _abrir_navegador(p):
         except Exception as err:
             errores.append(f"perfil temporal no creable: {type(err).__name__}: {err}")
 
+        # Probamos primero Chrome del sistema (si PREFER_SYSTEM_CHROME=1),
+        # después Chromium bundled. La app de referencia que pasa el captcha
+        # usa Chrome 148 del sistema; Chromium bundled de Playwright suele
+        # estar varias versiones atrás.
+        canales_orden: list[str | None] = []
+        if PREFER_SYSTEM_CHROME:
+            canales_orden.append("chrome")
+        canales_orden.append(None)  # Chromium bundled (sin channel)
+
         for etiqueta, ruta in rutas:
-            try:
-                context = p.chromium.launch_persistent_context(str(ruta), **persistent_kwargs)
-            except Exception as err:
-                errores.append(f"{etiqueta} ({ruta}): {type(err).__name__}: {err}")
-                logger.warning(f"launch_persistent_context falló con {etiqueta}: {err}")
-                continue
-            _aplicar_stealth(context)
-            resultado = _validar(f"{etiqueta} ({ruta})", context, None, True)
-            if resultado:
-                return resultado
+            for canal in canales_orden:
+                kw = dict(persistent_kwargs)
+                if canal:
+                    kw["channel"] = canal
+                etiqueta_canal = f"{etiqueta} ({ruta}) canal={canal or 'chromium-bundled'}"
+                try:
+                    context = p.chromium.launch_persistent_context(str(ruta), **kw)
+                except Exception as err:
+                    errores.append(f"{etiqueta_canal}: {type(err).__name__}: {err}")
+                    logger.warning(f"launch_persistent_context falló con {etiqueta_canal}: {err}")
+                    continue
+                _aplicar_stealth(context)
+                resultado = _validar(etiqueta_canal, context, None, True)
+                if resultado:
+                    return resultado
 
     # --- 3. Contexto NO persistente ---
     for canal in ("chrome", "chromium"):

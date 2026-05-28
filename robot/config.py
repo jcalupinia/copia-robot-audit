@@ -65,6 +65,23 @@ PERSISTENT_PROFILE_ENV = os.getenv("PLAYWRIGHT_PERSISTENT_PROFILE", "1").strip()
 USE_PERSISTENT_PROFILE = PERSISTENT_PROFILE_ENV in {"1", "true", "yes", "on"}
 USER_DATA_DIR = os.getenv("PLAYWRIGHT_USER_DATA_DIR", "browser_profile").strip()
 
+# Preferir Chrome del sistema en lugar de Chromium bundled. Confirmado que
+# reCAPTCHA Enterprise del SRI valida la versión moderna de Chrome: la app
+# de referencia que el usuario validó usa Chrome 148 del sistema y pasa el
+# captcha sin problemas. Chromium bundled de Playwright suele estar varias
+# versiones atrás (~127 en Playwright 1.47) y eso baja el score.
+#
+# Si esta var está activa, `_abrir_navegador` intenta abrir Chrome del sistema
+# (`channel="chrome"`) PRIMERO, en cualquier modo (persistente o no). Si Chrome
+# no está instalado, cae al Chromium bundled de Playwright.
+#
+# Si por alguna razón Chrome del sistema rompe algo en Emitidos, podés volver
+# al comportamiento previo con: PREFER_SYSTEM_CHROME=0
+PREFER_SYSTEM_CHROME = (
+    os.getenv("PREFER_SYSTEM_CHROME", "1").strip().lower()
+    in {"1", "true", "yes", "on", "si"}
+)
+
 
 # --------------------------------------------------------------------------- #
 # Timeouts y pausas del scraping
