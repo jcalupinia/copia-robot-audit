@@ -3444,7 +3444,16 @@ with tab1:
                         )
 
     if st.session_state.download_status in {"running", "cancelling"}:
-        time.sleep(0.6)
+        # Intervalo de polling del estado de descarga. Cada `st.rerun()`
+        # produce un overlay oscuro momentáneo en la UI de Streamlit; a
+        # 0.6s la pantalla parpadea constantemente mientras descarga. A
+        # 1.5s es mucho menos perceptible y el progreso sigue siendo
+        # cómodo. Configurable via env var STREAMLIT_REFRESH_SEC.
+        try:
+            _refresh_sec = max(0.3, float(os.getenv("STREAMLIT_REFRESH_SEC", "1.5")))
+        except (TypeError, ValueError):
+            _refresh_sec = 1.5
+        time.sleep(_refresh_sec)
         try:
             st.rerun()
         except Exception:
