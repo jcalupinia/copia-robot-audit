@@ -2664,7 +2664,65 @@ with st.sidebar:
     st.markdown("###  Auditora Web SRI Robot")
     st.write("Automatiza descargas, valida comprobantes y genera reportes tributarios.")
     st.markdown("---")
-    st.markdown("**Versión:** 2.0  \n**Actualizado:** Febrero 2026")
+    # Versión dinámica + botón manual de actualización.
+    # En el .exe compilado, `_desktop_launcher.APP_VERSION` viene de version.txt.
+    # En modo dev, mostramos un placeholder.
+    if _desktop_launcher is not None and _desktop_launcher.APP_VERSION:
+        _app_version_display = _desktop_launcher.APP_VERSION
+    else:
+        _app_version_display = "3.0 (dev)"
+
+    _col_ver, _col_upd = st.columns([2, 1])
+    with _col_ver:
+        st.markdown(f"**Versión:** {_app_version_display}")
+    with _col_upd:
+        if st.button("🔄 Buscar", help="Buscar actualizaciones disponibles",
+                     use_container_width=True, key="btn_buscar_update"):
+            # Reset del estado para forzar un nuevo chequeo.
+            st.session_state.pop("_update_checked", None)
+            st.session_state.pop("_update_message", None)
+            st.session_state["_manual_update_check"] = True
+            st.rerun()
+
+    # Resultado del chequeo manual (solo se ejecuta UNA vez tras el click).
+    if st.session_state.pop("_manual_update_check", False):
+        if not getattr(sys, "frozen", False):
+            st.info(
+                "La auto-actualización solo funciona en el ejecutable .exe "
+                "compilado, no en modo desarrollo."
+            )
+        elif _desktop_launcher is None:
+            st.warning("Módulo de actualización no disponible en este build.")
+        else:
+            with st.spinner("Verificando actualizaciones..."):
+                try:
+                    _update_payload = _get_update_payload()
+                except Exception as _upd_err:
+                    _update_payload = None
+                    st.error(f"Error al verificar: {_upd_err}")
+            if _update_payload:
+                _new_ver = _update_payload.get("version", "?")
+                _msg = (
+                    f"Nueva versión **{_new_ver}** disponible. "
+                    f"Descargando y aplicando... la app se reiniciará en breve."
+                )
+                st.session_state["_update_message"] = _msg
+                st.session_state["_update_checked"] = True
+                st.success(_msg)
+
+                def _manual_update_worker():
+                    try:
+                        _start_update(_update_payload)
+                    except Exception:
+                        pass
+
+                threading.Thread(target=_manual_update_worker, daemon=True).start()
+            else:
+                st.session_state["_update_checked"] = True
+                st.success(
+                    f"Ya estás en la última versión ({_app_version_display}). "
+                    "No hay actualizaciones disponibles."
+                )
 
 # ==============================
 # INTERFAZ PRINCIPAL
