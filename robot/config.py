@@ -156,16 +156,16 @@ except ValueError:
     RECIBIDOS_AUTO_RESULT_TIMEOUT_MS = 60000
 
 try:
-    # Default bajado de 3 → 2: la rehidratación (recarga completa de la
-    # página) es lo que más sube el score de reCAPTCHA porque resetea el
-    # estado y arranca con un widget fresco. Hacerlo antes (desde el
-    # intento 2) hace que el captcha pase más rápido en el 2do en lugar
-    # de aguantar el 3-4to.
+    # Default restaurado a 3 (estuvo brevemente en 2 y empeoró).
+    # Rehidratar (recarga completa) desde el intento 2 es demasiado
+    # agresivo: Google parece interpretar el reset rápido del widget
+    # como abuso y rechaza todo. Desde el 3 funciona — antes pasaba en
+    # 3-4 intentos con este valor.
     RECIBIDOS_REHIDRATAR_DESDE_INTENTO = max(
-        2, int(os.getenv("RECIBIDOS_REHIDRATAR_DESDE_INTENTO", "2"))
+        2, int(os.getenv("RECIBIDOS_REHIDRATAR_DESDE_INTENTO", "3"))
     )
 except ValueError:
-    RECIBIDOS_REHIDRATAR_DESDE_INTENTO = 2
+    RECIBIDOS_REHIDRATAR_DESDE_INTENTO = 3
 
 RECIBIDOS_REHIDRATAR_ON_CAPTCHA = (
     os.getenv("RECIBIDOS_REHIDRATAR_ON_CAPTCHA", "1").strip().lower()
