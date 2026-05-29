@@ -976,30 +976,18 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             boton_consultar.first.scroll_into_view_if_needed()
         except Exception:
             pass
-        # Trayectoria mínima del cursor al botón ANTES del click. Genera
-        # ~12 eventos `mousemove` intermedios que reCAPTCHA Enterprise usa
-        # como señal de interacción humana.
-        #
-        # IMPORTANTE: lo hacemos SIEMPRE, incluso si la humanización
-        # completa está apagada (`RECIBIDOS_HUMANIZAR_PRE_CLICK=0`).
-        # Sin este micro-hover, `click()` teleporta el cursor al botón y
-        # reCAPTCHA rechaza los primeros 2-3 intentos por falta de
-        # mousemoves. Si humanizar ya hizo su propio hover, evitamos
-        # duplicarlo.
-        if not humanizar_info.get("aplicado"):
-            try:
-                box = boton_consultar.first.bounding_box()
-                if box:
-                    cx = int(box["x"] + box["width"] / 2)
-                    cy = int(box["y"] + box["height"] / 2)
-                    page.mouse.move(cx, cy, steps=random.randint(10, 14))
-                    page.wait_for_timeout(random.randint(180, 320))
-            except Exception:
-                pass
+        # NOTA: NO agregamos mouse moves sintéticos aquí (lo intentamos en el
+        # commit 336d634 y empeoró). Playwright's `page.mouse.move(..., steps=N)`
+        # genera eventos con timing perfectamente uniforme, y reCAPTCHA
+        # Enterprise lo detecta como sintético — termina dando peor score que
+        # un click directo sin mouse activity. La interacción humana real
+        # tiene jitter de ms que CDP no replica. Si querés añadir señal de
+        # mousemove, hacelo con `RECIBIDOS_HUMANIZAR_PRE_CLICK=1` que tiene
+        # pausas aleatorias más variables.
         try:
             # `delay=` añade tiempo entre mousedown/mouseup. Lo subimos a
-            # 150-300ms (vs 100-160 previo) para parecer más humano. Un
-            # mousedown/mouseup tan rápido como 100ms se ve sintético.
+            # 150-300ms para parecer más humano. Un mousedown/mouseup tan
+            # rápido como 100ms se ve sintético.
             boton_consultar.first.click(delay=random.randint(150, 300))
             return {"modo": "click-nativo", "click_ok": True, "humanizar": humanizar_info}
         except Exception as err:

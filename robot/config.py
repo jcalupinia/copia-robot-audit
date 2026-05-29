@@ -123,12 +123,16 @@ except ValueError:
     RECIBIDOS_CONSULTA_INTENTOS = 5
 
 try:
+    # Default bajado de 1.2 → 0.5: si los 3-4 reintentos son normales
+    # (reCAPTCHA score sube con tiempo en página y rehidratación), el
+    # backoff lineal de 1.2*intento solo agrega tiempo muerto.
+    # 0.5 da: intento 2=0.5s, 3=1s, 4=1.5s. Total backoff ~3s.
     RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC = max(
         0.0,
-        float(os.getenv("RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC", "1.2")),
+        float(os.getenv("RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC", "0.5")),
     )
 except ValueError:
-    RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC = 1.2
+    RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC = 0.5
 
 try:
     RECIBIDOS_AUTO_PRE_EXECUTE_MS = max(
@@ -152,11 +156,16 @@ except ValueError:
     RECIBIDOS_AUTO_RESULT_TIMEOUT_MS = 60000
 
 try:
+    # Default bajado de 3 → 2: la rehidratación (recarga completa de la
+    # página) es lo que más sube el score de reCAPTCHA porque resetea el
+    # estado y arranca con un widget fresco. Hacerlo antes (desde el
+    # intento 2) hace que el captcha pase más rápido en el 2do en lugar
+    # de aguantar el 3-4to.
     RECIBIDOS_REHIDRATAR_DESDE_INTENTO = max(
-        2, int(os.getenv("RECIBIDOS_REHIDRATAR_DESDE_INTENTO", "3"))
+        2, int(os.getenv("RECIBIDOS_REHIDRATAR_DESDE_INTENTO", "2"))
     )
 except ValueError:
-    RECIBIDOS_REHIDRATAR_DESDE_INTENTO = 3
+    RECIBIDOS_REHIDRATAR_DESDE_INTENTO = 2
 
 RECIBIDOS_REHIDRATAR_ON_CAPTCHA = (
     os.getenv("RECIBIDOS_REHIDRATAR_ON_CAPTCHA", "1").strip().lower()
