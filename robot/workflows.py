@@ -63,19 +63,14 @@ from robot.config import (
     MANUAL_CONSULTA_RECIBIDOS,
     PAUSE_BEFORE_CONSULTAR,
     PAUSE_BEFORE_CONSULTAR_SECONDS,
+    PERFIL_URL,
     RECIBIDOS_AUTO_POST_EXECUTE_MS,
     RECIBIDOS_AUTO_PRE_EXECUTE_MS,
     RECIBIDOS_AUTO_RESULT_TIMEOUT_MS,
     RECIBIDOS_CONSULTA_BACKOFF_BASE_SEC,
     RECIBIDOS_CONSULTA_INTENTOS,
     RECIBIDOS_DIRECT_URL,
-    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MAX,
-    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN,
-    RECIBIDOS_HUMANIZAR_CLICK_X_RATIO,
-    RECIBIDOS_HUMANIZAR_CLICK_Y_RATIO,
-    RECIBIDOS_HUMANIZAR_CLICKS,
-    RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS,
-    RECIBIDOS_HUMANIZAR_PRE_CLICK,
+    RECIBIDOS_PERFIL_WARMUP_MS,
     RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
     RECIBIDOS_REHIDRATAR_DESDE_INTENTO,
     RECIBIDOS_REHIDRATAR_ON_CAPTCHA,
@@ -260,6 +255,34 @@ def _build_download_verification(
 
 def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: str, formatos: list):
     _check_cancel("inicio_recibidos")
+
+    # WARMUP PASIVO en página de perfil (replica el comportamiento de la app
+    # de referencia que pasa el captcha al primer intento). El usuario
+    # confirmó que esa app mantiene Chrome abierto en srienlinea.sri.gob.ec
+    # por minutos mientras el usuario configura filtros, antes del primer
+    # click en Consultar. reCAPTCHA Enterprise acumula signals positivos
+    # durante ese tiempo en dominio y arranca con score más alto.
+    #
+    # Lo hacemos UNA SOLA VEZ por sesión del bot — usamos un flag en el
+    # page object para que las consultas subsiguientes del mismo arranque
+    # (otros meses/tipos) no repitan el warmup.
+    if (
+        RECIBIDOS_PERFIL_WARMUP_MS > 0
+        and not getattr(page, "_perfil_warmup_done", False)
+    ):
+        try:
+            logger.info(
+                "Recibidos: warmup pasivo en %s por %d ms (replica el "
+                "tiempo de la app de referencia en página de perfil).",
+                PERFIL_URL, RECIBIDOS_PERFIL_WARMUP_MS,
+            )
+            page.goto(PERFIL_URL, wait_until="domcontentloaded", timeout=15000)
+            page.wait_for_timeout(RECIBIDOS_PERFIL_WARMUP_MS)
+            setattr(page, "_perfil_warmup_done", True)
+            logger.info("Recibidos: warmup completado, navegando a Recibidos.")
+        except Exception as err:
+            logger.warning(f"Recibidos: warmup en perfil falló: {err}. Continuamos.")
+
     if RECIBIDOS_DIRECT_URL not in (page.url or ""):
         try:
             page.goto(RECIBIDOS_DIRECT_URL, wait_until="domcontentloaded", timeout=5000)
@@ -730,210 +753,14 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
         except Exception:
             return False
 
-    def _humanizar_pre_consultar() -> dict:
-        """Genera interacción humana antes de hacer click en "Consultar".
-
-        Confirmación empírica del usuario: si hace ~6 clicks rápidos en una
-        zona blanca de la página antes de presionar Consultar, el SRI acepta
-        el captcha y devuelve la tabla. Sin esos clicks, Google asigna score
-        bajo y el SRI rechaza con "Captcha incorrecta".
-
-        Estrategia (replicando la prueba manual del usuario):
-          1) Pausa inicial (~1.8s default) para "tiempo en página".
-          2) Mouse moves en 3 puntos con `steps` intermedios (trayectoria).
-          3) Verificar que las coordenadas (X_RATIO, Y_RATIO) del viewport
-             caen sobre un elemento NO interactivo (no input/select/button/
-             /anchor/label/role=button, sin onclick). Si no es seguro, log
-             y se saltan los clicks (queda el resto de la humanización).
-          4) `RECIBIDOS_HUMANIZAR_CLICKS` clicks reales con jitter ±15px y
-             `delay` aleatorio entre [DELAY_MIN, DELAY_MAX]. Pausa 80-180ms
-             entre clicks.
-          5) Pausa 300-700ms post-clicks.
-          6) Hover final sobre el botón Consultar (mouseover + mouseenter
-             generan eventos que reCAPTCHA reconoce como humano antes del
-             click real).
-
-        Devuelve {aplicado, puntos_mouse, clicks_blancos, coordenadas,
-        zona_segura, duracion_ms} para logging.
-        """
-        out = {
-            "aplicado": False,
-            "puntos_mouse": 0,
-            "clicks_blancos": 0,
-            "coordenadas": (0, 0),
-            "zona_segura": False,
-            "duracion_ms": 0,
-        }
-        if not RECIBIDOS_HUMANIZAR_PRE_CLICK:
-            return out
-        inicio = time.perf_counter()
-        try:
-            # (1) Pausa inicial: "tiempo en la página" antes de submitear.
-            if RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS > 0:
-                try:
-                    page.wait_for_timeout(RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS)
-                except Exception:
-                    pass
-
-            # (2) Trayectoria de mouse en zonas seguras (lejos de controles).
-            vp = page.viewport_size or {"width": 1280, "height": 720}
-            ancho = max(800, int(vp.get("width") or 1280))
-            alto = max(600, int(vp.get("height") or 720))
-            puntos = [
-                (max(80, ancho // 6), max(70, alto // 7)),
-                (ancho // 2, max(90, alto // 5)),
-                (min(ancho - 80, ancho - ancho // 5), max(80, alto // 6)),
-            ]
-            for x, y in puntos:
-                try:
-                    page.mouse.move(int(x), int(y), steps=random.randint(8, 14))
-                except Exception:
-                    pass
-                try:
-                    page.wait_for_timeout(random.randint(180, 380))
-                except Exception:
-                    pass
-            out["puntos_mouse"] = len(puntos)
-
-            # (3) Calcular coordenada para los clicks blancos.
-            click_x = int(ancho * RECIBIDOS_HUMANIZAR_CLICK_X_RATIO)
-            click_y = int(alto * RECIBIDOS_HUMANIZAR_CLICK_Y_RATIO)
-            out["coordenadas"] = (click_x, click_y)
-
-            # Verificación de seguridad: que el elemento en (click_x, click_y)
-            # NO sea interactivo. Logueamos también el outerHTML truncado y el
-            # rect del elemento, para debug si el portal cambia layout.
-            zona_segura = False
-            elemento_diag = ""
-            elemento_html = ""
-            if RECIBIDOS_HUMANIZAR_CLICKS > 0:
-                try:
-                    diag = page.evaluate(
-                        """({x, y}) => {
-                            const el = document.elementFromPoint(x, y);
-                            if (!el) return { segura: true, tag: 'NONE', motivo: 'fuera-de-pagina', html: '' };
-                            const tag = (el.tagName || '').toUpperCase();
-                            const role = el.getAttribute ? (el.getAttribute('role') || '') : '';
-                            const id = el.id ? '#' + el.id : '';
-                            const cls = el.className && typeof el.className === 'string'
-                                ? '.' + el.className.trim().split(/\\s+/).slice(0,3).join('.') : '';
-                            const html = (el.outerHTML || '').slice(0, 120);
-                            const desc = tag + id + cls;
-                            const noSegurosTag = ['INPUT','SELECT','TEXTAREA','BUTTON','A','LABEL','OPTION','IFRAME'];
-                            if (noSegurosTag.includes(tag)) {
-                                return { segura: false, tag: desc, motivo: 'tag-interactivo', html };
-                            }
-                            if (role === 'button' || role === 'link' || role === 'tab') {
-                                return { segura: false, tag: desc, motivo: 'role-' + role, html };
-                            }
-                            if (typeof el.onclick === 'function' && el.onclick !== null) {
-                                return { segura: false, tag: desc, motivo: 'tiene-onclick', html };
-                            }
-                            // Subimos por ancestros buscando button/a clickeable
-                            let cur = el;
-                            for (let i = 0; cur && i < 4; i++) {
-                                const t = (cur.tagName || '').toUpperCase();
-                                if (['BUTTON','A','INPUT','SELECT'].includes(t)) {
-                                    return { segura: false, tag: desc, motivo: 'ancestor-' + t, html };
-                                }
-                                cur = cur.parentElement;
-                            }
-                            return { segura: true, tag: desc, motivo: 'ok', html };
-                        }""",
-                        arg={"x": click_x, "y": click_y},
-                    ) or {}
-                    zona_segura = bool(diag.get("segura"))
-                    elemento_diag = f"{diag.get('tag','?')}/{diag.get('motivo','?')}"
-                    elemento_html = str(diag.get("html") or "")
-                except Exception:
-                    zona_segura = False
-                    elemento_diag = "eval-error"
-            out["zona_segura"] = zona_segura
-
-            # (4) Clicks reales en la zona blanca (si es segura).
-            # Cambios para parecer más humano (test manual del usuario lo confirma):
-            #   - Antes de cada click hacemos `mouse.move(x, y, steps=N)` para
-            #     que el cursor viaje (no teleporte) entre puntos. Esto genera
-            #     N eventos `mousemove` por trayecto.
-            #   - Pausa pre-click (60-140ms) y post-click (220-420ms) más
-            #     largas que antes (80-180ms total).
-            #   - Jitter de ±30 px (era ±15) para que los clicks no caigan en
-            #     la misma columna de pixels.
-            if zona_segura and RECIBIDOS_HUMANIZAR_CLICKS > 0:
-                logger.info(
-                    "Recibidos: humanizar -> intentando %d clicks blancos en "
-                    "(%d,%d) sobre %s | html=%r",
-                    RECIBIDOS_HUMANIZAR_CLICKS, click_x, click_y, elemento_diag,
-                    elemento_html,
-                )
-                for _ in range(RECIBIDOS_HUMANIZAR_CLICKS):
-                    jx = click_x + random.randint(-30, 30)
-                    jy = click_y + random.randint(-30, 30)
-                    # Viaje gradual hacia la nueva coordenada (genera mousemoves
-                    # intermedios, no teleporte).
-                    try:
-                        page.mouse.move(jx, jy, steps=random.randint(5, 12))
-                    except Exception:
-                        pass
-                    # Pausa breve antes del click (humano se "asienta" sobre el
-                    # punto antes de presionar).
-                    try:
-                        page.wait_for_timeout(random.randint(60, 140))
-                    except Exception:
-                        pass
-                    delay = random.randint(
-                        RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN,
-                        RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MAX,
-                    )
-                    try:
-                        page.mouse.click(jx, jy, delay=delay)
-                        out["clicks_blancos"] += 1
-                    except Exception:
-                        pass
-                    # Pausa más larga entre clicks (era 80-180ms; subido a
-                    # 220-420 porque la prueba manual del usuario tiene ritmo
-                    # más lento).
-                    try:
-                        page.wait_for_timeout(random.randint(220, 420))
-                    except Exception:
-                        pass
-                logger.info(
-                    "Recibidos: humanizar -> %d clicks blancos completados.",
-                    out["clicks_blancos"],
-                )
-            elif RECIBIDOS_HUMANIZAR_CLICKS > 0:
-                logger.warning(
-                    "Recibidos: coords humanizar (%d,%d) caen sobre control "
-                    "interactivo (%s) | html=%r. Saltando clicks blancos. "
-                    "Ajustá RECIBIDOS_HUMANIZAR_CLICK_X_RATIO/Y_RATIO si querés "
-                    "forzar los clicks en otra zona.",
-                    click_x, click_y, elemento_diag, elemento_html,
-                )
-
-            # (5) Pausa post-clicks (era 300-700ms; subida a 700-1500 para
-            # que el modelo de reCAPTCHA vea más "thinking time" antes del
-            # click definitivo).
-            try:
-                page.wait_for_timeout(random.randint(700, 1500))
-            except Exception:
-                pass
-
-            # (6) Hover final sobre el botón "Consultar".
-            try:
-                box = boton_consultar.first.bounding_box()
-                if box:
-                    cx = int(box["x"] + box["width"] / 2)
-                    cy = int(box["y"] + box["height"] / 2)
-                    page.mouse.move(cx, cy, steps=random.randint(8, 12))
-                    page.wait_for_timeout(random.randint(180, 320))
-            except Exception:
-                pass
-
-            out["aplicado"] = True
-        except Exception as err:
-            logger.warning(f"Recibidos: humanizar pre-click falló: {err}")
-        out["duracion_ms"] = int((time.perf_counter() - inicio) * 1000)
-        return out
+    # NOTA: `_humanizar_pre_consultar` se ELIMINÓ el 2026-05-29. Probamos
+    # múltiples variantes (mouse moves, clicks blancos automáticos, pausas
+    # largas) y NINGUNA mejoró el score de reCAPTCHA Enterprise. Lección:
+    # eventos sintéticos de Playwright tienen timing demasiado uniforme y
+    # Google los detecta como bots — cero signals > signals robóticos.
+    # Para "warmup" usamos `RECIBIDOS_PERFIL_WARMUP_MS` que mantiene Chrome
+    # en la página de perfil sin actividad simulada (replica el comportamiento
+    # de la app de referencia que pasa el captcha al primer intento).
 
     def _disparar_consulta_recibidos_automatica(action: str, flag: str) -> dict:
         """Dispara la consulta haciendo click NATURAL sobre el botón.
@@ -961,38 +788,30 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
           #2: source=frmPrincipal:j_idtNN       g-recaptcha-response=<token>
               (render de tablaCompRecibidos — éxito)
 
-        Antes del click hacemos pre-interacción humana (mouse moves) para
-        que reCAPTCHA Enterprise suba el score. Sin esto, Google rechaza
-        con "Captcha incorrecta" (score ≈ 0.0 por bot detection).
-
-        Devuelve {modo, click_ok, humanizar} para logging. `modo` es siempre
-        'click-nativo' (o '' si el click falló).
+        Devuelve {modo, click_ok}. `modo` es siempre 'click-nativo' (o ''
+        si el click falló).
         """
         # `action` y `flag` se aceptan solo para logging consistente — no
         # los reusamos para forzar nada, el onclick original ya los conoce.
         del action, flag  # solo para los logs del caller
-        humanizar_info = _humanizar_pre_consultar()
         try:
             boton_consultar.first.scroll_into_view_if_needed()
         except Exception:
             pass
-        # NOTA: NO agregamos mouse moves sintéticos aquí (lo intentamos en el
-        # commit 336d634 y empeoró). Playwright's `page.mouse.move(..., steps=N)`
-        # genera eventos con timing perfectamente uniforme, y reCAPTCHA
-        # Enterprise lo detecta como sintético — termina dando peor score que
-        # un click directo sin mouse activity. La interacción humana real
-        # tiene jitter de ms que CDP no replica. Si querés añadir señal de
-        # mousemove, hacelo con `RECIBIDOS_HUMANIZAR_PRE_CLICK=1` que tiene
-        # pausas aleatorias más variables.
+        # NOTA: NO agregamos mouse moves sintéticos. Probamos múltiples
+        # variantes (mouse moves con steps, clicks blancos automáticos,
+        # pausas largas) y NINGUNA mejoró el score de reCAPTCHA Enterprise.
+        # Playwright dispatches CDP events con timing demasiado uniforme;
+        # Google los detecta como bots. Para mejorar el score usamos el
+        # warmup PASIVO en página de perfil (`RECIBIDOS_PERFIL_WARMUP_MS`)
+        # que replica la receta de la app de referencia: dejar Chrome
+        # reposando en el dominio del SRI sin actividad simulada.
         try:
-            # `delay=` añade tiempo entre mousedown/mouseup. Lo subimos a
-            # 150-300ms para parecer más humano. Un mousedown/mouseup tan
-            # rápido como 100ms se ve sintético.
             boton_consultar.first.click(delay=random.randint(150, 300))
-            return {"modo": "click-nativo", "click_ok": True, "humanizar": humanizar_info}
+            return {"modo": "click-nativo", "click_ok": True}
         except Exception as err:
             logger.warning(f"Recibidos: no se pudo hacer click nativo en Consultar: {err}")
-            return {"modo": "", "click_ok": False, "humanizar": humanizar_info}
+            return {"modo": "", "click_ok": False}
 
     def _esperar_resultado_consulta(timeout: int = 300000) -> tuple[str, str]:
         """Espera el resultado válido de la consulta de Recibidos.
@@ -1255,13 +1074,6 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             )
             modo_disparo = disparo.get("modo", "")
             click_ok = bool(disparo.get("click_ok"))
-            humanizar_info = disparo.get("humanizar") or {}
-            humanizar_aplicado = bool(humanizar_info.get("aplicado"))
-            humanizar_dur = int(humanizar_info.get("duracion_ms") or 0)
-            humanizar_puntos = int(humanizar_info.get("puntos_mouse") or 0)
-            humanizar_clicks = int(humanizar_info.get("clicks_blancos") or 0)
-            humanizar_coords = humanizar_info.get("coordenadas") or (0, 0)
-            humanizar_zona_segura = bool(humanizar_info.get("zona_segura"))
             if RECIBIDOS_AUTO_POST_EXECUTE_MS > 0:
                 try:
                     page.wait_for_timeout(RECIBIDOS_AUTO_POST_EXECUTE_MS)
@@ -1281,15 +1093,12 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             dur = time.perf_counter() - inicio_intento
             logger.info(
                 "Recibidos intento %d/%d | action=%s flag=%s | modo=%s click_ok=%s | "
-                "humanizar=%s (puntos=%d clicks=%d zona_segura=%s coords=%s dur=%dms) | "
                 "api_lista=%s executeRecaptcha=%s enterprise.execute=%s rcBuscar=%s | "
                 "rehidratado=%s | n_requests=%d algun_token=%s render_tabla=%s | "
                 "estado=%s mensaje=%r | requests=%s | dur=%.2fs",
                 intento, intentos,
                 RECAPTCHA_ACTION, RECAPTCHA_FLAG,
                 modo_disparo or "desconocido", click_ok,
-                humanizar_aplicado, humanizar_puntos, humanizar_clicks,
-                humanizar_zona_segura, humanizar_coords, humanizar_dur,
                 api_lista,
                 apis_diag.get("hasExecuteRecaptcha", False),
                 apis_diag.get("hasEnterpriseExecute", False),
@@ -1303,8 +1112,6 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             print(
                 f"[INFO] Recibidos intento {intento}/{intentos}: "
                 f"action={RECAPTCHA_ACTION!r}, modo={modo_disparo or 'desconocido'}, "
-                f"humanizar={humanizar_aplicado} ({humanizar_puntos}m/"
-                f"{humanizar_clicks}c@{humanizar_coords}/{humanizar_dur}ms), "
                 f"n_requests={n_requests}, algun_token={algun_token}, "
                 f"render_tabla={algun_render}, estado={estado}, "
                 f"rehidratado={rehidratado}, dur={dur:.2f}s"

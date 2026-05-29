@@ -339,6 +339,7 @@ from robot.config import (
     RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
     RECIBIDOS_REHIDRATAR_DESDE_INTENTO,
     RECIBIDOS_REHIDRATAR_ON_CAPTCHA,
+    PLAYWRIGHT_USE_TEMP_PROFILE,
     PREFER_SYSTEM_CHROME,
     RECUPERAR_COMPROBANTES_URL,
     SLOW_MO,
@@ -757,15 +758,26 @@ def _abrir_navegador(p):
         persistent_kwargs = dict(base_kwargs, accept_downloads=True)
         rutas = []
 
-        perfil_fijo = Path(USER_DATA_DIR).expanduser()
-        if not perfil_fijo.is_absolute():
-            perfil_fijo = Path.cwd() / perfil_fijo
-        try:
-            perfil_fijo.mkdir(parents=True, exist_ok=True)
-            _limpiar_locks_perfil(perfil_fijo)
-            rutas.append(("perfil fijo", perfil_fijo))
-        except Exception as err:
-            errores.append(f"perfil fijo no accesible: {type(err).__name__}: {err}")
+        # Si PLAYWRIGHT_USE_TEMP_PROFILE=1, saltamos el perfil persistente
+        # fijo y usamos SOLO perfil temporal por sesión. Replica el
+        # comportamiento de la app de referencia que crea `scoped_dir_XXXX`
+        # nuevo cada vez y pasa el captcha al primer intento (no acumula
+        # mala reputación de Google en cookies viejas).
+        if not PLAYWRIGHT_USE_TEMP_PROFILE:
+            perfil_fijo = Path(USER_DATA_DIR).expanduser()
+            if not perfil_fijo.is_absolute():
+                perfil_fijo = Path.cwd() / perfil_fijo
+            try:
+                perfil_fijo.mkdir(parents=True, exist_ok=True)
+                _limpiar_locks_perfil(perfil_fijo)
+                rutas.append(("perfil fijo", perfil_fijo))
+            except Exception as err:
+                errores.append(f"perfil fijo no accesible: {type(err).__name__}: {err}")
+        else:
+            logger.info(
+                "PLAYWRIGHT_USE_TEMP_PROFILE=1: saltando perfil persistente "
+                "fijo. Solo usaremos perfil temporal por sesión."
+            )
 
         try:
             rutas.append(("perfil temporal", Path(tempfile.mkdtemp(prefix="sri_robot_profile_"))))

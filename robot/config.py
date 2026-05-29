@@ -175,70 +175,48 @@ RECIBIDOS_REHIDRATAR_ON_CAPTCHA = (
 MANUAL_CONSULTA_RECIBIDOS_ENV = os.getenv("RECIBIDOS_MANUAL_CONSULTA", "0").strip().lower()
 MANUAL_CONSULTA_RECIBIDOS = MANUAL_CONSULTA_RECIBIDOS_ENV in {"1", "true", "yes", "on"}
 
-# Humanizar la interacción antes de "Consultar" en Recibidos. El reCAPTCHA
-# Enterprise asigna score por trayectoria de mouse, pausas y tiempo en página;
-# sin estos eventos el score baja a ~0.0 y el SRI rechaza con "Captcha
-# incorrecta". Generamos mouse moves con `steps` intermedios, pausas
-# aleatorias y hover sobre el botón antes del click.
-RECIBIDOS_HUMANIZAR_PRE_CLICK = (
-    os.getenv("RECIBIDOS_HUMANIZAR_PRE_CLICK", "1").strip().lower()
+# Humanización eliminada (2026-05-29). Probamos pre-click con mouse moves
+# sintéticos (commit 336d634) y con clicks blancos automáticos (a5194da,
+# d9f72c6, 84e2643) y NINGUNO mejoró el score de reCAPTCHA Enterprise.
+# Los eventos sintéticos de Playwright tienen timing demasiado uniforme y
+# Google los detecta como bots. Lección: cero signals sintéticos > signals
+# robóticos. El click directo (sin humanización) es la mejor estrategia.
+
+# Warmup en la página de perfil del SRI antes de ir a Recibidos. El test del
+# usuario confirmó que la app de referencia que pasa el captcha al primer
+# intento mantiene Chrome abierto en srienlinea.sri.gob.ec por minutos (el
+# usuario configura filtros en la UI alterna mientras Chrome reposa en la
+# página de perfil). reCAPTCHA Enterprise acumula signals positivos durante
+# ese tiempo en dominio y arranca con score más alto cuando finalmente
+# clickea Consultar.
+#
+# Si =0 (default), no hace warmup — comportamiento previo. Si >0, después
+# del login el bot navega a /sri-en-linea/contribuyente/perfil, espera ese
+# tiempo, y RECIÉN AHÍ va a Recibidos. Se aplica una sola vez por sesión
+# del bot (flag en el page object), no por cada consulta de mes/tipo.
+try:
+    RECIBIDOS_PERFIL_WARMUP_MS = max(
+        0, int(os.getenv("RECIBIDOS_PERFIL_WARMUP_MS", "0"))
+    )
+except ValueError:
+    RECIBIDOS_PERFIL_WARMUP_MS = 0
+
+# Perfil temporal por sesión, en lugar de persistente. La app de referencia
+# usa `user-data-dir=...\Temp\scoped_dir_XXXX` (perfil nuevo cada vez) y
+# pasa el captcha al primer intento. Nuestro perfil persistente podría
+# acumular cookies de Google con "mala reputación" de intentos anteriores
+# con flags de automatización activos.
+#
+# Si =1, en cada arranque del bot se crea un perfil temporal con
+# `tempfile.mkdtemp("sri_bot_temp_")` y se usa como user-data-dir. El
+# usuario tiene que loguearse al SRI cada vez que arranca el bot (fricción
+# mayor), pero arranca con cookies vacías sin "mala reputación".
+#
+# Si =0 (default), usa el perfil persistente normal (browser_profile/).
+PLAYWRIGHT_USE_TEMP_PROFILE = (
+    os.getenv("PLAYWRIGHT_USE_TEMP_PROFILE", "0").strip().lower()
     in {"1", "true", "yes", "on", "si"}
 )
-try:
-    # Default subido a 5000 ms (5s): el test manual del usuario confirmó que
-    # con ~1.8s no alcanza para que reCAPTCHA Enterprise considere humano al
-    # bot; con tiempo de página más largo (rango 4-7s) sí pasa.
-    RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS = max(
-        0, int(os.getenv("RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS", "5000"))
-    )
-except ValueError:
-    RECIBIDOS_HUMANIZAR_PAUSA_INICIAL_MS = 5000
-
-# Clics reales en una zona "blanca" segura del viewport (lejos de inputs/
-# selects/botones) antes de presionar Consultar. El reCAPTCHA Enterprise
-# valora positivamente eventos `click` reales con timing humano. Test manual
-# del usuario: 6 clics rápidos en una zona vacía sí hacen que el captcha
-# pase, donde solo mover el mouse no era suficiente.
-try:
-    RECIBIDOS_HUMANIZAR_CLICKS = max(
-        0, int(os.getenv("RECIBIDOS_HUMANIZAR_CLICKS", "6"))
-    )
-except ValueError:
-    RECIBIDOS_HUMANIZAR_CLICKS = 6
-
-try:
-    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN = max(
-        0, int(os.getenv("RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN", "80"))
-    )
-except ValueError:
-    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN = 80
-
-try:
-    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MAX = max(
-        RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN,
-        int(os.getenv("RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MAX", "180")),
-    )
-except ValueError:
-    RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MAX = max(
-        RECIBIDOS_HUMANIZAR_CLICK_DELAY_MS_MIN, 180
-    )
-
-# Coordenadas relativas al viewport (0.0-1.0) donde caen los clicks blancos.
-# Default 0.82 / 0.48 → lado derecho-medio del viewport, donde el SRI suele
-# tener espacio en blanco (el formulario está alineado a la izquierda).
-try:
-    RECIBIDOS_HUMANIZAR_CLICK_X_RATIO = max(
-        0.05, min(0.95, float(os.getenv("RECIBIDOS_HUMANIZAR_CLICK_X_RATIO", "0.82")))
-    )
-except ValueError:
-    RECIBIDOS_HUMANIZAR_CLICK_X_RATIO = 0.82
-
-try:
-    RECIBIDOS_HUMANIZAR_CLICK_Y_RATIO = max(
-        0.05, min(0.95, float(os.getenv("RECIBIDOS_HUMANIZAR_CLICK_Y_RATIO", "0.48")))
-    )
-except ValueError:
-    RECIBIDOS_HUMANIZAR_CLICK_Y_RATIO = 0.48
 
 
 # --------------------------------------------------------------------------- #
@@ -265,6 +243,9 @@ URLS = {
     "Emitidos":  "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/consultas/emitidos/comprobantesEmitidos.jsf",
 }
 RECIBIDOS_DIRECT_URL = "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/consultas/recibidos/comprobantesRecibidos.jsf"
+# Página de perfil del SRI — la usamos como destino del warmup que la app de
+# referencia hace pasivamente mientras el usuario configura filtros.
+PERFIL_URL = "https://srienlinea.sri.gob.ec/sri-en-linea/contribuyente/perfil"
 RECUPERAR_COMPROBANTES_URL = "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/consultas/recuperarComprobantes.jsf"
 MENU_URL = "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/consultas/menu.jsf"
 MENU_URL_ALT = (
