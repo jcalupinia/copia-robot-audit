@@ -649,24 +649,40 @@ def _buscar_reportes_por_periodo(
     return encontrados
 
 
-def _extraer_fecha_desde_ruta_documento(ruta: Path, tipo_prefijo: str) -> tuple[int, int, int | None] | None:
-    tipo_slug = ""
+def _extraer_fecha_desde_ruta_documento(
+    ruta: Path,
+    tipo_prefijo: str,
+    tipo_slug_archivo: str | None = None,
+) -> tuple[int, int, int | None] | None:
+    # El slug usado para nombrar archivos al descargar viene de
+    # `_slug_tipo(tipo_visible)` (p.ej. "nota_de_credito" para "Nota de Credito").
+    # El derivado desde `tipo_prefijo` usa la etiqueta canonica del TIPO_LABEL_MAP
+    # (p.ej. "NotaCredito" -> slug "notacredito"), que NO coincide con los
+    # nombres de archivo reales. Aceptamos ambos por compatibilidad.
+    slugs_validos: set[str] = set()
+    if tipo_slug_archivo:
+        slug_norm = _slug_tipo(tipo_slug_archivo)
+        if slug_norm:
+            slugs_validos.add(slug_norm)
     try:
         _, etiqueta_tipo = str(tipo_prefijo or "").split("_", 1)
-        tipo_slug = _slug_tipo(etiqueta_tipo)
+        slug_derivado = _slug_tipo(etiqueta_tipo)
     except Exception:
-        tipo_slug = _slug_tipo(tipo_prefijo or "")
+        slug_derivado = _slug_tipo(tipo_prefijo or "")
+    if slug_derivado:
+        slugs_validos.add(slug_derivado)
 
     # Estructura nueva: .../<anio>/<mes>/<XML|PDF>/<tipo_slug>__YYYYMMDD__archivo.ext
     try:
-        if ruta.parent.name.lower() in {"xml", "pdf"}:
+        if ruta.parent.name.lower() in {"xml", "pdf"} and slugs_validos:
             mes_txt = ruta.parent.parent.name
             anio_txt = ruta.parent.parent.parent.name
             if anio_txt.isdigit():
                 mes = _mes_desde_texto(mes_txt)
                 if mes:
+                    union_slugs = "|".join(re.escape(s) for s in slugs_validos)
                     patron_nombre = re.compile(
-                        r"^" + re.escape(tipo_slug) + r"__(\d{8})__",
+                        r"^(?:" + union_slugs + r")__(\d{8})__",
                         re.IGNORECASE,
                     )
                     match_nombre = patron_nombre.match(ruta.name)
@@ -716,6 +732,7 @@ def _colectar_documentos_por_periodo(
     mes_inicio: int,
     mes_fin: int,
     dia_objetivo: int,
+    tipo_slug_archivo: str | None = None,
 ) -> list[Path]:
     if not base_dir.exists():
         return []
@@ -730,7 +747,7 @@ def _colectar_documentos_por_periodo(
                 continue
             if ruta.parent.name.lower() != ext:
                 continue
-            fecha_info = _extraer_fecha_desde_ruta_documento(ruta, tipo_prefijo)
+            fecha_info = _extraer_fecha_desde_ruta_documento(ruta, tipo_prefijo, tipo_slug_archivo)
             if not fecha_info:
                 continue
             anio_arch, mes_arch, dia_arch = fecha_info
@@ -1470,6 +1487,50 @@ section[data-testid="stSidebar"] img{
   margin-left:auto !important;
   margin-right:auto !important;
 }
+/* Linea de version en sidebar */
+.sidebar-version-line{
+  text-align:center !important;
+  font-size:0.95rem !important;
+  color:var(--text) !important;
+  margin:0.4rem 0 0.55rem 0;
+}
+.sidebar-version-line strong{
+  color:var(--text-strong) !important;
+  font-weight:700 !important;
+}
+/* Boton "Buscar actualizaciones" en sidebar */
+.st-key-btn_buscar_update button{
+  background:linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+  color:#ffffff !important;
+  border:none !important;
+  border-radius:12px !important;
+  font-weight:700 !important;
+  letter-spacing:0.01em;
+  padding:0.55rem 1rem !important;
+  box-shadow:0 10px 24px rgba(91,140,255,0.32) !important;
+  transition:transform .15s ease, filter .15s ease, box-shadow .15s ease;
+}
+.st-key-btn_buscar_update button *{
+  color:#ffffff !important;
+}
+.st-key-btn_buscar_update button:hover{
+  transform:translateY(-1px);
+  filter:brightness(1.08);
+  box-shadow:0 14px 32px rgba(91,140,255,0.45) !important;
+}
+
+/* ===================== Captions visibles en dark mode ===================== */
+.stApp [data-testid="stCaptionContainer"],
+.stApp [data-testid="stCaptionContainer"] *,
+.stApp [data-testid="stCaption"],
+.stApp [data-testid="stCaption"] *,
+.stApp [data-testid="stMarkdownContainer"] small,
+.stApp [data-testid="stMarkdownContainer"] small *,
+.stApp [data-testid="stMarkdown"] small,
+.stApp [data-testid="stMarkdown"] small *{
+  color:var(--text) !important;
+  opacity:1 !important;
+}
 
 /* ===================== Labels de widgets ===================== */
 .stApp [data-testid="stWidgetLabel"],
@@ -2204,7 +2265,7 @@ def _build_custom_report_from_folder(
     is_retencion = target_tipo == "retenciones"
     is_nota_credito = target_tipo == "notas_de_credito"
     is_nota_debito = target_tipo == "notas_de_debito"
-    is_factura_emitida = target_tipo == "factura" and origen == "Emitidos"
+    is_factura_emitida = target_tipo == "facturas" and origen == "Emitidos"
     is_liquidacion_emitida = target_tipo == "liquidacion_de_compra" and origen == "Emitidos"
     rows: list[dict] = []
     seen_keys: set[str] = set()
@@ -2242,7 +2303,7 @@ def _build_custom_report_from_folder(
             continue
         if is_nota_debito and origen == "Emitidos":
             row = _extraer_datos_xml_nota_debito_emitido(xml_path)
-            fecha_doc = _parse_report_date(row.get("Fecha de Emisión")) or _parse_report_date(row.get("Fecha de AutorizaciÃ³n"))
+            fecha_doc = _parse_report_date(row.get("Fecha de Emisión")) or _parse_report_date(row.get("Fecha de Autorización"))
             if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
                 continue
             key = _report_row_key(row)
@@ -2672,17 +2733,17 @@ with st.sidebar:
     else:
         _app_version_display = "3.0 (dev)"
 
-    _col_ver, _col_upd = st.columns([2, 1])
-    with _col_ver:
-        st.markdown(f"**Versión:** {_app_version_display}")
-    with _col_upd:
-        if st.button("🔄 Buscar", help="Buscar actualizaciones disponibles",
-                     use_container_width=True, key="btn_buscar_update"):
-            # Reset del estado para forzar un nuevo chequeo.
-            st.session_state.pop("_update_checked", None)
-            st.session_state.pop("_update_message", None)
-            st.session_state["_manual_update_check"] = True
-            st.rerun()
+    st.markdown(
+        f'<div class="sidebar-version-line">Versión: <strong>{_app_version_display}</strong></div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("🔄 Buscar actualizaciones", help="Buscar actualizaciones disponibles",
+                 use_container_width=True, key="btn_buscar_update"):
+        # Reset del estado para forzar un nuevo chequeo.
+        st.session_state.pop("_update_checked", None)
+        st.session_state.pop("_update_message", None)
+        st.session_state["_manual_update_check"] = True
+        st.rerun()
 
     # Resultado del chequeo manual (solo se ejecuta UNA vez tras el click).
     if st.session_state.pop("_manual_update_check", False):
@@ -4302,6 +4363,7 @@ with tab3:
                 int(mes_inicio_consolidar),
                 int(mes_fin_consolidar),
                 int(dia_consolidar),
+                tipo_slug_archivo=tipo_slug,
             )
             st.caption(f"Reportes XML base encontrados: {len(reportes_xml)}")
             st.caption(f"Documentos XML encontrados: {len(xml_files)}")
@@ -4354,6 +4416,7 @@ with tab3:
                 int(mes_inicio_consolidar),
                 int(mes_fin_consolidar),
                 int(dia_consolidar),
+                tipo_slug_archivo=tipo_slug,
             )
             st.caption(f"Reportes PDF encontrados: {len(reportes_pdf)}")
             st.caption(f"Documentos PDF encontrados: {len(pdf_files)}")

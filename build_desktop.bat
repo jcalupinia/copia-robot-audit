@@ -26,6 +26,7 @@ pyinstaller --noconfirm --onefile --name "ROBOT_AUDIT_SRI" ^
   --add-data "aplicacion.py;." ^
   --add-data "AUDIT_IA_sin_fondo_transparente_FINAL.png;." ^
   --add-data "licensing_client.py;." ^
+  --add-data "desktop_launcher.py;." ^
   --add-data "version.txt;." ^
   --add-data "robot;robot" ^
   --add-data "licensing_api;licensing_api" ^
