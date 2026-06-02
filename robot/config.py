@@ -252,6 +252,16 @@ RECUPERAR_COMPROBANTES_URL = "https://srienlinea.sri.gob.ec/comprobantes-electro
 # formulario real de consulta. El destino tras clickear el enlace se descubre
 # en runtime — no hay URL directa al formulario.
 MENU_ANULACION_URL = "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/solicitud/anulacion/menuAnulacion.jsf"
+# URL "oficial" que usa el side menu del SRI al cliquear "Anulacion" — lo
+# confirmo la barra de estado del navegador. accederAplicacion.jspa hace el
+# handshake de sesion del portal (tuportal-internet -> comprobantes-
+# electronicos-internet) y luego redirecciona a menuAnulacion.jsf. Es la
+# entry preferida porque NO mata la sesion como si hace el deep-link directo
+# a menuAnulacion.jsf.
+ACCEDER_ANULACION_URL = (
+    "https://srienlinea.sri.gob.ec/tuportal-internet/accederAplicacion.jspa"
+    "?redireccion=61&idGrupo=58"
+)
 MENU_URL = "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/consultas/menu.jsf"
 MENU_URL_ALT = (
     "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/consultas/menu.jsf"

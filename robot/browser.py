@@ -26,6 +26,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from robot._logging import get_logger
 from robot.config import (
+    ACCEDER_ANULACION_URL,
     ANULACION_PROD_SELECTOR,
     AUTORIZACION_COMPROBANTES_SOAP_URL,
     CONSULTAS_SELECTOR,
@@ -2157,46 +2158,26 @@ def _abrir_modulo_consultas(page, origen: str):
 
 
 def _es_pagina_login_sri(page) -> bool:
-    """True si la `page` esta en una pagina de login/auth del SRI o si
-    contiene texto claro de sesion expirada/cerrada.
+    """True si la `page` esta en una pagina de login/auth del SRI.
 
-    Usado para detectar el caso en que un goto a una URL protegida
-    redirecciono al SSO en vez de servir la pagina pedida (sintoma
-    tipico cuando se hace deep-link sin haber bootstrapeado la app
-    JSF correspondiente).
+    Detector estricto: SOLO confiamos en tokens de URL (Keycloak redirect,
+    sessionTimeout). NO buscamos frases en el contenido — el portal SRI
+    incluye textos como 'Iniciar sesion' / 'Cerrar Sesion' en partes
+    legitimas (header, tooltips, ayuda), y eso producia falsos positivos
+    que abortaban el flujo antes de poder navegar al side menu.
     """
     try:
         url = (page.url or "").lower()
     except Exception:
         url = ""
-    if any(
+    return any(
         token in url
         for token in (
             "openid-connect/auth",
-            "/auth/realms/",
-            "/login",
-            "logout",
+            "auth/realms/",
             "sessiontimeout",
         )
-    ):
-        return True
-    try:
-        contenido = page.content() or ""
-    except Exception:
-        contenido = ""
-    if not contenido:
-        return False
-    texto = unicodedata.normalize("NFKD", contenido).lower()
-    for phrase in (
-        "iniciar sesion",
-        "su sesion ha expirado",
-        "su sesion ha caducado",
-        "session has expired",
-        "sesion ha sido cerrada",
-    ):
-        if phrase in texto:
-            return True
-    return False
+    )
 
 
 def _en_menu_anulacion(page) -> bool:
@@ -2296,96 +2277,124 @@ def _navegar_anulacion_via_side_menu(page) -> None:
 def _abrir_modulo_anulados(page):
     """Navega al modulo de Consulta comprobantes anulados.
 
-    Estrategia en cascada:
-      Plan A: URL directa (`menuAnulacion.jsf`) precedida de un bootstrap
-              a `consultas/menu.jsf` para activar la sesion JSF de la
-              app comprobantes-electronicos-internet. Es lo preferido
-              porque evita interactuar con el side menu.
-      Plan B (fallback automatico): si Plan A no aterriza en
-              `menuAnulacion.jsf` o si el SRI mato la sesion, se navega
-              expandiendo el side menu (Facturacion > Produccion >
-              Anulacion). Reproduce el camino de un usuario real.
+    Estrategia en cascada de tres planes, ordenados por probabilidad de
+    exito y MINIMO impacto sobre la sesion:
 
-    Tras llegar al menu de Anulacion, se clickea el enlace 'Consulta
-    comprobantes anulados' usando una cascada de selectores
-    (get_by_role > scope al form#consultaDocumentoForm > XPath estable).
+      Plan A (accederAplicacion.jspa):
+        Es la URL que el propio side menu del SRI usa cuando el usuario
+        cliquea "Anulacion" (confirmado por la barra de estado del
+        navegador). Hace el handshake completo de portal -> aplicacion
+        y redirige a menuAnulacion.jsf. NO mata la sesion como si lo
+        hace el deep-link directo al .jsf.
+
+      Plan B (side menu):
+        Click sobre "Facturacion Electronica > Produccion > Anulacion"
+        en el side menu lateral. Reproduce un usuario real. Se usa el
+        selector scopeado a Produccion para evitar el "Anulacion"
+        duplicado que aparece bajo Pruebas.
+
+      Plan C (deep link a menuAnulacion.jsf):
+        Solo como ultimo recurso. Se sabe que puede matar la sesion en
+        algunos entornos del SRI, pero se intenta por completitud.
+
+    Despues de aterrizar en menuAnulacion.jsf se clickea el enlace
+    'Consulta comprobantes anulados' con cascada de selectores
+    (get_by_role > scope al form#consultaDocumentoForm > XPath).
     """
     _cerrar_modal_encuesta(page)
 
-    # ============ Plan A: URL directa con bootstrap ============
-    plan_a_ok = False
+    # Bootstrap: tocar consultas/menu.jsf para activar la sesion JSF de
+    # comprobantes-electronicos-internet. Ayuda a que cualquiera de los
+    # tres planes funcione mejor.
     try:
         page.goto(MENU_URL, wait_until="domcontentloaded", timeout=12000)
         try:
             page.wait_for_load_state("networkidle", timeout=3000)
         except Exception:
             pass
-
-        if _es_pagina_login_sri(page):
-            logger.warning(
-                "[anulados] tras bootstrap, el SRI quiere reautenticar. "
-                "Saltando a Plan B (side menu)."
-            )
-        else:
-            try:
-                page.goto(MENU_ANULACION_URL, wait_until="domcontentloaded", timeout=15000)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=4000)
-                except Exception:
-                    pass
-            except Exception as err:
-                logger.warning(f"goto directo a menuAnulacion fallo: {err}")
-            if not _es_pagina_login_sri(page) and _en_menu_anulacion(page):
-                plan_a_ok = True
-            else:
-                logger.warning(
-                    "[anulados] URL directa no aterrizo en menuAnulacion.jsf "
-                    "(posible session-kill). Saltando a Plan B (side menu)."
-                )
     except Exception as err:
-        logger.warning(f"Plan A para abrir Anulados fallo: {err}")
+        logger.warning(f"Bootstrap por consultas/menu.jsf fallo: {err}")
 
-    # ============ Plan B: side menu (fallback) ============
-    if not plan_a_ok:
-        # Necesitamos volver a un estado donde el side menu este disponible.
-        # PORTAL_HOME no lo importamos aqui — usamos consultas/menu.jsf que
-        # ya hicimos en el bootstrap y tiene el side menu del SRI.
+    if _es_pagina_login_sri(page):
+        raise RuntimeError(
+            "Tras login, el SRI redirigio a la pantalla de autenticacion. "
+            "La sesion no se pudo establecer en el portal. Vuelve a "
+            "iniciar sesion."
+        )
+
+    # ============ Plan A: accederAplicacion.jspa ============
+    plan_logrado = None
+    try:
+        page.goto(ACCEDER_ANULACION_URL, wait_until="domcontentloaded", timeout=20000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        if not _es_pagina_login_sri(page) and _en_menu_anulacion(page):
+            plan_logrado = "A (accederAplicacion.jspa)"
+    except Exception as err:
+        logger.warning(f"[anulados] Plan A (accederAplicacion) fallo: {err}")
+
+    # ============ Plan B: side menu ============
+    if not plan_logrado:
         try:
             current_url = (page.url or "").lower()
-            if "comprobantes-electronicos-internet" not in current_url:
+        except Exception:
+            current_url = ""
+        # Asegurarnos de estar en una pagina con el side menu disponible
+        # antes de intentar el click.
+        if "comprobantes-electronicos-internet" not in current_url or _es_pagina_login_sri(page):
+            try:
                 page.goto(MENU_URL, wait_until="domcontentloaded", timeout=12000)
                 try:
                     page.wait_for_load_state("networkidle", timeout=3000)
                 except Exception:
                     pass
-        except Exception:
-            pass
+            except Exception as err:
+                logger.warning(f"Re-bootstrap antes de Plan B fallo: {err}")
 
-        if _es_pagina_login_sri(page):
-            raise RuntimeError(
-                "El SRI cerro la sesion antes de llegar al side menu. "
-                "Vuelve a iniciar sesion."
-            )
-
-        _navegar_anulacion_via_side_menu(page)
-
-        if _es_pagina_login_sri(page):
-            raise RuntimeError(
-                "El SRI cerro la sesion al clickear 'Anulacion' en el "
-                "side menu. Esto sugiere que la cuenta no tiene permisos "
-                "para el modulo 'Facturacion Electronica > Produccion > "
-                "Anulacion'. Verifica con el administrador del RUC."
-            )
-        if not _en_menu_anulacion(page):
+        if not _es_pagina_login_sri(page):
             try:
-                url_final = page.url or "desconocida"
+                _navegar_anulacion_via_side_menu(page)
+                if not _es_pagina_login_sri(page) and _en_menu_anulacion(page):
+                    plan_logrado = "B (side menu)"
+            except Exception as err:
+                logger.warning(f"[anulados] Plan B (side menu) fallo: {err}")
+
+    # ============ Plan C: deep link directo ============
+    if not plan_logrado:
+        try:
+            page.goto(MENU_ANULACION_URL, wait_until="domcontentloaded", timeout=15000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=4000)
             except Exception:
-                url_final = "desconocida"
+                pass
+            if not _es_pagina_login_sri(page) and _en_menu_anulacion(page):
+                plan_logrado = "C (deep link menuAnulacion.jsf)"
+        except Exception as err:
+            logger.warning(f"[anulados] Plan C (deep link) fallo: {err}")
+
+    if not plan_logrado:
+        try:
+            url_final = page.url or "desconocida"
+        except Exception:
+            url_final = "desconocida"
+        sesion_kill = _es_pagina_login_sri(page)
+        if sesion_kill:
             raise RuntimeError(
-                f"Tras clickear 'Anulacion' en el side menu, la pagina no "
-                f"es menuAnulacion.jsf (URL actual: {url_final}). El SRI "
-                "puede haber cambiado el flujo."
+                "Los tres planes para abrir Anulados terminaron con el "
+                "SRI redirigiendo al login. Esto sugiere que la cuenta "
+                "no tiene permisos para el modulo de Anulacion. Revisa "
+                "con el administrador del RUC."
             )
+        raise RuntimeError(
+            f"No se pudo abrir el modulo de Anulados con ninguna de las "
+            f"tres estrategias (URL portal, side menu, deep link). "
+            f"URL final: {url_final}. El SRI puede haber cambiado el "
+            "flujo o el rol del usuario no incluye Anulacion."
+        )
+
+    logger.info(f"[anulados] entrada al modulo via Plan {plan_logrado}")
 
     # 1) Estrategia preferida: get_by_role("link", name=...). Tolera cambios
     #    de markup mientras el texto visible siga siendo el mismo.
