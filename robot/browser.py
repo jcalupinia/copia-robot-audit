@@ -26,6 +26,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from robot._logging import get_logger
 from robot.config import (
+    ANULACION_PROD_SELECTOR,
     AUTORIZACION_COMPROBANTES_SOAP_URL,
     CONSULTAS_SELECTOR,
     DOC_LABELS,
@@ -2198,77 +2199,193 @@ def _es_pagina_login_sri(page) -> bool:
     return False
 
 
+def _en_menu_anulacion(page) -> bool:
+    """True si la pagina actual es la de menuAnulacion.jsf (la pantalla
+    de tarjetas con el enlace 'Consulta comprobantes anulados')."""
+    try:
+        url = (page.url or "").lower()
+    except Exception:
+        url = ""
+    if "menuanulacion" in url:
+        return True
+    # Defensa: a veces el SRI redirige a una URL distinta pero con el
+    # mismo form. Detectamos el form#consultaDocumentoForm.
+    try:
+        return page.locator("form#consultaDocumentoForm").count() > 0
+    except Exception:
+        return False
+
+
+def _navegar_anulacion_via_side_menu(page) -> None:
+    """Navega a Anulacion expandiendo el side menu: Facturacion
+    Electronica -> Produccion -> Anulacion. Cuidado con el item
+    duplicado: 'Anulacion' aparece bajo Produccion Y bajo Pruebas.
+    El selector ANULACION_PROD_SELECTOR esta anclado al subtree de
+    Produccion para garantizar que tomamos el correcto.
+    """
+    # 1) Asegurar que el side menu esta abierto.
+    try:
+        toggle = page.locator(MENU_TOGGLE_SELECTOR)
+        if toggle.count():
+            try:
+                # Solo togglear si el panel de Facturacion no esta visible.
+                ya_visible = False
+                try:
+                    ya_visible = page.locator(FACTURACION_MENU_SELECTOR).first.is_visible(timeout=300)
+                except Exception:
+                    ya_visible = False
+                if not ya_visible:
+                    toggle.first.click(timeout=2000)
+                    page.wait_for_timeout(200)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 2) Expandir Facturacion Electronica.
+    try:
+        loc = page.locator(FACTURACION_MENU_SELECTOR)
+        if loc.count():
+            try:
+                expanded = (loc.first.get_attribute("aria-expanded") or "").lower()
+            except Exception:
+                expanded = ""
+            if expanded != "true":
+                loc.first.click(timeout=2000)
+                page.wait_for_timeout(300)
+    except Exception as err:
+        logger.warning(f"No se pudo expandir Facturacion Electronica: {err}")
+
+    # 3) Expandir Produccion.
+    try:
+        loc = page.locator(MODULO_PRODUCCION_SELECTOR)
+        if loc.count():
+            try:
+                expanded = (loc.first.get_attribute("aria-expanded") or "").lower()
+            except Exception:
+                expanded = ""
+            if expanded != "true":
+                loc.first.click(timeout=2000)
+                page.wait_for_timeout(300)
+    except Exception as err:
+        logger.warning(f"No se pudo expandir Produccion: {err}")
+
+    # 4) Click "Anulacion" — scoped a Produccion (NO Pruebas).
+    anulacion = page.locator(ANULACION_PROD_SELECTOR)
+    if not anulacion.count():
+        raise RuntimeError(
+            "No se encontro el item 'Anulacion' dentro del subtree de "
+            "Produccion en el side menu del SRI. Verifica que el rol "
+            "tenga acceso al modulo de Anulacion."
+        )
+    try:
+        anulacion.first.wait_for(state="visible", timeout=4000)
+    except Exception:
+        pass
+    anulacion.first.click(timeout=4000)
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=12000)
+    except Exception:
+        pass
+    try:
+        page.wait_for_load_state("networkidle", timeout=4000)
+    except Exception:
+        pass
+
+
 def _abrir_modulo_anulados(page):
     """Navega al modulo de Consulta comprobantes anulados.
 
-    Flujo:
-      0. Bootstrap: goto a `consultas/menu.jsf` para activar la sesion
-         JSF de la app `comprobantes-electronicos-internet`. El SRI mata
-         la sesion si se intenta un deep-link a `solicitud/anulacion/...`
-         sin haber tocado primero esa app — los flujos de Recibidos /
-         Emitidos pasan por aqui implicitamente, Anulados no.
-      1. goto menuAnulacion.jsf (pantalla de tarjetas/enlaces de anulacion).
-      2. Click en el enlace 'Consulta comprobantes anulados'. El enlace vive
-         dentro de form#consultaDocumentoForm; el id (j_idtNN) cambia entre
-         deploys, asi que NO se usa. Estrategia: rol/texto > scope al form >
-         XPath estable como ultimo recurso.
-      3. Espera a que cargue la pantalla de consulta real.
+    Estrategia en cascada:
+      Plan A: URL directa (`menuAnulacion.jsf`) precedida de un bootstrap
+              a `consultas/menu.jsf` para activar la sesion JSF de la
+              app comprobantes-electronicos-internet. Es lo preferido
+              porque evita interactuar con el side menu.
+      Plan B (fallback automatico): si Plan A no aterriza en
+              `menuAnulacion.jsf` o si el SRI mato la sesion, se navega
+              expandiendo el side menu (Facturacion > Produccion >
+              Anulacion). Reproduce el camino de un usuario real.
 
-    Devuelve la `page` ya posicionada en el formulario de consulta de
-    anulados (lista para que `_flujo_anulados` haga la query/descarga).
+    Tras llegar al menu de Anulacion, se clickea el enlace 'Consulta
+    comprobantes anulados' usando una cascada de selectores
+    (get_by_role > scope al form#consultaDocumentoForm > XPath estable).
     """
     _cerrar_modal_encuesta(page)
 
-    # 0) Bootstrap del modulo comprobantes-electronicos-internet.
+    # ============ Plan A: URL directa con bootstrap ============
+    plan_a_ok = False
     try:
         page.goto(MENU_URL, wait_until="domcontentloaded", timeout=12000)
         try:
             page.wait_for_load_state("networkidle", timeout=3000)
         except Exception:
             pass
-    except Exception as err:
-        logger.warning(
-            f"Bootstrap por consultas/menu.jsf fallo (continuamos igual): {err}"
-        )
 
-    if _es_pagina_login_sri(page):
-        raise RuntimeError(
-            "Tras login, el SRI redirigio a la pantalla de autenticacion "
-            "al abrir consultas/menu.jsf. Esto suele indicar que la "
-            "sesion no se propago a la app comprobantes-electronicos-"
-            "internet. Vuelve a iniciar sesion."
-        )
-
-    # 1) goto al menu de Anulacion (ahora con la sesion JSF activa).
-    def _goto_menu():
-        ultimo_error = None
-        for intento in range(3):
+        if _es_pagina_login_sri(page):
+            logger.warning(
+                "[anulados] tras bootstrap, el SRI quiere reautenticar. "
+                "Saltando a Plan B (side menu)."
+            )
+        else:
             try:
                 page.goto(MENU_ANULACION_URL, wait_until="domcontentloaded", timeout=15000)
                 try:
                     page.wait_for_load_state("networkidle", timeout=4000)
                 except Exception:
                     pass
-                return
             except Exception as err:
-                ultimo_error = err
+                logger.warning(f"goto directo a menuAnulacion fallo: {err}")
+            if not _es_pagina_login_sri(page) and _en_menu_anulacion(page):
+                plan_a_ok = True
+            else:
                 logger.warning(
-                    f"Reintentando acceso a menuAnulacion ({intento + 1}/3): {err}"
+                    "[anulados] URL directa no aterrizo en menuAnulacion.jsf "
+                    "(posible session-kill). Saltando a Plan B (side menu)."
                 )
-        raise RuntimeError(
-            f"No se pudo abrir el menu de Anulacion: {ultimo_error}"
-        )
+    except Exception as err:
+        logger.warning(f"Plan A para abrir Anulados fallo: {err}")
 
-    _goto_menu()
+    # ============ Plan B: side menu (fallback) ============
+    if not plan_a_ok:
+        # Necesitamos volver a un estado donde el side menu este disponible.
+        # PORTAL_HOME no lo importamos aqui — usamos consultas/menu.jsf que
+        # ya hicimos en el bootstrap y tiene el side menu del SRI.
+        try:
+            current_url = (page.url or "").lower()
+            if "comprobantes-electronicos-internet" not in current_url:
+                page.goto(MENU_URL, wait_until="domcontentloaded", timeout=12000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=3000)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
-    if _es_pagina_login_sri(page):
-        raise RuntimeError(
-            "El SRI cerro la sesion al navegar a menuAnulacion.jsf. "
-            "Esto suele pasar si el usuario no tiene permisos para el "
-            "modulo de Anulacion o si la sesion del SSO ya expiro. "
-            "Inicia sesion otra vez y revisa que la cuenta tenga acceso "
-            "a 'Facturacion Electronica > Produccion > Anulacion'."
-        )
+        if _es_pagina_login_sri(page):
+            raise RuntimeError(
+                "El SRI cerro la sesion antes de llegar al side menu. "
+                "Vuelve a iniciar sesion."
+            )
+
+        _navegar_anulacion_via_side_menu(page)
+
+        if _es_pagina_login_sri(page):
+            raise RuntimeError(
+                "El SRI cerro la sesion al clickear 'Anulacion' en el "
+                "side menu. Esto sugiere que la cuenta no tiene permisos "
+                "para el modulo 'Facturacion Electronica > Produccion > "
+                "Anulacion'. Verifica con el administrador del RUC."
+            )
+        if not _en_menu_anulacion(page):
+            try:
+                url_final = page.url or "desconocida"
+            except Exception:
+                url_final = "desconocida"
+            raise RuntimeError(
+                f"Tras clickear 'Anulacion' en el side menu, la pagina no "
+                f"es menuAnulacion.jsf (URL actual: {url_final}). El SRI "
+                "puede haber cambiado el flujo."
+            )
 
     # 1) Estrategia preferida: get_by_role("link", name=...). Tolera cambios
     #    de markup mientras el texto visible siga siendo el mismo.

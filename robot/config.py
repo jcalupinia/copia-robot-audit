@@ -292,6 +292,16 @@ CONSULTAS_SELECTOR = (
     "xpath=//span[contains(@class,'ui-menuitem-text') and "
     "normalize-space()='Consultas']/ancestor::a[1]"
 )
+# Anulación dentro de la rama "Producción". OJO: en el side menu del SRI
+# hay DOS items llamados "Anulación" — uno bajo Produccion y otro bajo
+# Pruebas. Este selector se ancla explicitamente al <ul> hermano del <a>
+# de "Produccion" para garantizar que tomamos el de produccion.
+ANULACION_PROD_SELECTOR = (
+    "xpath=//span[contains(@class,'ui-menuitem-text') and "
+    "normalize-space()='Producción']/ancestor::a[1]/following-sibling::ul"
+    "//span[contains(@class,'ui-menuitem-text') and "
+    "normalize-space()='Anulación']/ancestor::a[1]"
+)
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 
