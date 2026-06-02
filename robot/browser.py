@@ -33,6 +33,7 @@ from robot.config import (
     FACTURACION_MENU_SELECTOR,
     MENU_ANULACION_URL,
     MENU_TOGGLE_SELECTOR,
+    MENU_URL,
     MODULO_PRODUCCION_SELECTOR,
     OVERLAY_SELECTORS,
     PORTAL_INDISPONIBLE_MENSAJE,
@@ -2154,10 +2155,58 @@ def _abrir_modulo_consultas(page, origen: str):
     return page
 
 
+def _es_pagina_login_sri(page) -> bool:
+    """True si la `page` esta en una pagina de login/auth del SRI o si
+    contiene texto claro de sesion expirada/cerrada.
+
+    Usado para detectar el caso en que un goto a una URL protegida
+    redirecciono al SSO en vez de servir la pagina pedida (sintoma
+    tipico cuando se hace deep-link sin haber bootstrapeado la app
+    JSF correspondiente).
+    """
+    try:
+        url = (page.url or "").lower()
+    except Exception:
+        url = ""
+    if any(
+        token in url
+        for token in (
+            "openid-connect/auth",
+            "/auth/realms/",
+            "/login",
+            "logout",
+            "sessiontimeout",
+        )
+    ):
+        return True
+    try:
+        contenido = page.content() or ""
+    except Exception:
+        contenido = ""
+    if not contenido:
+        return False
+    texto = unicodedata.normalize("NFKD", contenido).lower()
+    for phrase in (
+        "iniciar sesion",
+        "su sesion ha expirado",
+        "su sesion ha caducado",
+        "session has expired",
+        "sesion ha sido cerrada",
+    ):
+        if phrase in texto:
+            return True
+    return False
+
+
 def _abrir_modulo_anulados(page):
     """Navega al modulo de Consulta comprobantes anulados.
 
     Flujo:
+      0. Bootstrap: goto a `consultas/menu.jsf` para activar la sesion
+         JSF de la app `comprobantes-electronicos-internet`. El SRI mata
+         la sesion si se intenta un deep-link a `solicitud/anulacion/...`
+         sin haber tocado primero esa app — los flujos de Recibidos /
+         Emitidos pasan por aqui implicitamente, Anulados no.
       1. goto menuAnulacion.jsf (pantalla de tarjetas/enlaces de anulacion).
       2. Click en el enlace 'Consulta comprobantes anulados'. El enlace vive
          dentro de form#consultaDocumentoForm; el id (j_idtNN) cambia entre
@@ -2170,6 +2219,27 @@ def _abrir_modulo_anulados(page):
     """
     _cerrar_modal_encuesta(page)
 
+    # 0) Bootstrap del modulo comprobantes-electronicos-internet.
+    try:
+        page.goto(MENU_URL, wait_until="domcontentloaded", timeout=12000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=3000)
+        except Exception:
+            pass
+    except Exception as err:
+        logger.warning(
+            f"Bootstrap por consultas/menu.jsf fallo (continuamos igual): {err}"
+        )
+
+    if _es_pagina_login_sri(page):
+        raise RuntimeError(
+            "Tras login, el SRI redirigio a la pantalla de autenticacion "
+            "al abrir consultas/menu.jsf. Esto suele indicar que la "
+            "sesion no se propago a la app comprobantes-electronicos-"
+            "internet. Vuelve a iniciar sesion."
+        )
+
+    # 1) goto al menu de Anulacion (ahora con la sesion JSF activa).
     def _goto_menu():
         ultimo_error = None
         for intento in range(3):
@@ -2190,6 +2260,15 @@ def _abrir_modulo_anulados(page):
         )
 
     _goto_menu()
+
+    if _es_pagina_login_sri(page):
+        raise RuntimeError(
+            "El SRI cerro la sesion al navegar a menuAnulacion.jsf. "
+            "Esto suele pasar si el usuario no tiene permisos para el "
+            "modulo de Anulacion o si la sesion del SSO ya expiro. "
+            "Inicia sesion otra vez y revisa que la cuenta tenga acceso "
+            "a 'Facturacion Electronica > Produccion > Anulacion'."
+        )
 
     # 1) Estrategia preferida: get_by_role("link", name=...). Tolera cambios
     #    de markup mientras el texto visible siga siendo el mismo.
