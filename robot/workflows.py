@@ -94,6 +94,7 @@ from robot.pdf_extraction import (
     _extraer_tipo_documento,
 )
 from robot.reporting import (
+    _guardar_reporte_anulados_excel,
     _guardar_reporte_pdf_excel,
     _guardar_reporte_pdf_factura_emitidos_excel,
     _guardar_reporte_pdf_nota_credito_emitidos_excel,
@@ -1290,191 +1291,242 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
             view_state = _obtener_viewstate_actual()
             filas = tabla_datos.locator("tr")
             total_filas = filas.count()
-            lote_inicio = time.perf_counter()
-            lote_contador = 0
-            lote_xml_ok = 0
-            lote_pdf_ok = 0
-            for idx in range(total_filas):
-                _check_cancel("recibidos_fila")
-                fila = filas.nth(idx)
-                celdas = fila.locator("td")
-                if not celdas.count():
-                    continue
-                clave_fila = _extraer_clave_fila(celdas)
-                razon_texto = celdas.nth(1).inner_text().strip()
-                bloques = [segmento.strip() for segmento in razon_texto.splitlines() if segmento.strip()]
-                razon_social = bloques[-1] if bloques else f"documento_{pagina}_{idx+1}"
-                nombre_base = _nombre_documento_mes(tipo_slug, fecha_token_doc, razon_social)
-                row_id = _build_download_row_id(
-                    clave_fila,
-                    tipo_slug,
-                    razon_social,
-                    f"pag{pagina}",
-                    f"fila{idx+1}",
-                )
-                registros_esperados += 1
-                if descargar_xml:
-                    esperados_xml.add(row_id)
-                if descargar_pdf:
-                    esperados_pdf.add(row_id)
-
-                xml_guardado = False
-                xml_path_report = None
-                if descargar_xml_para_reporte and not xml_guardado:
-                    for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
-                        xml_link_directo = fila.locator("a[id$=':lnkXml']")
-                        if not xml_link_directo.count():
-                            xml_link_directo = fila.locator("a[title*='xml' i], button[title*='xml' i]")
-                        if not xml_link_directo.count():
-                            icono_xml = fila.locator("img[title*='xml' i], img[alt*='xml' i]")
-                            if icono_xml.count():
-                                contenedor = icono_xml.first.locator("xpath=ancestor::a[1] | xpath=ancestor::button[1]")
-                                if not contenedor.count():
-                                    contenedor = icono_xml.first.locator("xpath=ancestor::span[1]")
-                                if contenedor.count():
-                                    xml_link_directo = contenedor.first
-                        if xml_link_directo and xml_link_directo.count():
-                            destino_base_directo = xml_dir / nombre_base
-                            destino_xml_directo = _resolver_destino_unico(destino_base_directo, ".xml")
-                            resultado_directo = _guardar_xml_desde_enlace(page, xml_link_directo, destino_xml_directo)
-                            if resultado_directo:
-                                xml_path_report = resultado_directo
-                                if descargar_xml:
-                                    n_xml += 1
-                                    descargados_xml.add(row_id)
-                                else:
-                                    xml_temp_paths.append(xml_path_report)
-                                xml_guardado = True
-                                lote_xml_ok += 1
-                                break
-
-                        xml_link = None
-                        selectores_xml = [
-                            "a[id$=':lnkXml']",
-                            "a[id*='lnkXml']",
-                            "a[title*='xml' i]",
-                            "button[id*='lnkXml']",
-                            "button[title*='xml' i]",
-                        ]
-                        for selector in selectores_xml:
-                            posible = fila.locator(selector)
-                            if posible.count():
-                                xml_link = posible.first
-                                break
-                        if not xml_link:
-                            icono_xml = fila.locator("img[title*='xml' i], img[alt*='xml' i]")
-                            if icono_xml.count():
-                                contenedor = icono_xml.first.locator("xpath=ancestor::a[1]")
-                                if contenedor.count():
-                                    xml_link = contenedor.first
-                        if xml_link:
-                            destino_xml = xml_dir / f"{nombre_base}.xml"
-                            sufijo_xml = 1
-                            while destino_xml.exists():
-                                destino_xml = xml_dir / f"{nombre_base}_{sufijo_xml}.xml"
-                                sufijo_xml += 1
-                            try:
-                                with page.expect_download(timeout=DOWNLOAD_TIMEOUT) as descarga_info:
-                                    xml_link.click(no_wait_after=True)
-                                descarga_xml = descarga_info.value
-                                sugerido = descarga_xml.suggested_filename or destino_xml.name
-                                extension = Path(sugerido).suffix or ".xml"
-                                destino_final = destino_xml.with_suffix(extension)
-                                sufijo_xml = 1
-                                while destino_final.exists():
-                                    destino_final = destino_xml.with_name(f"{destino_xml.stem}_{sufijo_xml}{extension}")
-                                    sufijo_xml += 1
-                                descarga_xml.save_as(str(destino_final))
-                                xml_path_report = destino_final
-                                if descargar_xml:
-                                    n_xml += 1
-                                    descargados_xml.add(row_id)
-                                else:
-                                    xml_temp_paths.append(xml_path_report)
-                                xml_guardado = True
-                                lote_xml_ok += 1
-                                break
-                            except Exception as err:
-                                logger.warning(f"No se pudo descargar XML para '{razon_social}' (intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}")
-                        if xml_guardado:
-                            break
-                        if intento_xml < DOWNLOAD_ROW_RETRY_ATTEMPTS:
-                            try:
-                                page.wait_for_timeout(250)
-                            except Exception:
-                                pass
-
-                usar_xml_reporte = False
-                if descargar_pdf and xml_path_report:
+            # Antes de iterar, esperar a que PrimeFaces termine de hidratar
+            # los <a> de PDF para TODAS las filas visibles. Sin esto, la
+            # ultima fila puede tener el <tr> en DOM pero todavia no su
+            # link, y la descarga se pierde de forma intermitente.
+            if total_filas > 0:
+                try:
+                    page.wait_for_function(
+                        "(n) => {"
+                        "  const t = document.getElementById('frmPrincipal:tablaCompRecibidos_data');"
+                        "  if (!t) return false;"
+                        "  return t.querySelectorAll(\"a[id$=':lnkPdf']\").length >= n;"
+                        "}",
+                        arg=total_filas,
+                        timeout=3000,
+                    )
+                except Exception:
+                    pass
+            # Procesamos la pagina en dos rondas:
+            #   ronda 1 = pase normal sobre todas las filas
+            #   ronda 2 = retry SOLO de filas que perdieron AMBAS descargas
+            #            (XML y PDF) -> sin fila en el Excel. Cubre el caso
+            #            de la ultima fila perdida por hidratacion tardia o
+            #            ViewState envejecido.
+            for ronda in (1, 2):
+                if ronda == 2:
+                    esperados_combinados = esperados_xml | esperados_pdf
+                    faltantes = {
+                        rid for rid in esperados_combinados
+                        if rid not in descargados_xml and rid not in descargados_pdf
+                    }
+                    if not faltantes:
+                        break
+                    logger.info(
+                        f"[recibidos] reintento por filas perdidas: "
+                        f"{len(faltantes)} fila(s) en pag {pagina}"
+                    )
                     try:
-                        if es_retencion:
-                            datos_xml = _extraer_datos_xml_retencion(xml_path_report)
-                        else:
-                            datos_xml = _extraer_datos_xml_pdf_report(xml_path_report)
-                        pdf_report_rows.append(datos_xml)
-                        usar_xml_reporte = True
-                    except Exception as err:
-                        logger.warning(f"No se pudo procesar XML para reporte: {err}")
+                        page.wait_for_timeout(800)
+                    except Exception:
+                        pass
+                    view_state = _obtener_viewstate_actual() or view_state
+                    filas = tabla_datos.locator("tr")
+                    total_filas = filas.count()
+                lote_inicio = time.perf_counter()
+                lote_contador = 0
+                lote_xml_ok = 0
+                lote_pdf_ok = 0
+                for idx in range(total_filas):
+                    _check_cancel("recibidos_fila")
+                    fila = filas.nth(idx)
+                    celdas = fila.locator("td")
+                    if not celdas.count():
+                        continue
+                    clave_fila = _extraer_clave_fila(celdas)
+                    razon_texto = celdas.nth(1).inner_text().strip()
+                    bloques = [segmento.strip() for segmento in razon_texto.splitlines() if segmento.strip()]
+                    razon_social = bloques[-1] if bloques else f"documento_{pagina}_{idx+1}"
+                    nombre_base = _nombre_documento_mes(tipo_slug, fecha_token_doc, razon_social)
+                    row_id = _build_download_row_id(
+                        clave_fila,
+                        tipo_slug,
+                        razon_social,
+                        f"pag{pagina}",
+                        f"fila{idx+1}",
+                    )
+                    if ronda == 1:
+                        registros_esperados += 1
+                        if descargar_xml:
+                            esperados_xml.add(row_id)
+                        if descargar_pdf:
+                            esperados_pdf.add(row_id)
+                    else:
+                        # En ronda 2 saltamos cualquier fila que ya tenga
+                        # al menos una descarga exitosa (su data ya quedo
+                        # en pdf_report_rows desde el primer pase).
+                        if row_id in descargados_xml or row_id in descargados_pdf:
+                            continue
 
-                if descargar_pdf:
-                    pdf_guardado = False
-                    for intento_pdf in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
-                        destino_pdf = pdf_dir / f"{nombre_base}.pdf"
-                        link_id = f"frmPrincipal:tablaCompRecibidos:{idx}:lnkPdf"
-                        resultado_pdf = None
-                        if view_state:
-                            resultado_pdf = _descargar_pdf_recibidos_post_con_viewstate(
-                                page, link_id, view_state, destino_pdf
-                            )
-                        if not resultado_pdf:
-                            view_state = _obtener_viewstate_actual() or view_state
+                    xml_guardado = False
+                    xml_path_report = None
+                    if descargar_xml_para_reporte and not xml_guardado:
+                        for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
+                            xml_link_directo = fila.locator("a[id$=':lnkXml']")
+                            if not xml_link_directo.count():
+                                xml_link_directo = fila.locator("a[title*='xml' i], button[title*='xml' i]")
+                            if not xml_link_directo.count():
+                                icono_xml = fila.locator("img[title*='xml' i], img[alt*='xml' i]")
+                                if icono_xml.count():
+                                    contenedor = icono_xml.first.locator("xpath=ancestor::a[1] | xpath=ancestor::button[1]")
+                                    if not contenedor.count():
+                                        contenedor = icono_xml.first.locator("xpath=ancestor::span[1]")
+                                    if contenedor.count():
+                                        xml_link_directo = contenedor.first
+                            if xml_link_directo and xml_link_directo.count():
+                                destino_base_directo = xml_dir / nombre_base
+                                destino_xml_directo = _resolver_destino_unico(destino_base_directo, ".xml")
+                                resultado_directo = _guardar_xml_desde_enlace(page, xml_link_directo, destino_xml_directo)
+                                if resultado_directo:
+                                    xml_path_report = resultado_directo
+                                    if descargar_xml:
+                                        n_xml += 1
+                                        descargados_xml.add(row_id)
+                                    else:
+                                        xml_temp_paths.append(xml_path_report)
+                                    xml_guardado = True
+                                    lote_xml_ok += 1
+                                    break
+
+                            xml_link = None
+                            selectores_xml = [
+                                "a[id$=':lnkXml']",
+                                "a[id*='lnkXml']",
+                                "a[title*='xml' i]",
+                                "button[id*='lnkXml']",
+                                "button[title*='xml' i]",
+                            ]
+                            for selector in selectores_xml:
+                                posible = fila.locator(selector)
+                                if posible.count():
+                                    xml_link = posible.first
+                                    break
+                            if not xml_link:
+                                icono_xml = fila.locator("img[title*='xml' i], img[alt*='xml' i]")
+                                if icono_xml.count():
+                                    contenedor = icono_xml.first.locator("xpath=ancestor::a[1]")
+                                    if contenedor.count():
+                                        xml_link = contenedor.first
+                            if xml_link:
+                                destino_xml = xml_dir / f"{nombre_base}.xml"
+                                sufijo_xml = 1
+                                while destino_xml.exists():
+                                    destino_xml = xml_dir / f"{nombre_base}_{sufijo_xml}.xml"
+                                    sufijo_xml += 1
+                                try:
+                                    with page.expect_download(timeout=DOWNLOAD_TIMEOUT) as descarga_info:
+                                        xml_link.click(no_wait_after=True)
+                                    descarga_xml = descarga_info.value
+                                    sugerido = descarga_xml.suggested_filename or destino_xml.name
+                                    extension = Path(sugerido).suffix or ".xml"
+                                    destino_final = destino_xml.with_suffix(extension)
+                                    sufijo_xml = 1
+                                    while destino_final.exists():
+                                        destino_final = destino_xml.with_name(f"{destino_xml.stem}_{sufijo_xml}{extension}")
+                                        sufijo_xml += 1
+                                    descarga_xml.save_as(str(destino_final))
+                                    xml_path_report = destino_final
+                                    if descargar_xml:
+                                        n_xml += 1
+                                        descargados_xml.add(row_id)
+                                    else:
+                                        xml_temp_paths.append(xml_path_report)
+                                    xml_guardado = True
+                                    lote_xml_ok += 1
+                                    break
+                                except Exception as err:
+                                    logger.warning(f"No se pudo descargar XML para '{razon_social}' (intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}")
+                            if xml_guardado:
+                                break
+                            if intento_xml < DOWNLOAD_ROW_RETRY_ATTEMPTS:
+                                try:
+                                    page.wait_for_timeout(250)
+                                except Exception:
+                                    pass
+
+                    usar_xml_reporte = False
+                    if descargar_pdf and xml_path_report:
+                        try:
+                            if es_retencion:
+                                datos_xml = _extraer_datos_xml_retencion(xml_path_report)
+                            else:
+                                datos_xml = _extraer_datos_xml_pdf_report(xml_path_report)
+                            pdf_report_rows.append(datos_xml)
+                            usar_xml_reporte = True
+                        except Exception as err:
+                            logger.warning(f"No se pudo procesar XML para reporte: {err}")
+
+                    if descargar_pdf:
+                        pdf_guardado = False
+                        for intento_pdf in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
+                            destino_pdf = pdf_dir / f"{nombre_base}.pdf"
+                            link_id = f"frmPrincipal:tablaCompRecibidos:{idx}:lnkPdf"
+                            resultado_pdf = None
                             if view_state:
                                 resultado_pdf = _descargar_pdf_recibidos_post_con_viewstate(
                                     page, link_id, view_state, destino_pdf
                                 )
-                        if not resultado_pdf:
-                            link_pdf = fila.locator("a[id$=':lnkPdf']")
-                            if not link_pdf.count():
-                                link_pdf = fila.locator("a[title*='pdf' i], button[title*='pdf' i]")
-                            if link_pdf.count():
-                                resultado_pdf = _guardar_pdf_desde_jsf(page, link_pdf.first, destino_pdf)
-                                if not resultado_pdf:
-                                    resultado_pdf = _guardar_pdf_desde_enlace(page, link_pdf.first, destino_pdf)
-                        if resultado_pdf:
-                            n_pdf += 1
-                            descargados_pdf.add(row_id)
-                            lote_pdf_ok += 1
-                            pdf_guardado = True
-                            if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
-                                if not usar_xml_reporte:
-                                    datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
-                                        resultado_pdf,
-                                        es_retencion=es_retencion,
-                                        es_nota_credito=es_nota_credito,
-                                        es_nota_debito=es_nota_debito,
+                            if not resultado_pdf:
+                                view_state = _obtener_viewstate_actual() or view_state
+                                if view_state:
+                                    resultado_pdf = _descargar_pdf_recibidos_post_con_viewstate(
+                                        page, link_id, view_state, destino_pdf
                                     )
-                                    pdf_report_rows.append(datos_pdf)
-                            break
-                        if intento_pdf < DOWNLOAD_ROW_RETRY_ATTEMPTS:
-                            try:
-                                page.wait_for_timeout(250)
-                            except Exception:
-                                pass
-                    if not pdf_guardado:
-                        logger.warning(f"No se pudo descargar PDF para '{razon_social}': no se obtuvo archivo.")
+                            if not resultado_pdf:
+                                link_pdf = fila.locator("a[id$=':lnkPdf']")
+                                if not link_pdf.count():
+                                    link_pdf = fila.locator("a[title*='pdf' i], button[title*='pdf' i]")
+                                if link_pdf.count():
+                                    resultado_pdf = _guardar_pdf_desde_jsf(page, link_pdf.first, destino_pdf)
+                                    if not resultado_pdf:
+                                        resultado_pdf = _guardar_pdf_desde_enlace(page, link_pdf.first, destino_pdf)
+                            if resultado_pdf:
+                                n_pdf += 1
+                                descargados_pdf.add(row_id)
+                                lote_pdf_ok += 1
+                                pdf_guardado = True
+                                if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
+                                    if not usar_xml_reporte:
+                                        datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
+                                            resultado_pdf,
+                                            es_retencion=es_retencion,
+                                            es_nota_credito=es_nota_credito,
+                                            es_nota_debito=es_nota_debito,
+                                        )
+                                        pdf_report_rows.append(datos_pdf)
+                                break
+                            if intento_pdf < DOWNLOAD_ROW_RETRY_ATTEMPTS:
+                                try:
+                                    page.wait_for_timeout(250)
+                                except Exception:
+                                    pass
+                        if not pdf_guardado:
+                            logger.warning(f"No se pudo descargar PDF para '{razon_social}': no se obtuvo archivo.")
 
-                lote_contador += 1
-                if lote_contador >= lote_size or idx == total_filas - 1:
-                    duracion_lote = time.perf_counter() - lote_inicio
-                    print(
-                        f"[INFO] Pag {pagina} lote {((idx // lote_size) + 1)}: "
-                        f"{lote_contador} filas, XML {lote_xml_ok}, PDF {lote_pdf_ok}, "
-                        f"{duracion_lote:.2f}s"
-                    )
-                    lote_inicio = time.perf_counter()
-                    lote_contador = 0
-                    lote_xml_ok = 0
-                    lote_pdf_ok = 0
+                    if ronda == 1:
+                        lote_contador += 1
+                        if lote_contador >= lote_size or idx == total_filas - 1:
+                            duracion_lote = time.perf_counter() - lote_inicio
+                            print(
+                                f"[INFO] Pag {pagina} lote {((idx // lote_size) + 1)}: "
+                                f"{lote_contador} filas, XML {lote_xml_ok}, PDF {lote_pdf_ok}, "
+                                f"{duracion_lote:.2f}s"
+                            )
+                            lote_inicio = time.perf_counter()
+                            lote_contador = 0
+                            lote_xml_ok = 0
+                            lote_pdf_ok = 0
 
             duracion_pagina = time.perf_counter() - page_inicio
             logger.info(f"Pag {pagina} completa: {total_filas} filas en {duracion_pagina:.2f}s")
@@ -1554,6 +1606,476 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                 Path(xml_tmp).unlink(missing_ok=True)
             except Exception:
                 pass
+    return resultado
+
+
+_MESES_ANULADOS_LABELS = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+]
+
+
+def _seleccionar_dropdown_anulados(page, etiqueta_buscar: str, valor_label: str) -> bool:
+    """Selecciona un <select> en el form de Consulta Anulados.
+
+    El SRI no usa selectOneMenu de PrimeFaces aqui (es un form sencillo
+    sin captcha), asi que la estrategia principal es Playwright nativo
+    sobre <select>. Mantenemos fallbacks por si el markup cambia.
+    """
+    valor = str(valor_label).strip()
+    if not valor:
+        return False
+
+    # 1) get_by_label + select_option (Playwright resuelve <label for=> y
+    #    aria-labelledby automaticamente).
+    try:
+        loc = page.get_by_label(etiqueta_buscar, exact=False).locator("select")
+        if loc.count():
+            loc.first.select_option(label=valor)
+            return True
+    except Exception:
+        pass
+
+    # 2) get_by_label directo (cuando el label apunta directo al select).
+    try:
+        loc = page.get_by_label(etiqueta_buscar, exact=False)
+        if loc.count():
+            loc.first.select_option(label=valor)
+            return True
+    except Exception:
+        pass
+
+    # 3) Buscar cualquier <select> de la pagina que tenga ese valor como option.
+    try:
+        sels = page.locator("select")
+        for i in range(sels.count()):
+            sel = sels.nth(i)
+            try:
+                opciones = sel.locator("option").all_text_contents()
+            except Exception:
+                continue
+            if any(opt.strip() == valor for opt in opciones):
+                sel.select_option(label=valor)
+                return True
+    except Exception:
+        pass
+
+    # 4) PrimeFaces selectOneMenu (panel + click), por si el SRI cambia.
+    try:
+        contenedor = page.locator(
+            f"xpath=//label[contains(normalize-space(.), '{etiqueta_buscar}')]"
+            "/ancestor-or-self::*[contains(@class, 'ui-selectonemenu')][1]"
+        )
+        if contenedor.count():
+            contenedor.first.click(timeout=2000)
+            opcion = page.locator(
+                f"li.ui-selectonemenu-item:has-text('{valor}'), "
+                f"li[data-label='{valor}']"
+            )
+            if opcion.count():
+                opcion.first.click(timeout=2000)
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _localizar_tabla_anulados(page, kind: str):
+    """Devuelve el Locator de la datatable de 'emitidos' o 'recibidos'.
+
+    Estrategia:
+      1) por id que contenga el slug ('emitidos' / 'recibidos').
+      2) por heading visible ('Comprobantes anulados emitidos/recibidos')
+         + busqueda del table siguiente hacia adelante en el DOM.
+
+    Devuelve None si no se encuentra (ej. el SRI no devolvio datos para
+    ese mes).
+    """
+    slug = kind.lower()
+    headings = {
+        "emitidos": "Comprobantes anulados emitidos",
+        "recibidos": "Comprobantes anulados recibidos",
+    }
+    heading_txt = headings.get(slug, "")
+
+    # 1) Por id que contenga 'emitidos' o 'recibidos' y termine en _data
+    #    o sea el wrapper de la datatable.
+    candidatos_id = [
+        f"div[id*='{slug}'].ui-datatable",
+        f"div.ui-datatable[id*='{slug}']",
+        f"table[id*='{slug}']",
+    ]
+    for sel in candidatos_id:
+        try:
+            loc = page.locator(sel)
+            if loc.count():
+                # Preferir el outer ui-datatable wrapper.
+                return loc.first
+        except Exception:
+            continue
+
+    # 2) Por heading visible -> tabla hermana siguiente.
+    if heading_txt:
+        try:
+            xpath = (
+                f"//*[normalize-space(.)='{heading_txt}' or contains(normalize-space(.), '{heading_txt}')]"
+                "/following::*[contains(@class,'ui-datatable') or self::table][1]"
+            )
+            loc = page.locator(f"xpath={xpath}")
+            if loc.count():
+                return loc.first
+        except Exception:
+            pass
+
+    return None
+
+
+def _mapear_columnas_anulados(tabla_loc) -> dict[str, int]:
+    """Lee la cabecera (thead) y mapea encabezados a claves semanticas."""
+    mapping: dict[str, int] = {}
+    try:
+        ths = tabla_loc.locator("thead th, .ui-datatable-thead th")
+        total = ths.count()
+        for i in range(total):
+            try:
+                h = ths.nth(i).inner_text().strip().lower()
+            except Exception:
+                continue
+            if not h:
+                continue
+            if "tipo" in h and "comprobante" in h:
+                mapping["tipo_comprobante"] = i
+            elif "serie" in h:
+                mapping["serie"] = i
+            elif ("raz" in h and ("social" in h or "social" in h)):
+                mapping["razon_social"] = i
+            elif "clave" in h and "acceso" in h:
+                mapping["clave_acceso"] = i
+            elif ("identif" in h and ("recep" in h or "receptor" in h)) or h.startswith("ruc") or "ruc emisor" in h:
+                mapping["ident"] = i
+    except Exception:
+        pass
+    return mapping
+
+
+def _iterar_tabla_anulados(
+    page,
+    tabla_loc,
+    anio: int,
+    mes: int,
+) -> list[dict]:
+    """Recorre todas las paginas de UNA tabla de anulados y devuelve filas.
+
+    Cada fila es un dict con keys: anio, mes, tipo_comprobante, serie,
+    ident, razon_social, clave_acceso. Las primeras dos vienen como
+    contexto; el resto se extrae del DOM.
+    """
+    if tabla_loc is None:
+        return []
+    rows: list[dict] = []
+    pagina = 1
+    while True:
+        _check_cancel("anulados_pagina")
+        # Mapear columnas en cada pagina (por si la cabecera cambia entre
+        # paginaciones, cosa que no deberia pasar pero es defensivo).
+        col_idx = _mapear_columnas_anulados(tabla_loc)
+        tbody = tabla_loc.locator("tbody.ui-datatable-data, tbody[id$='_data'], tbody")
+        if not tbody.count():
+            break
+        filas = tbody.first.locator("tr")
+        total_filas = filas.count()
+        for idx in range(total_filas):
+            fila = filas.nth(idx)
+            celdas = fila.locator("td")
+            try:
+                n_celdas = celdas.count()
+            except Exception:
+                n_celdas = 0
+            if n_celdas == 0:
+                continue
+            # Saltar "no records" row de PrimeFaces.
+            try:
+                primera = celdas.nth(0).inner_text().strip().lower()
+                if "no se encontraron" in primera or "no records" in primera:
+                    continue
+            except Exception:
+                pass
+
+            row = {
+                "anio": int(anio),
+                "mes": int(mes),
+                "tipo_comprobante": "",
+                "serie": "",
+                "ident": "",
+                "razon_social": "",
+                "clave_acceso": "",
+            }
+            for sem_key, pos in col_idx.items():
+                if 0 <= pos < n_celdas:
+                    try:
+                        row[sem_key] = celdas.nth(pos).inner_text().strip()
+                    except Exception:
+                        row[sem_key] = ""
+
+            # Defensa: si no se ubico la clave por header, buscar 49 digitos
+            # en cualquier celda.
+            if not row["clave_acceso"] or len(re.sub(r"\D", "", row["clave_acceso"])) != 49:
+                for i in range(n_celdas):
+                    try:
+                        texto = celdas.nth(i).inner_text().strip()
+                    except Exception:
+                        continue
+                    digitos = re.sub(r"\D", "", texto)
+                    match = re.search(r"\d{49}", digitos)
+                    if match:
+                        row["clave_acceso"] = match.group(0)
+                        break
+
+            rows.append(row)
+
+        # Paginacion dentro de esta tabla.
+        try:
+            paginador = tabla_loc.locator(".ui-paginator")
+            siguiente = paginador.locator(".ui-paginator-next:not(.ui-state-disabled)")
+            if siguiente.count():
+                siguiente.first.click()
+                pagina += 1
+                try:
+                    page.wait_for_timeout(500)
+                except Exception:
+                    pass
+                _esperar_ajax(page, timeout=3000)
+                continue
+        except Exception:
+            pass
+        break
+
+    logger.info(
+        f"[anulados] tabla iterada: {len(rows)} fila(s) en {pagina} pagina(s)."
+    )
+    return rows
+
+
+def _flujo_anulados(
+    page,
+    destino: Path,
+    anio: int,
+    mes: int,
+    dia: int,  # noqa: ARG001 - SRI Anulados filtra solo por anio+mes
+    tipo: str,  # noqa: ARG001 - el form no segmenta por tipo
+    formatos: list,
+):
+    """Flujo de Consulta Comprobantes Anulados.
+
+    Pre-requisito: la `page` ya esta en el formulario de consulta (lo dejo
+    asi `_abrir_modulo_anulados`).
+
+    Pasos:
+      1. Verifica que no estamos en menuAnulacion.jsf (el click previo
+         debio progresar).
+      2. Selecciona Año y Mes en el form, click Consultar.
+      3. Lee ambas tablas (emitidos / recibidos) con paginacion.
+      4. Si formatos incluye XML, intenta recuperar el XML por clave via
+         SOAP reusando `_descargar_xml_emitido_por_clave`. El servicio es
+         publico y aplica a cualquier clave (emisor o receptor).
+      5. Escribe un solo Excel con dos hojas y devuelve el dict de
+         resultados.
+    """
+    _check_cancel("inicio_anulados")
+    destino.mkdir(parents=True, exist_ok=True)
+
+    try:
+        url_actual = page.url or ""
+    except Exception:
+        url_actual = ""
+    if "menuAnulacion.jsf" in url_actual:
+        raise RuntimeError(
+            "El navegador sigue en menuAnulacion.jsf; el click sobre "
+            "'Consulta comprobantes anulados' no progreso. Revisa que la "
+            "cuenta tenga acceso al modulo de Anulacion."
+        )
+
+    formatos_norm = [(f or "").strip().upper() for f in (formatos or [])]
+    descargar_xml = "XML" in formatos_norm
+
+    anio_int = int(anio)
+    mes_int = int(mes)
+    mes_label = _MESES_ANULADOS_LABELS[mes_int - 1] if 1 <= mes_int <= 12 else str(mes_int)
+
+    # 1) Esperar a que el form de consulta este listo.
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=8000)
+    except Exception:
+        pass
+    _esperar_ajax(page, timeout=2000)
+
+    # 2) Año.
+    if not _seleccionar_dropdown_anulados(page, "Año", str(anio_int)):
+        raise RuntimeError(
+            f"No se pudo seleccionar el año {anio_int} en el formulario "
+            "de Consulta Anulados. Revisa que la pantalla este cargada."
+        )
+
+    # 3) Mes.
+    seleccionado = _seleccionar_dropdown_anulados(page, "Mes", mes_label)
+    if not seleccionado:
+        # El SRI a veces ofrece el mes como numero. Probar con padding.
+        for alt in (f"{mes_int:02d}", str(mes_int), mes_label.upper()):
+            if _seleccionar_dropdown_anulados(page, "Mes", alt):
+                seleccionado = True
+                break
+    if not seleccionado:
+        raise RuntimeError(
+            f"No se pudo seleccionar el mes '{mes_label}' en el "
+            "formulario de Consulta Anulados."
+        )
+
+    # 4) Click Consultar.
+    boton_consultar = None
+    for selector in (
+        page.get_by_role("button", name="Consultar"),
+        page.locator("button:has-text('Consultar')"),
+        page.locator("input[type='submit'][value='Consultar']"),
+        page.locator("a:has-text('Consultar')"),
+    ):
+        try:
+            if selector.count():
+                boton_consultar = selector.first
+                break
+        except Exception:
+            continue
+    if boton_consultar is None:
+        raise RuntimeError(
+            "No se encontro el boton 'Consultar' en el formulario de Anulados."
+        )
+    try:
+        boton_consultar.click(timeout=4000)
+    except Exception as err:
+        raise RuntimeError(f"No se pudo hacer click en Consultar: {err}") from err
+
+    # 5) Esperar resultados.
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
+    _esperar_ajax(page, timeout=4000)
+
+    # 6) Iterar las dos tablas. Si una no aparece (ej. 0 emitidos), seguimos.
+    tabla_emit = _localizar_tabla_anulados(page, "emitidos")
+    tabla_rec = _localizar_tabla_anulados(page, "recibidos")
+
+    rows_emitidos = _iterar_tabla_anulados(page, tabla_emit, anio_int, mes_int) if tabla_emit else []
+    rows_recibidos = _iterar_tabla_anulados(page, tabla_rec, anio_int, mes_int) if tabla_rec else []
+
+    logger.info(
+        f"[anulados] {anio_int}-{mes_int:02d}: "
+        f"{len(rows_emitidos)} emitidos / {len(rows_recibidos)} recibidos."
+    )
+
+    # 7) Estructura de carpetas.
+    mes_dir = f"{mes_int:02d}_{_mes_a_texto(mes_int)}"
+    anio_dir = f"{anio_int:04d}"
+    xml_dir_emit = destino / "Emitidos" / anio_dir / mes_dir / "XML"
+    xml_dir_rec = destino / "Recibidos" / anio_dir / mes_dir / "XML"
+    if descargar_xml:
+        xml_dir_emit.mkdir(parents=True, exist_ok=True)
+        xml_dir_rec.mkdir(parents=True, exist_ok=True)
+
+    # 8) Intentar XML por clave (SOAP). El servicio no distingue origen.
+    request_context = page.context.request
+    claves_emit: set[str] = set()
+    claves_rec: set[str] = set()
+    n_xml = 0
+
+    def _intentar_xml(row: dict, xml_dir_destino: Path, claves_set: set[str]) -> None:
+        nonlocal n_xml
+        clave = (row.get("clave_acceso") or "").strip()
+        clave_digits = re.sub(r"\D", "", clave)
+        if len(clave_digits) != 49:
+            row["estado_xml"] = "Sin clave"
+            row["archivo_xml"] = ""
+            return
+        clave = clave_digits
+        fallback_nombre = (
+            row.get("serie")
+            or row.get("ident")
+            or f"anulado_{anio_int:04d}{mes_int:02d}"
+        )
+        try:
+            xml_path = _descargar_xml_emitido_por_clave(
+                request_context,
+                clave,
+                xml_dir_destino,
+                _sanear_nombre_archivo(str(fallback_nombre)),
+                claves_set,
+            )
+            if xml_path is None:
+                row["estado_xml"] = "Duplicado"
+                row["archivo_xml"] = ""
+            else:
+                row["estado_xml"] = "OK"
+                row["archivo_xml"] = str(xml_path)
+                n_xml += 1
+        except RuntimeError as err:
+            msg = str(err).lower()
+            if "anulado" in msg or "sin comprobante" in msg or "estado" in msg:
+                row["estado_xml"] = "XML no disponible"
+            else:
+                row["estado_xml"] = f"Error: {err}"
+            row["archivo_xml"] = ""
+        except Exception as err:
+            row["estado_xml"] = f"Error: {err}"
+            row["archivo_xml"] = ""
+
+    if descargar_xml:
+        for row in rows_emitidos:
+            _check_cancel("anulados_xml_emitido")
+            _intentar_xml(row, xml_dir_emit, claves_emit)
+        for row in rows_recibidos:
+            _check_cancel("anulados_xml_recibido")
+            _intentar_xml(row, xml_dir_rec, claves_rec)
+    else:
+        # Sin XML solicitado: marcar todos como "No solicitado" para que
+        # el Excel quede claro.
+        for row in rows_emitidos + rows_recibidos:
+            row.setdefault("estado_xml", "No solicitado")
+            row.setdefault("archivo_xml", "")
+
+    # 9) Excel con dos hojas.
+    excel_path = destino / f"anulados_{anio_int:04d}{mes_int:02d}.xlsx"
+    if excel_path.exists():
+        try:
+            excel_path.unlink()
+        except PermissionError:
+            sufijo = 1
+            while True:
+                candidato = destino / f"anulados_{anio_int:04d}{mes_int:02d}_{sufijo}.xlsx"
+                if not candidato.exists():
+                    excel_path = candidato
+                    break
+                sufijo += 1
+
+    excel_ok = _guardar_reporte_anulados_excel(rows_emitidos, rows_recibidos, excel_path)
+
+    resultado: dict = {
+        "estado": "ok",
+        "n_xml": n_xml,
+        "n_pdf": 0,
+        "n_registros": len(rows_emitidos) + len(rows_recibidos),
+        "carpeta_tipo": str(destino),
+        "tipo_slug": "anulados",
+        "tipo_visible": "Anulados",
+        "xml_dir": str(xml_dir_emit) if descargar_xml else "",
+        "pdf_dir": "",
+    }
+    if excel_ok and excel_path.exists():
+        resultado["reporte_xml"] = str(excel_path)
+    resultado["mensaje"] = (
+        f"Anulados {anio_int}-{mes_int:02d}: "
+        f"{len(rows_emitidos)} emitidos / {len(rows_recibidos)} recibidos"
+        + (f" | XMLs descargados: {n_xml}" if descargar_xml else "")
+    )
     return resultado
 
 
@@ -1942,6 +2464,28 @@ def _flujo_emitidos(
             view_state = _obtener_viewstate_actual()
             filas = tabla_emitidos.locator("tr")
             total_filas = filas.count()
+            # Esperar a que PrimeFaces termine de hidratar los <a> de PDF
+            # de TODAS las filas. Sin esto, la ultima fila puede tener el
+            # <tr> pero no su link, y la descarga se pierde de forma
+            # intermitente.
+            if total_filas > 0:
+                table_id = (
+                    "frmPrincipal:tablaCompRechazados_data"
+                    if es_rechazado
+                    else "frmPrincipal:tablaCompEmitidos_data"
+                )
+                try:
+                    page.wait_for_function(
+                        "({tid, n}) => {"
+                        "  const t = document.getElementById(tid);"
+                        "  if (!t) return false;"
+                        "  return t.querySelectorAll(\"a[id$=':lnkPdf']\").length >= n;"
+                        "}",
+                        arg={"tid": table_id, "n": total_filas},
+                        timeout=3000,
+                    )
+                except Exception:
+                    pass
             lote_inicio = time.perf_counter()
             lote_contador = 0
             lote_xml_ok = 0

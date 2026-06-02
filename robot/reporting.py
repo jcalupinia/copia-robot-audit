@@ -621,3 +621,99 @@ def _guardar_reporte_emitidos_excel(df_emitidos: pd.DataFrame, excel_path: Path,
                     celda.alignment = Alignment(horizontal="center", vertical="center")
 
     return True
+
+
+# --------------------------------------------------------------------------- #
+# Anulados (Consulta comprobantes anulados del SRI)
+# --------------------------------------------------------------------------- #
+_ANULADOS_COLUMNS_EMITIDOS = [
+    ("Año", "anio"),
+    ("Mes", "mes"),
+    ("Tipo de Comprobante", "tipo_comprobante"),
+    ("Serie", "serie"),
+    ("Identificación Receptor", "ident"),
+    ("Razón Social Receptor", "razon_social"),
+    ("Clave de Acceso", "clave_acceso"),
+    ("Estado XML", "estado_xml"),
+    ("Archivo XML", "archivo_xml"),
+]
+_ANULADOS_COLUMNS_RECIBIDOS = [
+    ("Año", "anio"),
+    ("Mes", "mes"),
+    ("Tipo de Comprobante", "tipo_comprobante"),
+    ("Serie", "serie"),
+    ("RUC Emisor", "ident"),
+    ("Razón Social Emisor", "razon_social"),
+    ("Clave de Acceso", "clave_acceso"),
+    ("Estado XML", "estado_xml"),
+    ("Archivo XML", "archivo_xml"),
+]
+
+
+def _df_anulados(rows: list[dict], columnas: list[tuple[str, str]]) -> pd.DataFrame:
+    headers = [col[0] for col in columnas]
+    if not rows:
+        return pd.DataFrame(columns=headers)
+    data = [
+        {col_name: ("" if row.get(key) is None else row.get(key)) for col_name, key in columnas}
+        for row in rows
+    ]
+    return pd.DataFrame(data, columns=headers)
+
+
+def _estilizar_hoja_anulados(ws, columnas: list[tuple[str, str]]) -> None:
+    """Aplica estilos a una hoja de anulados — cabecera azul, texto bonito,
+    clave de acceso forzada a texto para que Excel no la convierta a notacion
+    cientifica.
+    """
+    header_fill = PatternFill("solid", fgColor="305496")
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.freeze_panes = "A2"
+
+    headers = [col[0] for col in columnas]
+    text_cols = {"Clave de Acceso", "Identificación Receptor", "RUC Emisor", "Serie"}
+    for idx_col, header in enumerate(headers, start=1):
+        max_len = len(header)
+        col_letter = get_column_letter(idx_col)
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=idx_col, max_col=idx_col):
+            celda = row[0]
+            valor = celda.value
+            if valor is None:
+                continue
+            texto = str(valor)
+            if len(texto) > max_len:
+                max_len = len(texto)
+            if header in text_cols:
+                celda.number_format = "@"
+                celda.value = texto
+                celda.alignment = Alignment(horizontal="left", vertical="center")
+        ws.column_dimensions[col_letter].width = min(max_len + 2, 55)
+
+
+def _guardar_reporte_anulados_excel(
+    rows_emitidos: list[dict],
+    rows_recibidos: list[dict],
+    excel_path: Path,
+) -> bool:
+    """Genera el Excel de Comprobantes Anulados con dos hojas:
+    'Anulados emitidos' y 'Anulados recibidos'. Si una de las listas viene
+    vacia, la hoja se crea igual (solo cabeceras) para que la estructura
+    del archivo sea consistente.
+    """
+    try:
+        excel_path.parent.mkdir(parents=True, exist_ok=True)
+        df_emit = _df_anulados(rows_emitidos or [], _ANULADOS_COLUMNS_EMITIDOS)
+        df_rec = _df_anulados(rows_recibidos or [], _ANULADOS_COLUMNS_RECIBIDOS)
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            df_emit.to_excel(writer, sheet_name="Anulados emitidos", index=False)
+            df_rec.to_excel(writer, sheet_name="Anulados recibidos", index=False)
+            _estilizar_hoja_anulados(writer.sheets["Anulados emitidos"], _ANULADOS_COLUMNS_EMITIDOS)
+            _estilizar_hoja_anulados(writer.sheets["Anulados recibidos"], _ANULADOS_COLUMNS_RECIBIDOS)
+        return True
+    except Exception as err:
+        logger.warning(f"No se pudo escribir Excel de Anulados: {err}")
+        return False

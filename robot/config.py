@@ -247,6 +247,11 @@ RECIBIDOS_DIRECT_URL = "https://srienlinea.sri.gob.ec/comprobantes-electronicos-
 # referencia hace pasivamente mientras el usuario configura filtros.
 PERFIL_URL = "https://srienlinea.sri.gob.ec/sri-en-linea/contribuyente/perfil"
 RECUPERAR_COMPROBANTES_URL = "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/consultas/recuperarComprobantes.jsf"
+# Menu de Anulacion (Facturacion Electronica > Produccion > Anulacion).
+# Desde aqui hay un enlace "Consulta comprobantes anulados" que lleva al
+# formulario real de consulta. El destino tras clickear el enlace se descubre
+# en runtime — no hay URL directa al formulario.
+MENU_ANULACION_URL = "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/solicitud/anulacion/menuAnulacion.jsf"
 MENU_URL = "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/consultas/menu.jsf"
 MENU_URL_ALT = (
     "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet/pages/consultas/menu.jsf"

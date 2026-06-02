@@ -2894,7 +2894,7 @@ with tab1:
         clave = st.text_input("Clave del SRI", type="password", placeholder="********")
 
     with col_base2:
-        origen = st.selectbox("Origen de comprobantes", ["Recibidos", "Emitidos"], index=0)
+        origen = st.selectbox("Origen de comprobantes", ["Recibidos", "Emitidos", "Anulados"], index=0)
         if origen == "Recibidos":
             tipo_opciones = [
                 "Facturas",
@@ -2903,7 +2903,7 @@ with tab1:
                 "Notas de débito",
                 "Liquidación de compra",
             ]
-        else:
+        elif origen == "Emitidos":
             tipo_opciones = [
                 "Facturas",
                 "Liquidación de compra",
@@ -2912,7 +2912,31 @@ with tab1:
                 "Notas de débito",
                 "Guía de remisión",
             ]
-        tipo = st.selectbox("Tipo de comprobante", tipo_opciones)
+        else:
+            # Anulados: el formulario del SRI no segmenta por tipo de
+            # comprobante (devuelve todos los anulados del mes en una sola
+            # consulta). Dejamos el selector visible solo por consistencia
+            # pero no se usa para filtrar — el flujo `_flujo_anulados`
+            # ignora este valor.
+            tipo_opciones = ["Todos"]
+        tipo = st.selectbox(
+            "Tipo de comprobante",
+            tipo_opciones,
+            disabled=(origen == "Anulados"),
+            help=(
+                "Anulados no filtra por tipo: el SRI devuelve todos los "
+                "comprobantes anulados del mes."
+                if origen == "Anulados"
+                else None
+            ),
+        )
+        if origen == "Anulados":
+            st.caption(
+                "Módulo Anulados: año + mes únicamente. "
+                "Se generará un Excel con dos hojas (emitidos y recibidos) "
+                "y, si seleccionas XML, se intentará recuperar el comprobante "
+                "vía SOAP por clave de acceso."
+            )
 
     estado_emitidos = None
     establecimiento_input = None
@@ -3004,7 +3028,7 @@ with tab1:
                     help="Elige 0 para descargar todo el mes o un día específico (1-31).",
                 )
         formatos = st.multiselect("Formatos a descargar", ["XML", "PDF"], default=["XML", "PDF"])
-    else:
+    elif origen == "Emitidos":
         modo_fechas_emitidos = st.radio(
             "Modo de fecha",
             ["Mes y día", "Rango de meses", "Año completo"],
@@ -3104,6 +3128,43 @@ with tab1:
             formatos.append("PDF")
         if descargar_xml_emitidos:
             formatos.append("XML")
+    else:
+        # Anulados: el SRI solo filtra por año (desde 2012) y mes. No hay
+        # captcha, no hay filtro por día, no hay descarga de PDF en la
+        # pantalla. El bot intenta recuperar XML por clave via SOAP.
+        col_a1, col_a2 = st.columns([1, 1])
+        with col_a1:
+            anio_anulados = st.number_input(
+                "Año",
+                min_value=2012,
+                max_value=datetime.now().year,
+                value=datetime.now().year,
+                step=1,
+                key="anio_anulados",
+            )
+        with col_a2:
+            mes_anulados_label = st.selectbox(
+                "Mes",
+                meses_es,
+                index=datetime.now().month - 1,
+                key="mes_anulados",
+            )
+        anio_recibidos = int(anio_anulados)
+        mes_recibidos = meses_es.index(mes_anulados_label) + 1
+        dia_recibidos = 0
+        descargar_xml_anulados = st.checkbox(
+            "Intentar recuperar XML por clave de acceso",
+            value=True,
+            key="descargar_xml_anulados",
+            help=(
+                "Para cada fila anulada, llama al servicio SOAP del SRI "
+                "con la clave de acceso. Si el comprobante existe, "
+                "guarda el XML en Anulados/<Emitidos|Recibidos>/AÑO/MES/XML. "
+                "Si el SRI devuelve solo estado 'ANULADO' sin comprobante, "
+                "queda registrado como 'XML no disponible' en el Excel."
+            ),
+        )
+        formatos = ["XML"] if descargar_xml_anulados else []
     st.markdown("---")
     st.markdown('<h3 class="section-title">Carpeta base donde se guardarán las descargas</h3>', unsafe_allow_html=True)
     current_dir = st.session_state.get("download_base_dir", str(DESC_DIR))
@@ -3184,6 +3245,19 @@ with tab1:
                     mes_val = 1
                     mes_fin_val = 12
                     dia_val = 0
+                fecha_emitidos_val = None
+                estado_emitidos_val = None
+                establecimiento_val = None
+                punto_emision_val = None
+            elif origen == "Anulados":
+                # Anulados: la UI almaceno los valores en
+                # anio_recibidos/mes_recibidos. `formatos` puede venir
+                # vacio (usuario solo quiere el Excel sin intentar XML).
+                # No validamos formato minimo aqui.
+                formatos_final = formatos
+                anio_val = int(anio_recibidos)
+                mes_val = int(mes_recibidos)
+                dia_val = 0
                 fecha_emitidos_val = None
                 estado_emitidos_val = None
                 establecimiento_val = None

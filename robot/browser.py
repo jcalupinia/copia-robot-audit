@@ -31,6 +31,7 @@ from robot.config import (
     DOC_LABELS,
     DOWNLOAD_TIMEOUT,
     FACTURACION_MENU_SELECTOR,
+    MENU_ANULACION_URL,
     MENU_TOGGLE_SELECTOR,
     MODULO_PRODUCCION_SELECTOR,
     OVERLAY_SELECTORS,
@@ -2149,6 +2150,107 @@ def _abrir_modulo_consultas(page, origen: str):
         pass
     if not _en_formulario():
         _goto_form()
+
+    return page
+
+
+def _abrir_modulo_anulados(page):
+    """Navega al modulo de Consulta comprobantes anulados.
+
+    Flujo:
+      1. goto menuAnulacion.jsf (pantalla de tarjetas/enlaces de anulacion).
+      2. Click en el enlace 'Consulta comprobantes anulados'. El enlace vive
+         dentro de form#consultaDocumentoForm; el id (j_idtNN) cambia entre
+         deploys, asi que NO se usa. Estrategia: rol/texto > scope al form >
+         XPath estable como ultimo recurso.
+      3. Espera a que cargue la pantalla de consulta real.
+
+    Devuelve la `page` ya posicionada en el formulario de consulta de
+    anulados (lista para que `_flujo_anulados` haga la query/descarga).
+    """
+    _cerrar_modal_encuesta(page)
+
+    def _goto_menu():
+        ultimo_error = None
+        for intento in range(3):
+            try:
+                page.goto(MENU_ANULACION_URL, wait_until="domcontentloaded", timeout=15000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=4000)
+                except Exception:
+                    pass
+                return
+            except Exception as err:
+                ultimo_error = err
+                logger.warning(
+                    f"Reintentando acceso a menuAnulacion ({intento + 1}/3): {err}"
+                )
+        raise RuntimeError(
+            f"No se pudo abrir el menu de Anulacion: {ultimo_error}"
+        )
+
+    _goto_menu()
+
+    # 1) Estrategia preferida: get_by_role("link", name=...). Tolera cambios
+    #    de markup mientras el texto visible siga siendo el mismo.
+    # 2) Fallback: scope al form#consultaDocumentoForm + texto exacto.
+    # 3) Ultimo recurso: XPath sin j_idtNN.
+    enlace_texto = "Consulta comprobantes anulados"
+    clicked = False
+
+    try:
+        candidato = page.get_by_role("link", name=enlace_texto)
+        if candidato.count():
+            candidato.first.wait_for(state="visible", timeout=4000)
+            candidato.first.click(timeout=4000)
+            clicked = True
+    except Exception as err:
+        logger.warning(f"get_by_role no encontro el enlace de anulados: {err}")
+
+    if not clicked:
+        try:
+            form_scope = page.locator("form#consultaDocumentoForm")
+            if form_scope.count():
+                candidato = form_scope.get_by_text(enlace_texto, exact=True)
+                if candidato.count():
+                    candidato.first.wait_for(state="visible", timeout=4000)
+                    candidato.first.click(timeout=4000)
+                    clicked = True
+        except Exception as err:
+            logger.warning(f"Scope al form#consultaDocumentoForm no funciono: {err}")
+
+    if not clicked:
+        try:
+            xpath = (
+                "//form[@id='consultaDocumentoForm']"
+                "//a[normalize-space()='Consulta comprobantes anulados']"
+            )
+            candidato = page.locator(f"xpath={xpath}")
+            if candidato.count():
+                candidato.first.wait_for(state="visible", timeout=4000)
+                candidato.first.click(timeout=4000)
+                clicked = True
+        except Exception as err:
+            logger.warning(f"XPath fallback no funciono: {err}")
+
+    if not clicked:
+        raise RuntimeError(
+            "No se encontro el enlace 'Consulta comprobantes anulados' "
+            "en menuAnulacion.jsf. Verifica que la sesion siga activa y "
+            "que el rol del usuario tenga acceso a Anulacion."
+        )
+
+    # Esperar a que la pantalla de consulta termine de cargar. JSF dispara
+    # un submit del form -> navegacion (o partial-update) -> formulario nuevo.
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=8000)
+    except Exception:
+        pass
+    try:
+        page.wait_for_load_state("networkidle", timeout=4000)
+    except Exception:
+        pass
+    _esperar_ajax(page, timeout=2000)
 
     return page
 
