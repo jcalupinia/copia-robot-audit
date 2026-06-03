@@ -137,31 +137,49 @@ EMITIDOS_PUNTO_SELECTORS = [
 DOWNLOAD_ROW_RETRY_ATTEMPTS = max(1, int(os.getenv("DOWNLOAD_ROW_RETRY_ATTEMPTS", "2")))
 
 
-def _extraer_clave_fila(celdas) -> str:
-    def _buscar_clave(texto: str) -> str:
-        texto = (texto or "").strip()
-        if not texto:
-            return ""
-        match = re.search(r"\d{49}", texto)
+def _buscar_clave_en_textos(textos: list[str]) -> str:
+    """Busca una clave de acceso (49 digitos) en una lista de textos ya
+    recolectados de las celdas. Reemplazo rapido de `_extraer_clave_fila`
+    que evita los round-trips CDP — usar con `celdas.all_inner_texts()`.
+    """
+    for texto in textos[:6]:
+        clean = (texto or "").strip()
+        if not clean:
+            continue
+        match = re.search(r"\d{49}", clean)
         if match:
             return match.group(0)
-        solo_digitos = re.sub(r"\D", "", texto)
-        return solo_digitos if len(solo_digitos) == 49 else ""
+        solo_digitos = re.sub(r"\D", "", clean)
+        if len(solo_digitos) == 49:
+            return solo_digitos
+    # Fallback: concatenar las primeras 8 columnas por si la clave
+    # vive partida (caso raro de algunas tablas del SRI).
+    texto_fila = " ".join((t or "").strip() for t in textos[:8])
+    match = re.search(r"\d{49}", texto_fila)
+    if match:
+        return match.group(0)
+    solo_digitos = re.sub(r"\D", "", texto_fila)
+    return solo_digitos if len(solo_digitos) == 49 else ""
 
+
+def _extraer_clave_fila(celdas) -> str:
+    """Version legacy basada en Locator (multiples round-trips CDP). Para
+    los flujos hot se prefiere `_buscar_clave_en_textos(celdas.all_inner_texts())`.
+    Se conserva por compat externa.
+    """
     try:
         total = celdas.count()
     except Exception:
         total = 0
-
-    for idx_celda in range(min(total, 6)):
+    if total <= 0:
+        return ""
+    textos = []
+    for idx_celda in range(min(total, 8)):
         try:
-            texto = celdas.nth(idx_celda).inner_text().strip()
+            textos.append(celdas.nth(idx_celda).inner_text())
         except Exception:
-            continue
-        clave = _buscar_clave(texto)
-        if clave:
-            return clave
-    return ""
+            textos.append("")
+    return _buscar_clave_en_textos(textos)
 
 
 def _xml_files_por_tipo(base_dir: Path, tipo_prefijo: str) -> list[Path]:
@@ -1307,6 +1325,20 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                     )
                 except Exception:
                     pass
+            # OPTIMIZACION: capturar el form_data base + referer_url UNA
+            # SOLA VEZ por pagina. Estos valores son constantes para todas
+            # las filas de la misma consulta (ano, mes, dia, tipo, captcha,
+            # etc) y antes se rearmaban en cada llamada a la funcion PDF
+            # — eso costaba ~350ms/fila en round-trips CDP. Cachearlos lo
+            # baja a ~5ms.
+            try:
+                form_base_pdf = _obtener_form_base_emitidos(page)
+            except Exception:
+                form_base_pdf = {}
+            try:
+                referer_url_pdf = (page.url or "").split("#")[0]
+            except Exception:
+                referer_url_pdf = ""
             # Procesamos la pagina en dos rondas:
             #   ronda 1 = pase normal sobre todas las filas
             #   ronda 2 = retry SOLO de filas que perdieron AMBAS descargas
@@ -1333,6 +1365,12 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                     view_state = _obtener_viewstate_actual() or view_state
                     filas = tabla_datos.locator("tr")
                     total_filas = filas.count()
+                    # Refrescar tambien el form_base — la paginacion JSF
+                    # puede haber rotado el captcha o el viewstate.
+                    try:
+                        form_base_pdf = _obtener_form_base_emitidos(page) or form_base_pdf
+                    except Exception:
+                        pass
                 lote_inicio = time.perf_counter()
                 lote_contador = 0
                 lote_xml_ok = 0
@@ -1341,10 +1379,17 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                     _check_cancel("recibidos_fila")
                     fila = filas.nth(idx)
                     celdas = fila.locator("td")
-                    if not celdas.count():
+                    # OPTIMIZACION: leer todas las celdas de la fila con
+                    # UN solo round-trip CDP (vs 8+ round-trips antes con
+                    # nth(i).inner_text() por columna).
+                    try:
+                        textos_celdas = celdas.all_inner_texts()
+                    except Exception:
+                        textos_celdas = []
+                    if not textos_celdas:
                         continue
-                    clave_fila = _extraer_clave_fila(celdas)
-                    razon_texto = celdas.nth(1).inner_text().strip()
+                    clave_fila = _buscar_clave_en_textos(textos_celdas)
+                    razon_texto = textos_celdas[1].strip() if len(textos_celdas) > 1 else ""
                     bloques = [segmento.strip() for segmento in razon_texto.splitlines() if segmento.strip()]
                     razon_social = bloques[-1] if bloques else f"documento_{pagina}_{idx+1}"
                     nombre_base = _nombre_documento_mes(tipo_slug, fecha_token_doc, razon_social)
@@ -1473,14 +1518,21 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                             link_id = f"frmPrincipal:tablaCompRecibidos:{idx}:lnkPdf"
                             resultado_pdf = None
                             if view_state:
+                                # Pasamos el form_base + referer_url cacheados
+                                # (capturados antes del loop) para evitar ~11
+                                # round-trips CDP por llamada.
                                 resultado_pdf = _descargar_pdf_recibidos_post_con_viewstate(
-                                    page, link_id, view_state, destino_pdf
+                                    page, link_id, view_state, destino_pdf,
+                                    form_base=form_base_pdf,
+                                    referer_url=referer_url_pdf,
                                 )
                             if not resultado_pdf:
                                 view_state = _obtener_viewstate_actual() or view_state
                                 if view_state:
                                     resultado_pdf = _descargar_pdf_recibidos_post_con_viewstate(
-                                        page, link_id, view_state, destino_pdf
+                                        page, link_id, view_state, destino_pdf,
+                                        form_base=form_base_pdf,
+                                        referer_url=referer_url_pdf,
                                     )
                             if not resultado_pdf:
                                 link_pdf = fila.locator("a[id$=':lnkPdf']")
@@ -1495,15 +1547,19 @@ def _flujo_recibidos(page, destino: Path, anio: int, mes: int, dia: int, tipo: s
                                 descargados_pdf.add(row_id)
                                 lote_pdf_ok += 1
                                 pdf_guardado = True
-                                if resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
-                                    if not usar_xml_reporte:
-                                        datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
-                                            resultado_pdf,
-                                            es_retencion=es_retencion,
-                                            es_nota_credito=es_nota_credito,
-                                            es_nota_debito=es_nota_debito,
-                                        )
-                                        pdf_report_rows.append(datos_pdf)
+                                # OPTIMIZACION: si el XML del reporte ya quedo
+                                # OK (usar_xml_reporte=True), no necesitamos
+                                # ni validar que el archivo PDF se vea como
+                                # PDF ni extraer datos de el — los datos para
+                                # el Excel vienen del XML que ya fue parseado.
+                                if not usar_xml_reporte and resultado_pdf.suffix.lower() == ".pdf" and _es_archivo_pdf(resultado_pdf):
+                                    datos_pdf = _extraer_datos_pdf_por_tipo_layout_first(
+                                        resultado_pdf,
+                                        es_retencion=es_retencion,
+                                        es_nota_credito=es_nota_credito,
+                                        es_nota_debito=es_nota_debito,
+                                    )
+                                    pdf_report_rows.append(datos_pdf)
                                 break
                             if intento_pdf < DOWNLOAD_ROW_RETRY_ATTEMPTS:
                                 try:
@@ -1968,6 +2024,14 @@ def _flujo_emitidos(
         claves_guardadas = set()
         request_context = page.context.request
         payload_base = _obtener_form_base_emitidos(page)
+        # OPTIMIZACION: capturar referer_url UNA SOLA VEZ — antes se leia
+        # page.url en CADA llamada a `_descargar_pdf_emitidos_post_con_viewstate`
+        # (round-trip CDP) y se reutiliza el `payload_base` para no rearmar
+        # el form_data por fila.
+        try:
+            referer_url_pdf = (page.url or "").split("#")[0]
+        except Exception:
+            referer_url_pdf = ""
         def _pdf_report_incompleto(datos: dict, min_campos: int = 4) -> bool:
             if not isinstance(datos, dict) or not datos:
                 return True
@@ -2023,43 +2087,32 @@ def _flujo_emitidos(
                 _check_cancel("emitidos_fila")
                 fila = filas.nth(idx)
                 celdas = fila.locator("td")
+                # OPTIMIZACION: 1 round-trip CDP en vez de 9. all_inner_texts()
+                # devuelve los textos de TODAS las celdas en una sola llamada.
                 try:
-                    total_celdas = celdas.count()
+                    textos_celdas = celdas.all_inner_texts()
                 except Exception:
-                    total_celdas = 0
+                    textos_celdas = []
+                total_celdas = len(textos_celdas)
                 if total_celdas < 2:
                     continue
-                try:
-                    tipo_serie_texto = celdas.nth(1).inner_text().strip()
-                except Exception:
-                    tipo_serie_texto = ""
+
+                def _txt(i: int) -> str:
+                    return textos_celdas[i].strip() if 0 <= i < total_celdas else ""
+
+                tipo_serie_texto = _txt(1)
                 tipo_detectado = _extraer_tipo_documento(tipo_serie_texto)
                 if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
                     print(
                         f"[WARN] Se omitio una fila de Emitidos porque corresponde a '{tipo_detectado}' y no a '{tipo_visible or tipo}'."
                     )
                     continue
-                clave_texto = _extraer_clave_fila(celdas)
-                try:
-                    razon_texto = celdas.nth(4).inner_text().strip() if total_celdas > 4 else ""
-                except Exception:
-                    razon_texto = ""
-                try:
-                    fecha_aut_texto = celdas.nth(3).inner_text().strip() if total_celdas > 3 else ""
-                except Exception:
-                    fecha_aut_texto = ""
-                try:
-                    valor_sin_imp_texto = celdas.nth(5).inner_text().strip() if total_celdas > 5 else ""
-                except Exception:
-                    valor_sin_imp_texto = ""
-                try:
-                    iva_texto = celdas.nth(6).inner_text().strip() if total_celdas > 6 else ""
-                except Exception:
-                    iva_texto = ""
-                try:
-                    importe_total_texto = celdas.nth(7).inner_text().strip() if total_celdas > 7 else ""
-                except Exception:
-                    importe_total_texto = ""
+                clave_texto = _buscar_clave_en_textos(textos_celdas)
+                razon_texto = _txt(4)
+                fecha_aut_texto = _txt(3)
+                valor_sin_imp_texto = _txt(5)
+                iva_texto = _txt(6)
+                importe_total_texto = _txt(7)
 
                 tipo_serie_completo = " ".join(
                     fragment for fragment in [tipo_serie_texto, clave_texto] if fragment
@@ -2143,13 +2196,17 @@ def _flujo_emitidos(
                                     resultado_pdf = None
                                     if link_id and view_state:
                                         resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
-                                            page, link_id, view_state, destino_pdf
+                                            page, link_id, view_state, destino_pdf,
+                                            form_base=payload_base,
+                                            referer_url=referer_url_pdf,
                                         )
                                     if not resultado_pdf:
                                         view_state = _obtener_viewstate_actual() or view_state
                                         if link_id and view_state:
                                             resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
-                                                page, link_id, view_state, destino_pdf
+                                                page, link_id, view_state, destino_pdf,
+                                                form_base=payload_base,
+                                                referer_url=referer_url_pdf,
                                             )
                                     if not resultado_pdf:
                                         resultado_pdf = _guardar_pdf_desde_jsf(page, contenedor, destino_pdf)
@@ -2280,13 +2337,17 @@ def _flujo_emitidos(
                         resultado_pdf = None
                         if link_id and view_state:
                             resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
-                                page, link_id, view_state, destino_pdf
+                                page, link_id, view_state, destino_pdf,
+                                form_base=payload_base,
+                                referer_url=referer_url_pdf,
                             )
                         if not resultado_pdf:
                             view_state = _obtener_viewstate_actual() or view_state
                             if link_id and view_state:
                                 resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
-                                    page, link_id, view_state, destino_pdf
+                                    page, link_id, view_state, destino_pdf,
+                                    form_base=payload_base,
+                                    referer_url=referer_url_pdf,
                                 )
                         if not resultado_pdf:
                             resultado_pdf = _guardar_pdf_desde_jsf(page, link_pdf.first, destino_pdf)

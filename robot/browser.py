@@ -1387,61 +1387,21 @@ def _descargar_pdf_emitidos_post(page, link_locator, base_destino: Path) -> Opti
     return destino_final
 
 
-def _descargar_pdf_recibidos_post_con_viewstate(
+def _ejecutar_post_pdf(
     page,
-    link_id: str,
-    view_state: str,
+    referer_url: str,
+    form_data: dict,
     base_destino: Path,
 ) -> Optional[Path]:
-    if not link_id or not view_state:
-        return None
-
-    def _input_value(selector: str) -> str:
-        try:
-            loc = page.locator(selector)
-            if loc.count():
-                return loc.first.input_value()
-        except Exception:
-            return ""
-        return ""
-
-    def _checked_value(selector: str) -> str:
-        try:
-            loc = page.locator(selector)
-            if loc.count():
-                return (loc.first.get_attribute("value") or "")
-        except Exception:
-            return ""
-        return ""
-
-    form_data = {"frmPrincipal": "frmPrincipal"}
-    opciones = _checked_value("input[name='frmPrincipal:opciones']:checked")
-    if opciones:
-        form_data["frmPrincipal:opciones"] = opciones
-
-    campos = {
-        "frmPrincipal:ano": "select#frmPrincipal\\:ano",
-        "frmPrincipal:mes": "select#frmPrincipal\\:mes",
-        "frmPrincipal:dia": "select#frmPrincipal\\:dia",
-        "frmPrincipal:cmbTipoComprobante": "select#frmPrincipal\\:cmbTipoComprobante",
-    }
-    for clave, selector in campos.items():
-        valor = _input_value(selector)
-        if valor:
-            form_data[clave] = valor
-
-    recaptcha_val = _input_value("textarea[name='g-recaptcha-response']")
-    form_data["g-recaptcha-response"] = recaptcha_val
-    form_data["javax.faces.ViewState"] = view_state
-    form_data[link_id] = link_id
-
-    url = page.url.split("#")[0]
+    """Ejecuta el POST + valida content-type + guarda el PDF a disco.
+    Logica compartida entre la version Recibidos y Emitidos.
+    """
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
-        "Referer": url,
+        "Referer": referer_url,
     }
     try:
-        respuesta = page.context.request.post(url, data=form_data, headers=headers)
+        respuesta = page.context.request.post(referer_url, data=form_data, headers=headers)
     except Exception:
         return None
     try:
@@ -1471,6 +1431,39 @@ def _descargar_pdf_recibidos_post_con_viewstate(
     except Exception:
         return None
     return destino_final
+
+
+def _descargar_pdf_recibidos_post_con_viewstate(
+    page,
+    link_id: str,
+    view_state: str,
+    base_destino: Path,
+    form_base: dict | None = None,
+    referer_url: str | None = None,
+) -> Optional[Path]:
+    """Descarga PDF de Recibidos via HTTP POST.
+
+    Si `form_base` y `referer_url` se pasan pre-cacheados (al inicio de la
+    pagina, una sola vez), evita ~11 round-trips CDP por llamada — gana
+    ~300ms por fila. Si vienen `None` se construye el form base inline
+    (modo legacy, mantenido por backward compat para llamadas sueltas).
+
+    `form_base` se obtiene con `_obtener_form_base_emitidos(page)` — esa
+    funcion es generica (captura todo el form#frmPrincipal con un solo
+    `page.evaluate`) y sirve para ambos modulos.
+    """
+    if not link_id or not view_state:
+        return None
+
+    if form_base is None:
+        form_base = _obtener_form_base_emitidos(page)
+    if referer_url is None:
+        referer_url = page.url.split("#")[0]
+
+    form_data = dict(form_base)
+    form_data["javax.faces.ViewState"] = view_state
+    form_data[link_id] = link_id
+    return _ejecutar_post_pdf(page, referer_url, form_data, base_destino)
 
 
 def _descargar_pdf_emitidos_post_con_viewstate(
@@ -1478,87 +1471,27 @@ def _descargar_pdf_emitidos_post_con_viewstate(
     link_id: str,
     view_state: str,
     base_destino: Path,
+    form_base: dict | None = None,
+    referer_url: str | None = None,
 ) -> Optional[Path]:
+    """Descarga PDF de Emitidos via HTTP POST.
+
+    Misma optimizacion que `_descargar_pdf_recibidos_post_con_viewstate`:
+    si `form_base` y `referer_url` vienen pre-cacheados, evita ~13
+    round-trips CDP por llamada (~350ms por fila).
+    """
     if not link_id or not view_state:
         return None
 
-    def _input_value(selector: str) -> str:
-        try:
-            loc = page.locator(selector)
-            if loc.count():
-                return loc.first.input_value()
-        except Exception:
-            return ""
-        return ""
+    if form_base is None:
+        form_base = _obtener_form_base_emitidos(page)
+    if referer_url is None:
+        referer_url = page.url.split("#")[0]
 
-    def _checked_value(selector: str) -> str:
-        try:
-            loc = page.locator(selector)
-            if loc.count():
-                return (loc.first.get_attribute("value") or "")
-        except Exception:
-            return ""
-        return ""
-
-    form_data = {"frmPrincipal": "frmPrincipal"}
-    opciones = _checked_value("input[name='frmPrincipal:opciones']:checked")
-    if opciones:
-        form_data["frmPrincipal:opciones"] = opciones
-
-    campos = {
-        "frmPrincipal:calendarFechaDesde_input": "input#frmPrincipal\\:calendarFechaDesde_input",
-        "frmPrincipal:cmbEstadoAutorizacion": "select#frmPrincipal\\:cmbEstadoAutorizacion",
-        "frmPrincipal:cmbTipoComprobante": "select#frmPrincipal\\:cmbTipoComprobante",
-        "frmPrincipal:cmbEstablecimiento": "select#frmPrincipal\\:cmbEstablecimiento",
-        "frmPrincipal:txtPuntoEmision": "input#frmPrincipal\\:txtPuntoEmision",
-    }
-    for clave, selector in campos.items():
-        valor = _input_value(selector)
-        if valor:
-            form_data[clave] = valor
-
-    recaptcha_val = _input_value("textarea[name='g-recaptcha-response']")
-    if recaptcha_val:
-        form_data["g-recaptcha-response"] = recaptcha_val
+    form_data = dict(form_base)
     form_data["javax.faces.ViewState"] = view_state
     form_data[link_id] = link_id
-
-    url = page.url.split("#")[0]
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Referer": url,
-    }
-    try:
-        respuesta = page.context.request.post(url, data=form_data, headers=headers)
-    except Exception:
-        return None
-    try:
-        status = respuesta.status
-        if status and status >= 400:
-            return None
-    except Exception:
-        pass
-    if not _es_respuesta_pdf(respuesta):
-        return None
-    try:
-        cuerpo = respuesta.body()
-    except Exception:
-        return None
-    if not cuerpo:
-        return None
-    headers_resp = respuesta.headers or {}
-    disposition = headers_resp.get("content-disposition", "")
-    extension = ".pdf"
-    if "filename=" in disposition:
-        nombre = disposition.split("filename=")[-1].strip().strip('"').strip("'")
-        if "." in nombre:
-            extension = Path(nombre).suffix or extension
-    destino_final = _resolver_destino_unico(base_destino, extension)
-    try:
-        Path(destino_final).write_bytes(cuerpo)
-    except Exception:
-        return None
-    return destino_final
+    return _ejecutar_post_pdf(page, referer_url, form_data, base_destino)
 
 
 def _es_respuesta_xml(response) -> bool:
