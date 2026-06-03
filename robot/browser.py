@@ -26,14 +26,12 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from robot._logging import get_logger
 from robot.config import (
-    ACCEDER_ANULACION_URL,
     ANULACION_PROD_SELECTOR,
     AUTORIZACION_COMPROBANTES_SOAP_URL,
     CONSULTAS_SELECTOR,
     DOC_LABELS,
     DOWNLOAD_TIMEOUT,
     FACTURACION_MENU_SELECTOR,
-    MENU_ANULACION_URL,
     MENU_TOGGLE_SELECTOR,
     MENU_URL,
     MODULO_PRODUCCION_SELECTOR,
@@ -2275,41 +2273,27 @@ def _navegar_anulacion_via_side_menu(page) -> None:
 
 
 def _abrir_modulo_anulados(page):
-    """Navega al modulo de Consulta comprobantes anulados.
+    """Navega al modulo de Anulacion EXCLUSIVAMENTE por el side menu.
 
-    Estrategia en cascada de tres planes, ordenados por probabilidad de
-    exito y MINIMO impacto sobre la sesion:
+    Las URLs directas (deep link a menuAnulacion.jsf y accederAplicacion.jspa)
+    matan la sesion del SRI en este entorno. La unica via confiable
+    es replicar al usuario real cliqueando el menu lateral:
+      Facturacion Electronica > Produccion > Anulacion.
 
-      Plan A (accederAplicacion.jspa):
-        Es la URL que el propio side menu del SRI usa cuando el usuario
-        cliquea "Anulacion" (confirmado por la barra de estado del
-        navegador). Hace el handshake completo de portal -> aplicacion
-        y redirige a menuAnulacion.jsf. NO mata la sesion como si lo
-        hace el deep-link directo al .jsf.
-
-      Plan B (side menu):
-        Click sobre "Facturacion Electronica > Produccion > Anulacion"
-        en el side menu lateral. Reproduce un usuario real. Se usa el
-        selector scopeado a Produccion para evitar el "Anulacion"
-        duplicado que aparece bajo Pruebas.
-
-      Plan C (deep link a menuAnulacion.jsf):
-        Solo como ultimo recurso. Se sabe que puede matar la sesion en
-        algunos entornos del SRI, pero se intenta por completitud.
-
-    Despues de aterrizar en menuAnulacion.jsf se clickea el enlace
+    Tras aterrizar en menuAnulacion.jsf, se clickea el enlace
     'Consulta comprobantes anulados' con cascada de selectores
     (get_by_role > scope al form#consultaDocumentoForm > XPath).
     """
     _cerrar_modal_encuesta(page)
 
-    # Bootstrap: tocar consultas/menu.jsf para activar la sesion JSF de
-    # comprobantes-electronicos-internet. Ayuda a que cualquiera de los
-    # tres planes funcione mejor.
+    # Bootstrap: ir a una pagina que tenga el side menu del SRI con el
+    # arbol "Facturacion Electronica > Produccion" disponible. NO se
+    # navega por URL directa al modulo de Anulacion en ningun caso —
+    # eso es lo que mata la sesion.
     try:
-        page.goto(MENU_URL, wait_until="domcontentloaded", timeout=12000)
+        page.goto(MENU_URL, wait_until="domcontentloaded", timeout=15000)
         try:
-            page.wait_for_load_state("networkidle", timeout=3000)
+            page.wait_for_load_state("networkidle", timeout=4000)
         except Exception:
             pass
     except Exception as err:
@@ -2322,79 +2306,28 @@ def _abrir_modulo_anulados(page):
             "iniciar sesion."
         )
 
-    # ============ Plan A: accederAplicacion.jspa ============
-    plan_logrado = None
-    try:
-        page.goto(ACCEDER_ANULACION_URL, wait_until="domcontentloaded", timeout=20000)
-        try:
-            page.wait_for_load_state("networkidle", timeout=5000)
-        except Exception:
-            pass
-        if not _es_pagina_login_sri(page) and _en_menu_anulacion(page):
-            plan_logrado = "A (accederAplicacion.jspa)"
-    except Exception as err:
-        logger.warning(f"[anulados] Plan A (accederAplicacion) fallo: {err}")
+    # Navegacion via side menu (unica estrategia).
+    _navegar_anulacion_via_side_menu(page)
 
-    # ============ Plan B: side menu ============
-    if not plan_logrado:
-        try:
-            current_url = (page.url or "").lower()
-        except Exception:
-            current_url = ""
-        # Asegurarnos de estar en una pagina con el side menu disponible
-        # antes de intentar el click.
-        if "comprobantes-electronicos-internet" not in current_url or _es_pagina_login_sri(page):
-            try:
-                page.goto(MENU_URL, wait_until="domcontentloaded", timeout=12000)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=3000)
-                except Exception:
-                    pass
-            except Exception as err:
-                logger.warning(f"Re-bootstrap antes de Plan B fallo: {err}")
-
-        if not _es_pagina_login_sri(page):
-            try:
-                _navegar_anulacion_via_side_menu(page)
-                if not _es_pagina_login_sri(page) and _en_menu_anulacion(page):
-                    plan_logrado = "B (side menu)"
-            except Exception as err:
-                logger.warning(f"[anulados] Plan B (side menu) fallo: {err}")
-
-    # ============ Plan C: deep link directo ============
-    if not plan_logrado:
-        try:
-            page.goto(MENU_ANULACION_URL, wait_until="domcontentloaded", timeout=15000)
-            try:
-                page.wait_for_load_state("networkidle", timeout=4000)
-            except Exception:
-                pass
-            if not _es_pagina_login_sri(page) and _en_menu_anulacion(page):
-                plan_logrado = "C (deep link menuAnulacion.jsf)"
-        except Exception as err:
-            logger.warning(f"[anulados] Plan C (deep link) fallo: {err}")
-
-    if not plan_logrado:
+    if _es_pagina_login_sri(page):
+        raise RuntimeError(
+            "El SRI cerro la sesion al clickear 'Anulacion' en el side "
+            "menu. Esto sugiere que la cuenta no tiene permisos para el "
+            "modulo 'Facturacion Electronica > Produccion > Anulacion'. "
+            "Verifica con el administrador del RUC."
+        )
+    if not _en_menu_anulacion(page):
         try:
             url_final = page.url or "desconocida"
         except Exception:
             url_final = "desconocida"
-        sesion_kill = _es_pagina_login_sri(page)
-        if sesion_kill:
-            raise RuntimeError(
-                "Los tres planes para abrir Anulados terminaron con el "
-                "SRI redirigiendo al login. Esto sugiere que la cuenta "
-                "no tiene permisos para el modulo de Anulacion. Revisa "
-                "con el administrador del RUC."
-            )
         raise RuntimeError(
-            f"No se pudo abrir el modulo de Anulados con ninguna de las "
-            f"tres estrategias (URL portal, side menu, deep link). "
-            f"URL final: {url_final}. El SRI puede haber cambiado el "
-            "flujo o el rol del usuario no incluye Anulacion."
+            f"Tras clickear 'Anulacion' en el side menu, no aterrizamos "
+            f"en menuAnulacion.jsf (URL actual: {url_final}). El SRI "
+            "puede haber cambiado el flujo del side menu."
         )
 
-    logger.info(f"[anulados] entrada al modulo via Plan {plan_logrado}")
+    logger.info("[anulados] entrada al modulo via side menu")
 
     # 1) Estrategia preferida: get_by_role("link", name=...). Tolera cambios
     #    de markup mientras el texto visible siga siendo el mismo.
