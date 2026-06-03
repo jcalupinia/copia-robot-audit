@@ -180,7 +180,6 @@ from robot.pdf_extraction import (
 # Se re-importan vía facade: login y los flujos (que siguen en downloader.py)
 # las usan como si vivieran aquí.
 from robot.browser import (
-    _abrir_modulo_anulados,
     _abrir_modulo_consultas,
     _actualizar_view_state_input,
     _asegurar_portal_disponible,
@@ -231,7 +230,6 @@ from robot.browser import (
 # que quedó aquí) usa `_xml_files_por_tipo`; aplicacion.py lo importa desde
 # robot.downloader, así que se re-exporta vía facade.
 from robot.workflows import (
-    _flujo_anulados,
     _flujo_recibidos,
     _flujo_emitidos,
     _xml_files_por_tipo,
@@ -907,10 +905,8 @@ def descargar_sri(
     destino.mkdir(parents=True, exist_ok=True)
     destino_recibidos = destino / "Recibidos"
     destino_emitidos = destino / "Emitidos"
-    destino_anulados = destino / "Anulados"
     destino_recibidos.mkdir(parents=True, exist_ok=True)
     destino_emitidos.mkdir(parents=True, exist_ok=True)
-    destino_anulados.mkdir(parents=True, exist_ok=True)
     destino_objetivo = destino
     cookies_path = Path(f"cookies_{ruc}.json")
     checkpoint_path_str = str(checkpoint_path or "").strip()
@@ -935,7 +931,7 @@ def descargar_sri(
 
         page = context.pages[0] if context.pages else context.new_page()
 
-        destino_url = PORTAL_HOME if origen in {"Recibidos", "Emitidos", "Anulados"} else URLS.get(origen, URLS["Recibidos"])
+        destino_url = PORTAL_HOME if origen in {"Recibidos", "Emitidos"} else URLS.get(origen, URLS["Recibidos"])
         _login(context, page, ruc, clave, cookies_path, destino_url, ci_adicional=ci_adicional)
         _check_cancel("post_login")
         # Valida explícitamente el estado antes de buscar paneles del portal:
@@ -1634,25 +1630,6 @@ def descargar_sri(
                 mes_objetivo = int(resume_month if resume_download else mes)
                 dia_objetivo = int(resume_day) if resume_download else int(dia)
                 resultado = _emitidos_por_mes(mes_objetivo, 0 if dia in (0, None) else dia_objetivo)
-            if isinstance(resultado, dict) and aviso_recorte:
-                resultado.setdefault("aviso_recorte", aviso_recorte)
-        elif origen == "Anulados":
-            # Modulo de Anulacion: navegamos al menu y clickeamos
-            # "Consulta comprobantes anulados". Tras eso la `page` queda
-            # en el formulario real y `_flujo_anulados` se encarga del
-            # resto. Por ahora `_flujo_anulados` solo valida la
-            # navegacion (fase 2 implementara consulta+descarga).
-            modulo_page = _abrir_modulo_anulados(page)
-            destino_objetivo = destino_anulados
-            resultado = _flujo_anulados(
-                modulo_page,
-                destino_objetivo,
-                anio,
-                mes,
-                dia,
-                tipo,
-                formatos,
-            )
             if isinstance(resultado, dict) and aviso_recorte:
                 resultado.setdefault("aviso_recorte", aviso_recorte)
         else:
