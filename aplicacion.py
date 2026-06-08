@@ -2773,30 +2773,140 @@ def _build_custom_report_from_folder(
     }
 
 
-def _render_hero_panel():
-    """Renderiza el panel visual lateral con la imagen del robot + brand
-    overlay, replicando `.login-visual` del mockup. Se usa en login,
-    reset_request y password_recovery.
+def _inject_login_background_css():
+    """Inyecta:
+      - CSS que aplica `assets/hero.jpg` como background fixed full-viewport
+        sobre `.stApp`, con un gradient overlay (mas oscuro hacia la derecha
+        para legibilidad del form).
+      - Marker `.is-login-page` para que las reglas CSS scopeadas se activen
+        (selector `:has(.is-login-page)`).
+      - Reglas que reposicionan el main container de Streamlit y dejan los
+        widgets alineados a la derecha en un card flotante semi-transparente.
+      - Brand badge fijo abajo-izquierda (lv-brand-floating).
+
+    Se llama una sola vez por render de login / reset / recovery, antes de
+    cualquier otro widget. NO usa `st.columns`.
     """
     hero_uri = _asset_data_uri("hero.jpg")
     if not hero_uri:
+        # Sin asset, no podemos hacer full-bleed — fallback minimal.
         logo_html = _logo_html(220)
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
         return
     st.markdown(
         f"""
-        <div class="login-visual">
-          <img src="{hero_uri}" alt="Robot SRI Audit"/>
-          <div class="lv-fade"></div>
-          <div class="lv-brand">
-            <span class="b-badge">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 3v11m0 0l4-4m-4 4l-4-4M5 20h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"/>
-              </svg>
-            </span>
-            <span><b>ROBOT&nbsp;SRI&nbsp;AUDIT</b><span class="kicker">Descarga y auditoría del SRI</span></span>
-          </div>
+        <div class="is-login-page" aria-hidden="true"></div>
+        <style>
+        /* Hero como background del viewport entero + overlay para
+           que el form sea legible. El overlay es mas opaco hacia la
+           derecha (donde flota el card). */
+        .stApp:has(.is-login-page){{
+          background:
+            linear-gradient(to right,
+              rgba(7,11,20,0.28) 0%,
+              rgba(7,11,20,0.50) 42%,
+              rgba(7,11,20,0.82) 68%,
+              rgba(7,11,20,0.94) 90%,
+              rgba(7,11,20,0.97) 100%
+            ),
+            url('{hero_uri}') no-repeat center / cover fixed !important;
+          background-attachment: fixed !important;
+        }}
+        /* Quitamos cualquier padding-top extra del main container del login
+           y lo convertimos en flex centrado verticalmente, con padding lateral
+           generoso para que el card respire del borde derecho. */
+        .stApp:has(.is-login-page) [data-testid="stMainBlockContainer"],
+        .stApp:has(.is-login-page) section.main > div.block-container{{
+          min-height: 100vh !important;
+          padding: 1.5rem clamp(1.5rem, 6vw, 6rem) !important;
+          display: flex !important;
+          flex-direction: column !important;
+          justify-content: center !important;
+        }}
+        /* Empuja la columna vertical de widgets hacia la derecha del
+           viewport, ancho fijo ~460px (forma el "panel" del mockup). */
+        .stApp:has(.is-login-page) [data-testid="stMainBlockContainer"]
+          [data-testid="stVerticalBlock"]:first-of-type{{
+          max-width: 460px;
+          width: 100%;
+          margin-left: auto;
+          margin-right: 0;
+        }}
+        /* Form como card flotante semi-transparente con blur. */
+        .stApp:has(.is-login-page) [data-testid="stForm"]{{
+          background: rgba(15, 23, 42, 0.82) !important;
+          border: 1px solid var(--border) !important;
+          border-radius: 18px !important;
+          padding: 1.5rem 1.4rem 1.3rem !important;
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          box-shadow: 0 30px 60px -25px rgba(0,0,0,0.65) !important;
+          position: relative;
+          overflow: hidden;
+        }}
+        /* Beam superior del card (linea gradient verde-azul). */
+        .stApp:has(.is-login-page) [data-testid="stForm"]::before{{
+          content: "";
+          position: absolute; top: 0; left: 0; right: 0; height: 2px;
+          background: linear-gradient(90deg,
+            transparent, var(--accent), var(--accent-2), transparent);
+          pointer-events: none;
+        }}
+        /* Brand badge fijo abajo-izquierda (mockup). */
+        .lv-brand-floating{{
+          position: fixed;
+          left: clamp(1.2rem, 2.5vw, 2.4rem);
+          bottom: clamp(1.4rem, 4vh, 2.4rem);
+          display: flex;
+          align-items: center;
+          gap: .65rem;
+          z-index: 20;
+          pointer-events: none;
+        }}
+        .lv-brand-floating .b-badge{{
+          width: 36px; height: 36px;
+          border-radius: 10px;
+          display: grid; place-items: center;
+          border: 1.5px solid var(--accent);
+          background: rgba(7,13,8,0.6);
+          flex: 0 0 auto;
+        }}
+        .lv-brand-floating b{{
+          display: block;
+          font-size: .92rem; font-weight: 800;
+          color: #fff; line-height: 1.1;
+          letter-spacing: .01em;
+        }}
+        .lv-brand-floating .kicker{{
+          display: block;
+          font-size: .66rem;
+          letter-spacing: .14em;
+          text-transform: uppercase;
+          color: color-mix(in srgb, var(--accent) 75%, white);
+          margin-top: 2px;
+        }}
+        /* En pantallas chicas, el form vuelve a centrarse y el brand
+           se vuelve mas chico para no superponer el card. */
+        @media (max-width: 720px) {{
+          .stApp:has(.is-login-page) [data-testid="stMainBlockContainer"]
+            [data-testid="stVerticalBlock"]:first-of-type{{
+            margin-left: auto; margin-right: auto;
+            max-width: 100%;
+          }}
+          .lv-brand-floating .kicker{{ display: none; }}
+        }}
+        </style>
+        <div class="lv-brand-floating">
+          <span class="b-badge">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3v11m0 0l4-4m-4 4l-4-4M5 20h14"
+                stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round"
+                style="color:var(--accent)"/>
+            </svg>
+          </span>
+          <span><b>ROBOT&nbsp;SRI&nbsp;AUDIT</b><span class="kicker">Descarga y auditoría del SRI</span></span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2824,78 +2934,74 @@ def _render_auth_header(title: str, subtitle: str):
 
 
 def _render_reset_request():
-    col_hero, col_form = st.columns([1.1, 1], gap="medium")
-    with col_hero:
-        _render_hero_panel()
-    with col_form:
-        if st.button("← Volver a iniciar sesión", key="btn_top_login_reset_request"):
-            st.session_state["reset_request_mode"] = False
-            st.session_state.pop("recovery_email", None)
-            st.query_params.clear()
-            st.rerun()
-        _render_auth_header(
-            "Recuperar contraseña",
-            "Te enviaremos un enlace para restablecerla",
-        )
-        with st.form("password_request_form"):
-            email = st.text_input("Correo electrónico", value=st.session_state.get("recovery_email", ""))
-            send = st.form_submit_button("Enviar enlace", type="primary")
-            if send:
-                if not email:
-                    st.error("Ingresa el correo registrado.")
-                else:
-                    try:
-                        _request_password_reset(email.strip())
-                        st.success("Si el correo existe, enviaremos un enlace de recuperación.")
-                        st.session_state["reset_request_mode"] = False
-                        st.session_state["password_recovery_mode"] = False
-                        st.query_params.clear()
-                        st.rerun()
-                    except Exception as err:
-                        st.error(f"No se pudo enviar el correo: {err}")
+    # Layout: hero como background full-viewport; widgets en columna unica
+    # alineados a la derecha por CSS (sin st.columns).
+    _inject_login_background_css()
+    if st.button("← Volver a iniciar sesión", key="btn_top_login_reset_request"):
+        st.session_state["reset_request_mode"] = False
+        st.session_state.pop("recovery_email", None)
+        st.query_params.clear()
+        st.rerun()
+    _render_auth_header(
+        "Recuperar contraseña",
+        "Te enviaremos un enlace para restablecerla",
+    )
+    with st.form("password_request_form"):
+        email = st.text_input("Correo electrónico", value=st.session_state.get("recovery_email", ""))
+        send = st.form_submit_button("Enviar enlace", type="primary")
+        if send:
+            if not email:
+                st.error("Ingresa el correo registrado.")
+            else:
+                try:
+                    _request_password_reset(email.strip())
+                    st.success("Si el correo existe, enviaremos un enlace de recuperación.")
+                    st.session_state["reset_request_mode"] = False
+                    st.session_state["password_recovery_mode"] = False
+                    st.query_params.clear()
+                    st.rerun()
+                except Exception as err:
+                    st.error(f"No se pudo enviar el correo: {err}")
 
 
 def _render_password_recovery():
     st.session_state.setdefault("password_recovery_mode", False)
-    col_hero, col_form = st.columns([1.1, 1], gap="medium")
-    with col_hero:
-        _render_hero_panel()
-    with col_form:
-        if st.button("← Volver a iniciar sesión", key="btn_top_login_password_recovery"):
-            st.session_state["password_recovery_mode"] = False
-            st.session_state.pop("recovery_email", None)
-            st.session_state.pop("active_reset_token", None)
-            st.query_params.clear()
-            st.rerun()
-        _render_auth_header(
-            "Restablecer contraseña",
-            "Crea tu nueva contraseña para finalizar el acceso",
-        )
-        active_token = st.session_state.get("active_reset_token") or ""
-        recovery_email = st.session_state.get("recovery_email") or ""
-        if not active_token or not recovery_email:
-            st.warning("Abre el enlace de recuperación desde tu correo para continuar.")
-            return
-        with st.form("password_recovery_form"):
-            st.text_input("Correo electrónico", value=recovery_email, disabled=True)
-            new_password = st.text_input("Nueva contraseña", type="password")
-            confirm_password = st.text_input("Confirmar contraseña", type="password")
-            submitted = st.form_submit_button("Guardar contraseña", type="primary")
-            if submitted:
-                if not new_password or not confirm_password:
-                    st.error("Completa todos los campos.")
-                elif new_password != confirm_password:
-                    st.error("Las contraseñas no coinciden.")
-                else:
-                    try:
-                        _confirm_password_reset(active_token, new_password)
-                        st.success("Tu contraseña se actualizó correctamente.")
-                        st.session_state["password_recovery_mode"] = False
-                        st.session_state.pop("recovery_email", None)
-                        st.session_state.pop("active_reset_token", None)
-                        st.rerun()
-                    except Exception as err:
-                        st.error(f"No se pudo actualizar la contraseña: {err}")
+    _inject_login_background_css()
+    if st.button("← Volver a iniciar sesión", key="btn_top_login_password_recovery"):
+        st.session_state["password_recovery_mode"] = False
+        st.session_state.pop("recovery_email", None)
+        st.session_state.pop("active_reset_token", None)
+        st.query_params.clear()
+        st.rerun()
+    _render_auth_header(
+        "Restablecer contraseña",
+        "Crea tu nueva contraseña para finalizar el acceso",
+    )
+    active_token = st.session_state.get("active_reset_token") or ""
+    recovery_email = st.session_state.get("recovery_email") or ""
+    if not active_token or not recovery_email:
+        st.warning("Abre el enlace de recuperación desde tu correo para continuar.")
+        return
+    with st.form("password_recovery_form"):
+        st.text_input("Correo electrónico", value=recovery_email, disabled=True)
+        new_password = st.text_input("Nueva contraseña", type="password")
+        confirm_password = st.text_input("Confirmar contraseña", type="password")
+        submitted = st.form_submit_button("Guardar contraseña", type="primary")
+        if submitted:
+            if not new_password or not confirm_password:
+                st.error("Completa todos los campos.")
+            elif new_password != confirm_password:
+                st.error("Las contraseñas no coinciden.")
+            else:
+                try:
+                    _confirm_password_reset(active_token, new_password)
+                    st.success("Tu contraseña se actualizó correctamente.")
+                    st.session_state["password_recovery_mode"] = False
+                    st.session_state.pop("recovery_email", None)
+                    st.session_state.pop("active_reset_token", None)
+                    st.rerun()
+                except Exception as err:
+                    st.error(f"No se pudo actualizar la contraseña: {err}")
 
 
 def _render_login():
@@ -2908,24 +3014,24 @@ def _render_login():
     if st.session_state["reset_request_mode"]:
         _render_reset_request()
         return
-    col_hero, col_form = st.columns([1.1, 1], gap="medium")
-    with col_hero:
-        _render_hero_panel()
-    with col_form:
-        _render_auth_header(
-            "Iniciar sesión",
-            "Accede a tu Robot de auditoría del SRI",
-        )
-        with st.form("login_form"):
-            email = st.text_input("Correo electrónico")
-            password = st.text_input("Contraseña", type="password")
-            submitted = st.form_submit_button("Iniciar sesión", type="primary")
-        st.markdown(
-            "<div class='auth-reset-wrap'>"
-            "<a class='auth-reset-link' href='?reset_request=1'>&iquest;Olvidaste tu contrase&ntilde;a?</a>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
+    # Layout: hero como background full-viewport del .stApp; los widgets
+    # se renderizan en flujo vertical y el CSS los alinea a la derecha
+    # como un panel flotante semi-transparente. NO se usan st.columns.
+    _inject_login_background_css()
+    _render_auth_header(
+        "Iniciar sesión",
+        "Accede a tu Robot de auditoría del SRI",
+    )
+    with st.form("login_form"):
+        email = st.text_input("Correo electrónico")
+        password = st.text_input("Contraseña", type="password")
+        submitted = st.form_submit_button("Iniciar sesión", type="primary")
+    st.markdown(
+        "<div class='auth-reset-wrap'>"
+        "<a class='auth-reset-link' href='?reset_request=1'>&iquest;Olvidaste tu contrase&ntilde;a?</a>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
     if submitted:
         if not email or not password:
             st.error("Completa todos los campos.")
