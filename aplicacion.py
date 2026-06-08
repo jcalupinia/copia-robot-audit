@@ -1671,23 +1671,42 @@ section[data-testid="stSidebar"] img{
 /* ============== COMPONENTES MIGRADOS DEL MOCKUP ============== */
 /* ============================================================ */
 
-/* Limitar ancho del main como el .wrap del mockup */
+/* App ocupa TODO el ancho del viewport — no la confinamos a 1080px (eso
+   metia el topbar y el login dentro de un "box" centrado). Mantenemos
+   solo un padding minimo a los costados para que el contenido no se
+   pegue al borde. */
 .stApp div[data-testid="stMainBlockContainer"],
 .stApp section.main > div.block-container{
-  max-width:1080px !important;
-  padding-top:1.5rem !important;
-  padding-bottom:2rem !important;
+  max-width:none !important;
+  padding-top:0 !important;
+  padding-left:0 !important;
+  padding-right:0 !important;
+  padding-bottom:0 !important;
 }
 
-/* === Topbar (sticky, glass) === */
+/* === Topbar (sticky, full-bleed arriba) ===
+   Spaneo el topbar al borde del viewport: sin border-radius, sin
+   border lateral, solo una linea inferior. Margenes negativos para
+   "salir" del padding interno que Streamlit pone alrededor del main. */
 .app-topbar{
   position:sticky; top:0; z-index:30;
   display:flex; align-items:center; justify-content:space-between;
-  gap:1rem; padding:.85rem clamp(1rem,2.5vw,1.6rem);
+  gap:1rem; padding:.85rem clamp(1.2rem,3vw,2rem);
   background:color-mix(in srgb, var(--glass) 86%, transparent);
   backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-  border:1px solid var(--border); border-radius:14px;
-  margin-bottom:1.4rem;
+  border:0; border-bottom:1px solid var(--border);
+  border-radius:0;
+  margin:0 0 1.4rem 0;
+  width:100%;
+}
+
+/* Contenido de los tabs: lo centramos a un ancho legible (1180px)
+   sin afectar al topbar (que sigue al 100%). Esto da el look del
+   mockup: header full-width arriba + contenido centrado debajo. */
+.stApp [data-testid="stTabs"]{
+  max-width:1180px;
+  margin:0 auto;
+  padding:0 clamp(1rem,3vw,2rem);
 }
 .app-topbar .brand{display:flex; align-items:center; gap:.6rem; font-weight:800; letter-spacing:-.01em}
 .app-topbar .brand img{height:32px; width:auto; mix-blend-mode:screen}
@@ -1826,13 +1845,33 @@ section[data-testid="stSidebar"] img{
 }
 .about-card h4{margin:0 0 .8rem; color:var(--text-strong); font-size:1.05rem}
 
-/* === Login con hero lateral === */
-.login-shell{display:flex; gap:0; min-height:calc(100vh - 80px);
+/* === Login con hero lateral, FULL BLEED ===
+   El hero ocupa toda la altura de la pantalla y media de ancho — sin
+   box ni rounded corners, replicando la pantalla `#login` del mockup. */
+.login-shell{display:flex; gap:0; min-height:100vh;
   background:transparent; border-radius:0; overflow:hidden}
-.login-visual{position:relative; flex:1.1; min-height:520px;
-  border-radius:18px; overflow:hidden; border:1px solid var(--border)}
+.login-visual{position:relative; flex:1.1;
+  min-height:calc(100vh - 20px);
+  border-radius:0; overflow:hidden; border:0;
+  margin:0;
+}
 .login-visual img{position:absolute; inset:0; width:100%; height:100%;
   object-fit:cover; object-position:34% 46%; display:block}
+
+/* Cuando se renderiza el login, el wrapping de st.columns mete un padding
+   que rompe el "full-bleed". Lo neutralizamos. */
+.stApp [data-testid="stHorizontalBlock"]:has(.login-visual){
+  gap:0 !important;
+}
+.stApp [data-testid="stHorizontalBlock"]:has(.login-visual) > div{
+  padding:0 !important;
+}
+/* La columna del form recupera un padding interno para que el card no
+   toque el borde derecho de la pantalla. */
+.stApp [data-testid="stHorizontalBlock"]:has(.login-visual) > div:last-child{
+  padding:clamp(2rem,5vw,4rem) clamp(1.5rem,4vw,3rem) !important;
+  display:flex; align-items:center;
+}
 .login-visual .lv-fade{position:absolute; inset:0; pointer-events:none;
   background:linear-gradient(to right, transparent 30%,
     color-mix(in srgb, var(--bg) 60%, transparent) 70%,
