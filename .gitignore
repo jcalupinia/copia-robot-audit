@@ -31,3 +31,6 @@ desktop_config.json
 
 # Artefactos del harness de Claude Code (sesiones, hooks locales).
 .claude/
+
+# Carpeta del mockup de referencia (no se commitea al repo de la app real).
+Proyectos-de-Claude-main/

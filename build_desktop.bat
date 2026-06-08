@@ -31,6 +31,7 @@ pyinstaller --noconfirm --onefile --name "ROBOT_AUDIT_SRI" ^
   --add-data "robot;robot" ^
   --add-data "licensing_api;licensing_api" ^
   --add-data ".streamlit;.streamlit" ^
+  --add-data "assets;assets" ^
   desktop_launcher.py
 if /I "%PUBLISH_UPDATE%"=="1" (
   python scripts\publish_update.py

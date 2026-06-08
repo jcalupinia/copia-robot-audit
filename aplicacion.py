@@ -15,6 +15,9 @@ import re
 import unicodedata
 import calendar
 import base64
+import contextlib
+import functools
+import html
 from datetime import datetime, timedelta, date
 from pathlib import Path
 
@@ -440,6 +443,56 @@ def _logo_html(width):
     if not data_uri:
         return ""
     return f"<div style='text-align:center'><img src='{data_uri}' width='{width}'/></div>"
+
+
+@functools.lru_cache(maxsize=2)
+def _asset_data_uri(filename: str) -> str:
+    """Devuelve un data URI base64 para un asset de la carpeta `assets/`.
+
+    Cacheado a un solo I/O por archivo. Usado para hero/logo del mockup.
+    """
+    base_dir = Path(__file__).parent
+    path = base_dir / "assets" / filename
+    if not path.exists():
+        return ""
+    suffix = path.suffix.lower()
+    mime = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".svg": "image/svg+xml",
+        ".webp": "image/webp",
+    }.get(suffix, "application/octet-stream")
+    try:
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    except Exception:
+        return ""
+    return f"data:{mime};base64,{encoded}"
+
+
+@contextlib.contextmanager
+def _group_card(step: int | str, title: str, subtitle: str = ""):
+    """Context manager para envolver una seccion como `.group` del mockup
+    (card con borde + header numerado). Uso:
+
+        with _group_card(1, "Credenciales", "Datos del SRI"):
+            ...widgets de Streamlit...
+
+    Internamente usa st.container(border=True) y el truco de :has() para
+    aplicar el aspecto del mockup (ver CSS .group-h-marker).
+    """
+    container = st.container(border=True)
+    with container:
+        subtitle_html = f"<small>{html.escape(subtitle)}</small>" if subtitle else ""
+        st.markdown(
+            f"<div class='group-h-marker'>"
+            f"<span class='step'>{step}</span>"
+            f"<h3>{html.escape(str(title))}</h3>"
+            f"{subtitle_html}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        yield container
 
 
 def _slug_estado_emitidos(estado: str) -> str:
@@ -1040,7 +1093,10 @@ st.set_page_config(
     page_title="SRI Robot Audit",
     page_icon=str(Path(__file__).parent / "AUDIT_IA_sin_fondo_transparente_FINAL.png"),
     layout="wide",
-    initial_sidebar_state="expanded",
+    # Sidebar oculto: el mockup usa un topbar sticky en lugar de side menu.
+    # El menu de perfil y el chequeo de actualizaciones se muestran ahora
+    # en el header superior (ver _render_topbar) y en la pestana Ayuda.
+    initial_sidebar_state="collapsed",
 )
 _auto_update_ui()
 _render_update_modal()
@@ -1610,6 +1666,220 @@ section[data-testid="stSidebar"] img{
   border-color:var(--accent) !important;
   background:var(--accent-soft) !important;
 }
+
+/* ============================================================ */
+/* ============== COMPONENTES MIGRADOS DEL MOCKUP ============== */
+/* ============================================================ */
+
+/* Limitar ancho del main como el .wrap del mockup */
+.stApp div[data-testid="stMainBlockContainer"],
+.stApp section.main > div.block-container{
+  max-width:1080px !important;
+  padding-top:1.5rem !important;
+  padding-bottom:2rem !important;
+}
+
+/* === Topbar (sticky, glass) === */
+.app-topbar{
+  position:sticky; top:0; z-index:30;
+  display:flex; align-items:center; justify-content:space-between;
+  gap:1rem; padding:.85rem clamp(1rem,2.5vw,1.6rem);
+  background:color-mix(in srgb, var(--glass) 86%, transparent);
+  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  border:1px solid var(--border); border-radius:14px;
+  margin-bottom:1.4rem;
+}
+.app-topbar .brand{display:flex; align-items:center; gap:.6rem; font-weight:800; letter-spacing:-.01em}
+.app-topbar .brand img{height:32px; width:auto; mix-blend-mode:screen}
+.app-topbar .brand .divider{width:1px; height:24px; background:var(--border)}
+.app-topbar .title{font-size:.95rem; color:var(--text-muted); font-weight:600}
+.app-topbar .title b{color:var(--text)}
+.app-topbar .ver-chip{
+  display:inline-flex; align-items:center; gap:.35rem;
+  font-size:.72rem; font-weight:600; color:var(--text-muted);
+  border:1px solid var(--border); border-radius:999px;
+  padding:.25rem .65rem; background:var(--input-bg);
+}
+.app-topbar .ver-chip::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--accent)}
+.app-topbar .top-actions{display:flex; align-items:center; gap:.55rem}
+
+/* Mini-banda inferior con email del usuario (avatar + email) */
+.app-topbar .profile-mini{
+  display:flex; align-items:center; gap:.55rem;
+  padding:.3rem .7rem .3rem .35rem;
+  border:1px solid var(--border); border-radius:999px;
+  background:var(--input-bg);
+}
+.app-topbar .avatar{
+  width:28px; height:28px; border-radius:50%;
+  display:grid; place-items:center;
+  font-size:.7rem; font-weight:800; color:#04130b;
+  background:linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+.app-topbar .email{font-size:.82rem; color:var(--text-muted)}
+@media (max-width:760px){
+  .app-topbar .title, .app-topbar .email{display:none}
+}
+
+/* === pagehead === */
+.pagehead{margin:0 0 1.1rem 0}
+.pagehead h1{
+  font-size:clamp(1.4rem, 2.6vw, 1.95rem) !important;
+  font-weight:800 !important; letter-spacing:-.02em !important;
+  line-height:1.1 !important; margin:0 !important;
+  background:var(--title-grad); -webkit-background-clip:text; background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.pagehead p{color:var(--text-muted); margin:.35rem 0 0 !important; font-size:.92rem}
+
+/* === Group cards (steps numerados) ===
+   Aplicamos look "group" al wrapper que Streamlit renderiza para los
+   containers que llevan nuestro header `.group-h-marker` (truco con :has).
+*/
+.stApp [data-testid="stVerticalBlockBorderWrapper"]:has(> div > div > .group-h-marker){
+  background:var(--glass) !important;
+  border:1px solid var(--border) !important;
+  border-radius:var(--radius) !important;
+  padding:1.1rem 1.2rem !important;
+  margin-bottom:1rem !important;
+  box-shadow:none !important;
+}
+.group-h-marker{
+  display:flex; align-items:center; gap:.7rem;
+  margin:0 0 .9rem 0;
+}
+.group-h-marker .step{
+  width:26px; height:26px; flex:0 0 26px;
+  border-radius:8px; display:grid; place-items:center;
+  font-weight:800; font-size:.8rem;
+  color:var(--accent); background:var(--accent-soft);
+  border:1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.group-h-marker h3{
+  font-size:1.05rem !important; font-weight:700 !important;
+  margin:0 !important; color:var(--text-strong) !important;
+  letter-spacing:-.01em;
+}
+.group-h-marker small{
+  color:var(--text-muted); font-weight:500;
+  margin-left:auto; font-size:.78rem;
+}
+
+/* === Quickstart (Ayuda) === */
+.quickstart{
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+  gap:1rem; margin:.4rem 0 1.3rem 0;
+}
+.qs{
+  background:var(--glass); border:1px solid var(--border);
+  border-radius:var(--radius); padding:1.1rem;
+}
+.qs .n{
+  color:var(--accent); font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-weight:700; font-size:.85rem;
+}
+.qs h4{margin:.4rem 0 .3rem; font-size:1rem; color:var(--text-strong)}
+.qs p{color:var(--text-muted); font-size:.85rem; margin:0}
+
+/* === Accordion === */
+.acc{background:var(--glass); border:1px solid var(--border);
+  border-radius:var(--radius); overflow:hidden}
+.acc details{border-bottom:1px solid var(--border)}
+.acc details:last-child{border-bottom:0}
+.acc summary{
+  list-style:none; cursor:pointer;
+  display:flex; align-items:center; gap:.8rem;
+  padding:1rem 1.2rem; font-weight:600; color:var(--text);
+}
+.acc summary::-webkit-details-marker{display:none}
+.acc summary .ic{color:var(--accent)}
+.acc summary .pm{margin-left:auto; color:var(--text-muted); transition:.2s}
+.acc details[open] .pm{transform:rotate(45deg)}
+.acc .body{padding:0 1.2rem 1.2rem 3.4rem; color:var(--text-muted); font-size:.9rem}
+
+/* === Chips === */
+.chip{
+  display:inline-flex; align-items:center; gap:.35rem;
+  font-size:.74rem; font-weight:700;
+  padding:.2rem .55rem; border-radius:999px;
+  border:1px solid transparent; white-space:nowrap;
+}
+.chip::before{content:""; width:6px; height:6px; border-radius:50%; background:currentColor}
+.chip-ok{color:var(--accent); background:var(--accent-soft);
+  border-color:color-mix(in srgb, var(--accent) 30%, transparent)}
+.chip-auth{color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 14%, transparent);
+  border-color:color-mix(in srgb, var(--accent-2) 30%, transparent)}
+.chip-warn{color:var(--warn); background:color-mix(in srgb, var(--warn) 14%, transparent)}
+
+/* === About card === */
+.about-card{
+  background:var(--glass); border:1px solid var(--border);
+  border-radius:var(--radius); padding:1.2rem;
+}
+.about-card .row{display:flex; align-items:center; gap:.7rem; flex-wrap:wrap}
+.about-card .label{color:var(--text-muted); font-size:.82rem; font-weight:600}
+.about-card .value{
+  font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-weight:700; color:var(--text-strong);
+  background:var(--input-bg); border:1px solid var(--border);
+  padding:.25rem .65rem; border-radius:999px; font-size:.82rem;
+}
+.about-card h4{margin:0 0 .8rem; color:var(--text-strong); font-size:1.05rem}
+
+/* === Login con hero lateral === */
+.login-shell{display:flex; gap:0; min-height:calc(100vh - 80px);
+  background:transparent; border-radius:0; overflow:hidden}
+.login-visual{position:relative; flex:1.1; min-height:520px;
+  border-radius:18px; overflow:hidden; border:1px solid var(--border)}
+.login-visual img{position:absolute; inset:0; width:100%; height:100%;
+  object-fit:cover; object-position:34% 46%; display:block}
+.login-visual .lv-fade{position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(to right, transparent 30%,
+    color-mix(in srgb, var(--bg) 60%, transparent) 70%,
+    color-mix(in srgb, var(--bg) 90%, transparent) 100%)}
+.login-visual .lv-brand{
+  position:absolute; left:1.4rem; bottom:1.4rem;
+  display:flex; align-items:center; gap:.6rem; z-index:2;
+}
+.login-visual .lv-brand .b-badge{
+  width:36px; height:36px; border-radius:10px;
+  display:grid; place-items:center;
+  border:1.5px solid var(--accent); background:rgba(7,13,8,.6);
+}
+.login-visual .lv-brand b{display:block; font-size:.95rem; font-weight:800; color:#fff; line-height:1.1}
+.login-visual .lv-brand span.kicker{
+  display:block; font-size:.66rem; letter-spacing:.14em;
+  text-transform:uppercase; color:color-mix(in srgb, var(--accent) 70%, white);
+}
+
+/* Login form card */
+.login-form-card{
+  background:var(--glass); border:1px solid var(--border);
+  border-radius:18px; padding:1.6rem 1.5rem 1.4rem;
+  box-shadow:0 30px 60px -25px rgba(0,0,0,.55);
+  position:relative; overflow:hidden;
+}
+.login-form-card .beam{
+  position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent);
+}
+.login-form-card h2{
+  font-size:1.6rem !important; font-weight:800 !important;
+  margin:0 0 .35rem !important; color:var(--text-strong) !important;
+  letter-spacing:-.02em;
+}
+.login-form-card .sub{color:var(--text-muted); font-size:.92rem; margin:0 0 1rem}
+.badge-device{
+  display:inline-flex; align-items:center; gap:.4rem;
+  font-size:.72rem; font-weight:700; color:var(--accent);
+  background:var(--accent-soft);
+  border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding:.3rem .7rem; border-radius:999px; margin-bottom:.9rem;
+}
+.badge-device::before{content:""; width:6px; height:6px; border-radius:50%; background:currentColor}
+
+/* Esconder logo gigante centrado en login */
+.login-shell + div [data-testid="stImage"]{display:none}
 """
 
 
@@ -2464,22 +2734,70 @@ def _build_custom_report_from_folder(
     }
 
 
-def _render_reset_request():
-    st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
-    _, col, _ = st.columns([1, 0.9, 1])
-    with col:
-        top_left, top_right = st.columns([4.2, 1.3])
-        with top_right:
-            if st.button("Iniciar sesión", key="btn_top_login_reset_request"):
-                st.session_state["reset_request_mode"] = False
-                st.session_state.pop("recovery_email", None)
-                st.query_params.clear()
-                st.rerun()
-        logo_html = _logo_html(140)
+def _render_hero_panel():
+    """Renderiza el panel visual lateral con la imagen del robot + brand
+    overlay, replicando `.login-visual` del mockup. Se usa en login,
+    reset_request y password_recovery.
+    """
+    hero_uri = _asset_data_uri("hero.jpg")
+    if not hero_uri:
+        logo_html = _logo_html(220)
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Recuperar contraseña</div>", unsafe_allow_html=True)
-        st.info("Ingresa tu correo registrado y te enviaremos un enlace para restablecer tu contraseña.")
+        return
+    st.markdown(
+        f"""
+        <div class="login-visual">
+          <img src="{hero_uri}" alt="Robot SRI Audit"/>
+          <div class="lv-fade"></div>
+          <div class="lv-brand">
+            <span class="b-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 3v11m0 0l4-4m-4 4l-4-4M5 20h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"/>
+              </svg>
+            </span>
+            <span><b>ROBOT&nbsp;SRI&nbsp;AUDIT</b><span class="kicker">Descarga y auditoría del SRI</span></span>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_auth_header(title: str, subtitle: str):
+    """Encabezado del card derecho del login (h2 + subtitulo + badge + beam)."""
+    st.markdown(
+        f"""
+        <div style="position:relative;padding-top:.6rem">
+          <span class="beam" style="position:absolute;top:0;left:0;right:0;height:2px;
+            background:linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent)"></span>
+          <span class="badge-device">Sesión vinculada al dispositivo</span>
+          <h2 style="font-size:1.6rem;font-weight:800;margin:.4rem 0 .35rem;color:var(--text-strong);letter-spacing:-.02em">
+            {html.escape(title)}
+          </h2>
+          <p style="color:var(--text-muted);font-size:.92rem;margin:0 0 1rem">
+            {html.escape(subtitle)}
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_reset_request():
+    col_hero, col_form = st.columns([1.1, 1], gap="medium")
+    with col_hero:
+        _render_hero_panel()
+    with col_form:
+        if st.button("← Volver a iniciar sesión", key="btn_top_login_reset_request"):
+            st.session_state["reset_request_mode"] = False
+            st.session_state.pop("recovery_email", None)
+            st.query_params.clear()
+            st.rerun()
+        _render_auth_header(
+            "Recuperar contraseña",
+            "Te enviaremos un enlace para restablecerla",
+        )
         with st.form("password_request_form"):
             email = st.text_input("Correo electrónico", value=st.session_state.get("recovery_email", ""))
             send = st.form_submit_button("Enviar enlace", type="primary")
@@ -2500,22 +2818,20 @@ def _render_reset_request():
 
 def _render_password_recovery():
     st.session_state.setdefault("password_recovery_mode", False)
-    st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
-    _, col, _ = st.columns([1, 0.9, 1])
-    with col:
-        top_left, top_right = st.columns([4.2, 1.3])
-        with top_right:
-            if st.button("Iniciar sesión", key="btn_top_login_password_recovery"):
-                st.session_state["password_recovery_mode"] = False
-                st.session_state.pop("recovery_email", None)
-                st.session_state.pop("active_reset_token", None)
-                st.query_params.clear()
-                st.rerun()
-        logo_html = _logo_html(140)
-        if logo_html:
-            st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Reestablecer contraseña</div>", unsafe_allow_html=True)
-        st.info("Crea tu nueva contraseña para finalizar el acceso a tu cuenta.")
+    col_hero, col_form = st.columns([1.1, 1], gap="medium")
+    with col_hero:
+        _render_hero_panel()
+    with col_form:
+        if st.button("← Volver a iniciar sesión", key="btn_top_login_password_recovery"):
+            st.session_state["password_recovery_mode"] = False
+            st.session_state.pop("recovery_email", None)
+            st.session_state.pop("active_reset_token", None)
+            st.query_params.clear()
+            st.rerun()
+        _render_auth_header(
+            "Restablecer contraseña",
+            "Crea tu nueva contraseña para finalizar el acceso",
+        )
         active_token = st.session_state.get("active_reset_token") or ""
         recovery_email = st.session_state.get("recovery_email") or ""
         if not active_token or not recovery_email:
@@ -2553,13 +2869,14 @@ def _render_login():
     if st.session_state["reset_request_mode"]:
         _render_reset_request()
         return
-    st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
-    _, col, _ = st.columns([1, 0.9, 1])
-    with col:
-        logo_html = _logo_html(160)
-        if logo_html:
-            st.markdown(logo_html, unsafe_allow_html=True)
-        st.markdown("<div class='auth-title'>Iniciar sesión</div>", unsafe_allow_html=True)
+    col_hero, col_form = st.columns([1.1, 1], gap="medium")
+    with col_hero:
+        _render_hero_panel()
+    with col_form:
+        _render_auth_header(
+            "Iniciar sesión",
+            "Accede a tu Robot de auditoría del SRI",
+        )
         with st.form("login_form"):
             email = st.text_input("Correo electrónico")
             password = st.text_input("Contraseña", type="password")
@@ -2710,94 +3027,83 @@ if "first_use_tour_prompt_shown_session" not in st.session_state:
 DEVICE_FINGERPRINT = st.session_state.get("device_fingerprint") or st.session_state.get("user_email")
 
 # ==============================
-# SIDEBAR CORPORATIVO
+# TOPBAR (sticky header del mockup)
 # ==============================
-with st.sidebar:
+# Versión dinámica del app — en el .exe compilado viene de version.txt;
+# en modo dev mostramos un placeholder. La usamos en el topbar (chip
+# discreto) y tambien en Ayuda → Acerca de la aplicación.
+if _desktop_launcher is not None and _desktop_launcher.APP_VERSION:
+    _app_version_display = _desktop_launcher.APP_VERSION
+else:
+    _app_version_display = "3.0 (dev)"
+
+
+def _render_topbar(app_version: str) -> None:
+    """Renderiza el topbar sticky superior del mockup: branding a la izquierda,
+    titulo en el centro, chip de version + perfil a la derecha. Los botones
+    interactivos (Cerrar sesion / Cerrar app) van debajo en una fila compacta
+    que el CSS alinea visualmente con el topbar.
+    """
     user_email = st.session_state.get("user_email") or "No disponible"
-    with st.expander("Perfil", expanded=False):
-        st.markdown("**Usuario conectado**")
-        st.caption(user_email)
-        if st.button("Cerrar sesión"):
+    initials_seed = (user_email.split("@")[0] or "U").replace(".", " ")
+    avatar_initials = "".join(part[0].upper() for part in initials_seed.split() if part)[:2] or "U"
+
+    logo_uri = _asset_data_uri("logo-acg.png")
+    logo_img = (
+        f'<img src="{logo_uri}" alt="Audit Consulting Group"/>'
+        if logo_uri
+        else ""
+    )
+
+    st.markdown(
+        f"""
+        <div class="app-topbar">
+          <div class="brand">
+            {logo_img}
+            <span class="divider"></span>
+            <span style="font-weight:800">SRI&nbsp;Robot&nbsp;Audit</span>
+          </div>
+          <span class="title">Descarga y <b>Reporte Automático</b></span>
+          <div class="top-actions">
+            <span class="ver-chip" title="Versión actual">v{html.escape(app_version)}</span>
+            <div class="profile-mini" title="Usuario conectado">
+              <span class="avatar">{html.escape(avatar_initials)}</span>
+              <span class="email">{html.escape(user_email)}</span>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Fila compacta con los botones reales. Streamlit no permite renderizar
+    # botones interactivos dentro del HTML markdown, asi que los ponemos
+    # debajo. El CSS los pone con estilo "ghost" y los alinea a la derecha.
+    cols = st.columns([6, 1.1, 1.4, 1.4]) if getattr(sys, "frozen", False) else st.columns([6, 1.1, 1.4])
+    with cols[1]:
+        if st.button("Tema", key="btn_topbar_theme", help="Alternar tema claro/oscuro"):
+            st.session_state["ui_theme"] = "light" if st.session_state.get("ui_theme") == "dark" else "dark"
+            st.rerun()
+    with cols[2]:
+        if st.button("Cerrar sesión", key="btn_topbar_logout"):
             device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
             _clear_cached_auth_only()
             st.session_state.clear()
             if device_id:
                 st.session_state["_device_id"] = device_id
             st.rerun()
-        if getattr(sys, "frozen", False):
-            if st.button("Cerrar aplicacion", key="btn_open_close_app", use_container_width=True):
+    if getattr(sys, "frozen", False):
+        with cols[3]:
+            if st.button("Cerrar app", key="btn_open_close_app"):
                 st.session_state["open_close_app_dialog"] = True
 
-    logo_path = Path(__file__).parent / "AUDIT_IA_sin_fondo_transparente_FINAL.png"
-    if logo_path.exists():
-        st.image(str(logo_path), width=180)
-    st.markdown("###  Auditora Web SRI Robot")
-    st.write("Automatiza descargas, valida comprobantes y genera reportes tributarios.")
-    st.markdown("---")
-    # Versión dinámica + botón manual de actualización.
-    # En el .exe compilado, `_desktop_launcher.APP_VERSION` viene de version.txt.
-    # En modo dev, mostramos un placeholder.
-    if _desktop_launcher is not None and _desktop_launcher.APP_VERSION:
-        _app_version_display = _desktop_launcher.APP_VERSION
-    else:
-        _app_version_display = "3.0 (dev)"
 
-    st.markdown(
-        f'<div class="sidebar-version-line">Versión: <strong>{_app_version_display}</strong></div>',
-        unsafe_allow_html=True,
-    )
-    if st.button("🔄 Buscar actualizaciones", help="Buscar actualizaciones disponibles",
-                 use_container_width=True, key="btn_buscar_update"):
-        # Reset del estado para forzar un nuevo chequeo.
-        st.session_state.pop("_update_checked", None)
-        st.session_state.pop("_update_message", None)
-        st.session_state["_manual_update_check"] = True
-        st.rerun()
+_render_topbar(_app_version_display)
 
-    # Resultado del chequeo manual (solo se ejecuta UNA vez tras el click).
-    if st.session_state.pop("_manual_update_check", False):
-        if not getattr(sys, "frozen", False):
-            st.info(
-                "La auto-actualización solo funciona en el ejecutable .exe "
-                "compilado, no en modo desarrollo."
-            )
-        elif _desktop_launcher is None:
-            st.warning("Módulo de actualización no disponible en este build.")
-        else:
-            with st.spinner("Verificando actualizaciones..."):
-                try:
-                    _update_payload = _get_update_payload()
-                except Exception as _upd_err:
-                    _update_payload = None
-                    st.error(f"Error al verificar: {_upd_err}")
-            if _update_payload:
-                _new_ver = _update_payload.get("version", "?")
-                _msg = (
-                    f"Nueva versión **{_new_ver}** disponible. "
-                    f"Descargando y aplicando... la app se reiniciará en breve."
-                )
-                st.session_state["_update_message"] = _msg
-                st.session_state["_update_checked"] = True
-                st.success(_msg)
-
-                def _manual_update_worker():
-                    try:
-                        _start_update(_update_payload)
-                    except Exception:
-                        pass
-
-                threading.Thread(target=_manual_update_worker, daemon=True).start()
-            else:
-                st.session_state["_update_checked"] = True
-                st.success(
-                    f"Ya estás en la última versión ({_app_version_display}). "
-                    "No hay actualizaciones disponibles."
-                )
 
 # ==============================
 # INTERFAZ PRINCIPAL
 # ==============================
-st.markdown('<h1 class="app-title">SRI Robot Audit Descarga y Reporte Automático</h1>', unsafe_allow_html=True)
 
 if hasattr(st, "dialog"):
     @st.dialog("Recorrido rapido del sistema")
@@ -2889,7 +3195,13 @@ with tab1:
 
     col_title, col_tour_link = st.columns([5, 1.6])
     with col_title:
-        st.markdown('<h3 class="section-title">Ingreso de Credenciales y Filtros</h3>', unsafe_allow_html=True)
+        st.markdown(
+            "<div class='pagehead'>"
+            "<h1>Descarga de Comprobantes</h1>"
+            "<p>Ingreso de credenciales y filtros — el robot descarga todo automáticamente.</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
     with col_tour_link:
         if st.button("Primera vez? Ver tour", key="btn_open_tour"):
             _start_first_use_tour(reset_step=True)
@@ -3588,6 +3900,13 @@ with tab1:
             pass
 
 with tab2:
+    st.markdown(
+        "<div class='pagehead'>"
+        "<h1>Reporte e Historial</h1>"
+        "<p>Genera reportes por fechas y revisa las ejecuciones recientes.</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
     st.markdown('<h3 class="section-title">Reporte por fechas</h3>', unsafe_allow_html=True)
     st.caption("Genera un Excel desde una carpeta ya descargada. Se usarán XML cuando existan y PDF como respaldo para los documentos sin XML.")
 
@@ -4102,6 +4421,13 @@ with tab2:
 
 with tab3:
     st.markdown(
+        "<div class='pagehead'>"
+        "<h1>Consolidar desde carpeta</h1>"
+        "<p>Genera reportes consolidados desde documentos ya descargados.</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
         '<h3 class="section-title" style="color:#ffffff !important;">Consolidar desde carpeta</h3>',
         unsafe_allow_html=True,
     )
@@ -4449,19 +4775,33 @@ with tab3:
                 st.info("No se copiaron PDF porque no hubo documentos para el periodo seleccionado.")
 
 with tab4:
-    st.markdown('<h3 class="section-title" style="color:#ffffff !important;">Centro de ayuda</h3>', unsafe_allow_html=True)
-    st.write("Guia rapida para usar el sistema paso a paso.")
-
+    # ===== Encabezado =====
     st.markdown(
-        """
-1. Inicia sesión con tu correo y contraseña.
-2. En Descarga de Comprobantes, completa RUC, clave SRI y filtros.
-3. Elige formato XML y/o PDF segun la necesidad.
-4. Selecciona la carpeta base de descarga.
-5. Ejecuta Iniciar proceso y revisa el resumen final.
-"""
+        "<div class='pagehead'>"
+        "<h1>Centro de ayuda</h1>"
+        "<p>Guía rápida para usar el sistema paso a paso.</p>"
+        "</div>",
+        unsafe_allow_html=True,
     )
 
+    # ===== Quickstart cards (numeradas 01-04) =====
+    st.markdown(
+        """
+        <div class="quickstart">
+          <div class="qs"><div class="n">01</div><h4>Inicia sesión</h4>
+            <p>Verifica tu correo, contraseña y licencia activa.</p></div>
+          <div class="qs"><div class="n">02</div><h4>Descarga comprobantes</h4>
+            <p>Ingresa RUC, clave del SRI y filtros.</p></div>
+          <div class="qs"><div class="n">03</div><h4>Genera o consolida</h4>
+            <p>Elige formato (XML/PDF) según lo que necesites.</p></div>
+          <div class="qs"><div class="n">04</div><h4>Revisa el historial</h4>
+            <p>Consulta el estado de cada ejecución.</p></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ===== Acciones del tour =====
     col_help_1, col_help_2 = st.columns([1, 1])
     with col_help_1:
         if st.button("Activar tour de primer uso", key="help_start_tour", use_container_width=True):
@@ -4475,36 +4815,123 @@ with tab4:
             _persist_user_preferences()
             st.success("Listo. El tour volvera a mostrarse.")
 
-    with st.expander("Inicio de sesion y licencias", expanded=True):
-        st.write(
-            "Si no puedes entrar, verifica correo, contrasena y estado de licencia. "
-            "El acceso depende de la base en Render; si el usuario no existe o no tiene licencia activa, no podra ingresar."
-        )
+    # ===== Accordion de ayuda (usando <details> nativo, estilizado como el mockup) =====
+    st.markdown(
+        """
+        <div class="acc">
+          <details open>
+            <summary><span class="ic">●</span> Inicio de sesión y licencias <span class="pm">+</span></summary>
+            <div class="body">Si no puedes entrar, verifica correo, contraseña y estado de licencia.
+              El acceso depende de la base en Render; si el usuario no existe o no tiene licencia activa,
+              no podrá ingresar. La sesión queda vinculada a este dispositivo.</div>
+          </details>
+          <details>
+            <summary><span class="ic">●</span> Descarga de Recibidos <span class="pm">+</span></summary>
+            <div class="body">Usa Recibidos para descargar comprobantes por mes, día, rango de meses
+              o año completo. Puedes combinar XML y PDF en la misma ejecución.</div>
+          </details>
+          <details>
+            <summary><span class="ic">●</span> Descarga de Emitidos <span class="pm">+</span></summary>
+            <div class="body">En Emitidos define estado de autorización, establecimiento y punto de
+              emisión si aplica. Para XML de Emitidos Autorizados, el sistema valida automáticamente
+              el límite operativo de 30 días.</div>
+          </details>
+          <details>
+            <summary><span class="ic">●</span> Consolidación desde carpeta <span class="pm">+</span></summary>
+            <div class="body">Permite generar reportes consolidados desde documentos ya descargados.
+              Puedes consolidar XML, PDF o ambos y copiar todos los archivos encontrados al
+              directorio final.</div>
+          </details>
+          <details>
+            <summary><span class="ic">●</span> Errores frecuentes y qué hacer <span class="pm">+</span></summary>
+            <div class="body">
+              · Timeout o portal lento: vuelve a intentar en unos segundos.<br>
+              · Captcha incorrecta: espera 1-2 minutos y repite la consulta.<br>
+              · Sin resultados: valida rango de fechas, tipo y estado seleccionado.<br>
+              · No descarga archivos: revisa permisos de carpeta y espacio disponible.
+            </div>
+          </details>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    with st.expander("Descarga de Recibidos"):
-        st.write(
-            "Usa Recibidos para descargar comprobantes por mes, dia, rango de meses o ano completo. "
-            "Puedes combinar XML y PDF en la misma ejecucion."
-        )
+    # ===== Acerca de la aplicación (versión + buscar actualizaciones) =====
+    st.markdown("<div style='height:.8rem'></div>", unsafe_allow_html=True)
+    with _group_card("i", "Acerca de la aplicación", "Información y actualizaciones"):
+        col_about_1, col_about_2 = st.columns([3, 2])
+        with col_about_1:
+            st.markdown(
+                f"""
+                <div class="about-card" style="background:transparent;border:0;padding:0">
+                  <div class="row">
+                    <span class="label">Versión actual</span>
+                    <span class="value">v{html.escape(_app_version_display)}</span>
+                  </div>
+                  <div class="row" style="margin-top:.55rem">
+                    <span class="label">Modo</span>
+                    <span class="value">{'compilado (.exe)' if getattr(sys, 'frozen', False) else 'desarrollo'}</span>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with col_about_2:
+            if st.button(
+                "🔄 Buscar actualizaciones",
+                help="Verifica si hay una versión más reciente disponible",
+                use_container_width=True,
+                key="btn_buscar_update",
+            ):
+                # Reset del estado para forzar un nuevo chequeo.
+                st.session_state.pop("_update_checked", None)
+                st.session_state.pop("_update_message", None)
+                st.session_state["_manual_update_check"] = True
+                st.rerun()
 
-    with st.expander("Descarga de Emitidos"):
-        st.write(
-            "En Emitidos define estado de autorizacion, establecimiento y punto de emision si aplica. "
-            "Para XML de Emitidos Autorizados, el sistema valida automaticamente el limite operativo de 30 dias."
-        )
+        # Resultado del chequeo manual (solo se ejecuta UNA vez tras el click).
+        # MISMA logica que vivia antes en el sidebar — solo se traslada de
+        # ubicacion visual, sin cambiar el mecanismo interno.
+        if st.session_state.pop("_manual_update_check", False):
+            if not getattr(sys, "frozen", False):
+                st.info(
+                    "La auto-actualización solo funciona en el ejecutable .exe "
+                    "compilado, no en modo desarrollo."
+                )
+            elif _desktop_launcher is None:
+                st.warning("Módulo de actualización no disponible en este build.")
+            else:
+                with st.spinner("Verificando actualizaciones..."):
+                    try:
+                        _update_payload = _get_update_payload()
+                    except Exception as _upd_err:
+                        _update_payload = None
+                        st.error(f"Error al verificar: {_upd_err}")
+                if _update_payload:
+                    _new_ver = _update_payload.get("version", "?")
+                    _msg = (
+                        f"Nueva versión **{_new_ver}** disponible. "
+                        f"Descargando y aplicando... la app se reiniciará en breve."
+                    )
+                    st.session_state["_update_message"] = _msg
+                    st.session_state["_update_checked"] = True
+                    st.success(_msg)
 
-    with st.expander("Consolidacion desde carpeta"):
-        st.write(
-            "Permite generar reportes consolidados desde documentos ya descargados. "
-            "Puedes consolidar XML, PDF o ambos y copiar todos los archivos encontrados al directorio final."
-        )
+                    def _manual_update_worker():
+                        try:
+                            _start_update(_update_payload)
+                        except Exception:
+                            pass
 
-    with st.expander("Errores frecuentes y que hacer"):
-        st.markdown(
-            """
-- Si aparece timeout o portal lento: vuelve a intentar en unos segundos.
-- Si aparece captcha incorrecta: espera 1 a 2 minutos y repite la consulta.
-- Si no hay resultados: valida rango de fechas, tipo y estado seleccionado.
-- Si no descarga archivos: revisa permisos de carpeta y espacio disponible.
-"""
-        )
+                    threading.Thread(target=_manual_update_worker, daemon=True).start()
+                else:
+                    st.session_state["_update_checked"] = True
+                    st.success(
+                        f"Ya estás en la última versión ({_app_version_display}). "
+                        "No hay actualizaciones disponibles."
+                    )
+
+        # Mensaje persistente de actualización en curso (si quedó del auto-check).
+        _persistent_msg = st.session_state.get("_update_message")
+        if _persistent_msg and not st.session_state.pop("_manual_update_check", False):
+            st.caption(_persistent_msg)
