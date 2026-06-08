@@ -1047,67 +1047,76 @@ _render_update_modal()
 # --- Tema de la interfaz (claro / oscuro) -----------------------------------
 _THEME_TOKENS = {
     "dark": {
-        "--bg": ("radial-gradient(900px 620px at 10% -8%, rgba(91,140,255,0.20), transparent 60%),"
-                 "radial-gradient(820px 620px at 94% 6%, rgba(139,92,246,0.17), transparent 60%),"
-                 "radial-gradient(760px 760px at 50% 118%, rgba(34,197,94,0.08), transparent 60%),"
-                 "linear-gradient(180deg, #070a14 0%, #0b1020 100%)"),
-        "--text": "#e9edf6",
+        # Paleta dark del mockup: base #070b14, panels #111a2e, lineas #1f2b45.
+        # Acentos verde primario + azul secundario flotan como gradientes
+        # radiales sutiles desde las esquinas (igual que el mockup).
+        "--bg": ("radial-gradient(60rem 30rem at 90% -10%, rgba(91,140,255,0.14), transparent 60%),"
+                 "radial-gradient(50rem 30rem at -10% 10%, rgba(34,197,94,0.12), transparent 60%),"
+                 "linear-gradient(180deg, #070b14 0%, #0b1120 100%)"),
+        "--text": "#eaf0fb",
         "--text-strong": "#ffffff",
-        "--text-muted": "rgba(233,237,246,0.60)",
+        "--text-muted": "#94a1bd",
         "--text-label": "#cfd8ee",
-        "--glass": "rgba(255,255,255,0.045)",
-        "--glass-strong": "rgba(255,255,255,0.07)",
-        "--glass-hover": "rgba(255,255,255,0.11)",
-        "--border": "rgba(255,255,255,0.10)",
-        "--border-strong": "rgba(255,255,255,0.17)",
-        "--input-bg": "rgba(255,255,255,0.04)",
-        "--input-bg-hover": "rgba(255,255,255,0.06)",
-        "--input-bg-focus": "rgba(91,140,255,0.06)",
+        # Paneles solidos del mockup (#111a2e y #0e1626). Mantenemos los
+        # tokens "glass" del codigo existente para no romper selectores —
+        # solo cambia el color que entregan.
+        "--glass": "#111a2e",
+        "--glass-strong": "#111a2e",
+        "--glass-hover": "#172238",
+        "--border": "#1f2b45",
+        "--border-strong": "#2a3a5e",
+        "--input-bg": "#0e1626",
+        "--input-bg-hover": "#172238",
+        "--input-bg-focus": "rgba(34,197,94,0.08)",
         "--shadow": "0 24px 60px rgba(0,0,0,0.55)",
-        "--sidebar-bg": "linear-gradient(180deg, rgba(13,18,34,0.96), rgba(8,11,22,0.96))",
-        "--title-grad": "linear-gradient(120deg, #ffffff 0%, #b9c8ee 55%, #5b8cff 100%)",
-        "--table-head": "linear-gradient(135deg, rgba(91,140,255,0.22), rgba(139,92,246,0.18))",
-        "--table-row": "rgba(255,255,255,0.025)",
-        "--table-row-alt": "rgba(255,255,255,0.045)",
-        "--table-hover": "rgba(91,140,255,0.14)",
+        "--sidebar-bg": "linear-gradient(180deg, #0b1120 0%, #070b14 100%)",
+        # Titulo en gradiente verde→blanco→azul para reflejar la marca.
+        "--title-grad": "linear-gradient(120deg, #22c55e 0%, #ffffff 55%, #5b8cff 100%)",
+        "--table-head": "#0e1626",
+        "--table-row": "transparent",
+        "--table-row-alt": "rgba(255,255,255,0.02)",
+        "--table-hover": "#172238",
     },
     "light": {
-        "--bg": ("radial-gradient(900px 620px at 10% -8%, rgba(91,140,255,0.16), transparent 60%),"
-                 "radial-gradient(820px 620px at 94% 6%, rgba(139,92,246,0.13), transparent 60%),"
-                 "radial-gradient(760px 760px at 50% 118%, rgba(34,197,94,0.07), transparent 60%),"
-                 "linear-gradient(180deg, #eef1f8 0%, #e4e9f5 100%)"),
-        "--text": "#1f2a44",
+        # Paleta light del mockup: bg #eef2f8, panel #ffffff, panel-2 #f4f7fb.
+        "--bg": ("radial-gradient(60rem 30rem at 90% -10%, rgba(91,140,255,0.10), transparent 60%),"
+                 "radial-gradient(50rem 30rem at -10% 10%, rgba(34,197,94,0.10), transparent 60%),"
+                 "linear-gradient(180deg, #eef2f8 0%, #e6ebf3 100%)"),
+        "--text": "#101828",
         "--text-strong": "#0d1426",
-        "--text-muted": "rgba(31,42,68,0.62)",
+        "--text-muted": "#516081",
         "--text-label": "#34416a",
-        "--glass": "rgba(255,255,255,0.55)",
-        "--glass-strong": "rgba(255,255,255,0.72)",
-        "--glass-hover": "rgba(255,255,255,0.92)",
-        "--border": "rgba(15,23,42,0.10)",
-        "--border-strong": "rgba(15,23,42,0.17)",
-        "--input-bg": "rgba(255,255,255,0.78)",
-        "--input-bg-hover": "rgba(255,255,255,0.92)",
-        "--input-bg-focus": "rgba(91,140,255,0.12)",
-        "--shadow": "0 20px 45px rgba(30,42,80,0.16)",
-        "--sidebar-bg": "linear-gradient(180deg, rgba(255,255,255,0.86), rgba(235,239,250,0.86))",
-        "--title-grad": "linear-gradient(120deg, #1d2b50 0%, #3a5bb8 55%, #5b8cff 100%)",
-        "--table-head": "linear-gradient(135deg, rgba(91,140,255,0.18), rgba(139,92,246,0.13))",
-        "--table-row": "rgba(255,255,255,0.62)",
-        "--table-row-alt": "rgba(255,255,255,0.40)",
-        "--table-hover": "rgba(91,140,255,0.15)",
+        "--glass": "#ffffff",
+        "--glass-strong": "#ffffff",
+        "--glass-hover": "#f4f7fb",
+        "--border": "#d8e0ee",
+        "--border-strong": "#c2cce0",
+        "--input-bg": "#f4f7fb",
+        "--input-bg-hover": "#ffffff",
+        "--input-bg-focus": "rgba(34,197,94,0.10)",
+        "--shadow": "0 20px 45px rgba(30,42,80,0.10)",
+        "--sidebar-bg": "linear-gradient(180deg, #ffffff 0%, #f4f7fb 100%)",
+        "--title-grad": "linear-gradient(120deg, #16a34a 0%, #1d2b50 55%, #3a5bb8 100%)",
+        "--table-head": "#f4f7fb",
+        "--table-row": "#ffffff",
+        "--table-row-alt": "#f4f7fb",
+        "--table-hover": "#e7edf6",
     },
 }
 
 # Tokens fijos (no dependen del tema): acentos, radios, anillo de foco.
+# El mockup usa VERDE como primario (#22c55e) y azul como secundario (#5b8cff).
 _THEME_TOKENS_FIJOS = {
-    "--accent": "#5b8cff",
-    "--accent-2": "#8b5cf6",
-    "--accent-soft": "rgba(91,140,255,0.16)",
+    "--accent": "#22c55e",
+    "--accent-2": "#5b8cff",
+    "--accent-soft": "rgba(34,197,94,0.16)",
+    "--accent-tint": "#0f2a1c",
     "--success": "#22c55e",
-    "--danger": "#ef4444",
+    "--danger": "#f0556a",
+    "--warn": "#e7b24a",
     "--radius": "14px",
-    "--radius-lg": "22px",
-    "--ring": "0 0 0 3px rgba(91,140,255,0.28)",
+    "--radius-lg": "18px",
+    "--ring": "0 0 0 3px rgba(34,197,94,0.28)",
 }
 
 
@@ -1135,7 +1144,7 @@ def _render_theme_toggle() -> None:
         st.rerun()
 
 
-_CSS_IMPORT = "@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');"
+_CSS_IMPORT = "@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');"
 
 _CSS_REGLAS = """
 /* ===================== Ocultar UI de Streamlit ===================== */
@@ -1160,11 +1169,11 @@ div[data-testid="stDecoration"]{
   background:var(--bg);
   background-attachment:fixed;
   color:var(--text);
-  font-family:'Manrope', system-ui, sans-serif;
+  font-family:'Plus Jakarta Sans', system-ui, sans-serif;
 }
 .stApp, .stApp p, .stApp span, .stApp label, .stApp li,
 .stApp div, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6{
-  font-family:'Manrope', system-ui, sans-serif;
+  font-family:'Plus Jakarta Sans', system-ui, sans-serif;
 }
 .stApp div[data-testid="stAppViewContainer"] .main,
 .stApp div[data-testid="stAppViewContainer"] .main h1,
@@ -1225,7 +1234,7 @@ div[data-testid="stForm"]::before{
   inset:0 0 auto 0;
   height:1px;
   border-radius:var(--radius-lg) var(--radius-lg) 0 0;
-  background:linear-gradient(90deg, transparent, rgba(91,140,255,0.7), rgba(139,92,246,0.7), transparent);
+  background:linear-gradient(90deg, transparent, rgba(34,197,94,0.7), rgba(91,140,255,0.7), transparent);
 }
 div[data-testid="stForm"] label,
 div[data-testid="stForm"] p,
@@ -1311,14 +1320,14 @@ div[data-testid="stForm"] button[data-testid="baseButton-primary"]{
   font-weight:700 !important;
   letter-spacing:0.01em;
   padding:0.6rem 1.2rem !important;
-  box-shadow:0 12px 28px rgba(91,140,255,0.32) !important;
+  box-shadow:0 12px 28px rgba(34,197,94,0.32) !important;
   transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;
 }
 div[data-testid="stForm"] button[kind="primaryFormSubmit"]:hover,
 div[data-testid="stForm"] button[data-testid="baseButton-primary"]:hover{
   transform:translateY(-2px);
   filter:brightness(1.08);
-  box-shadow:0 16px 36px rgba(91,140,255,0.45) !important;
+  box-shadow:0 16px 36px rgba(34,197,94,0.45) !important;
 }
 div[data-testid="stForm"] button[kind="primaryFormSubmit"]:disabled,
 div[data-testid="stForm"] button[data-testid="baseButton-primary"]:disabled{
@@ -1456,7 +1465,7 @@ button[aria-label="Detener proceso"]:hover{
   color:var(--text) !important;
 }
 .stApp [data-baseweb="tab"][aria-selected="true"]{
-  background:linear-gradient(135deg, var(--accent-soft), rgba(139,92,246,0.16)) !important;
+  background:linear-gradient(135deg, var(--accent-soft), rgba(91,140,255,0.16)) !important;
   color:var(--text-strong) !important;
 }
 .stApp [data-baseweb="tab-highlight"],
@@ -1507,7 +1516,7 @@ section[data-testid="stSidebar"] img{
   font-weight:700 !important;
   letter-spacing:0.01em;
   padding:0.55rem 1rem !important;
-  box-shadow:0 10px 24px rgba(91,140,255,0.32) !important;
+  box-shadow:0 10px 24px rgba(34,197,94,0.32) !important;
   transition:transform .15s ease, filter .15s ease, box-shadow .15s ease;
 }
 .st-key-btn_buscar_update button *{
@@ -1516,7 +1525,7 @@ section[data-testid="stSidebar"] img{
 .st-key-btn_buscar_update button:hover{
   transform:translateY(-1px);
   filter:brightness(1.08);
-  box-shadow:0 14px 32px rgba(91,140,255,0.45) !important;
+  box-shadow:0 14px 32px rgba(34,197,94,0.45) !important;
 }
 
 /* ===================== Captions visibles en dark mode ===================== */
@@ -1593,7 +1602,7 @@ section[data-testid="stSidebar"] img{
   margin-right:0.5rem;
   border-radius:999px;
   background:var(--accent);
-  box-shadow:0 0 0 3px rgba(91,140,255,0.22);
+  box-shadow:0 0 0 3px rgba(34,197,94,0.22);
   vertical-align:middle;
 }
 .st-key-btn_open_tour button:hover{
