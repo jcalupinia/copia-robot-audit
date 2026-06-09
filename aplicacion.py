@@ -3659,8 +3659,9 @@ def _render_topbar(app_version: str) -> None:
     with bar:
         st.markdown('<div class="is-topbar-marker"></div>', unsafe_allow_html=True)
         # Pesos: brand izquierda + spacer central (titulo es absolute, no
-        # ocupa flujo) + chip version + boton tema + hamburguesa compacta.
-        col_weights = [3, 5.5, 0.9, 1.1, 0.6]
+        # ocupa flujo) + boton tema + icono usuario. La version se removio
+        # del topbar — sigue disponible en Ayuda > Acerca de la aplicacion.
+        col_weights = [3, 6.4, 1.1, 0.6]
         try:
             cols = st.columns(col_weights, vertical_alignment="center")
         except TypeError:
@@ -3684,11 +3685,6 @@ def _render_topbar(app_version: str) -> None:
                 unsafe_allow_html=True,
             )
         with cols[2]:
-            st.markdown(
-                f'<div class="ver-chip" title="Versión actual">v{html.escape(app_version)}</div>',
-                unsafe_allow_html=True,
-            )
-        with cols[3]:
             # Theme toggle DENTRO del topbar (reemplaza al boton flotante
             # _render_theme_toggle que vivia arriba a la derecha).
             tema = st.session_state.get("ui_theme", "dark")
@@ -3696,7 +3692,7 @@ def _render_topbar(app_version: str) -> None:
             if st.button(label, key="btn_topbar_theme", help="Cambiar tema claro/oscuro", use_container_width=True):
                 st.session_state["ui_theme"] = "light" if tema == "dark" else "dark"
                 st.rerun()
-        with cols[4]:
+        with cols[3]:
             # Menu de usuario: trigger compacto con silueta de persona
             # (👤) en vez de hamburguesa. El email del usuario y el
             # boton Cerrar sesion viven ADENTRO del panel desplegable
