@@ -18,6 +18,7 @@ import base64
 import contextlib
 import functools
 import html
+import textwrap
 from datetime import datetime, timedelta, date
 from pathlib import Path
 
@@ -2794,8 +2795,12 @@ def _inject_login_background_css():
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
         return
+    # NOTA: usamos textwrap.dedent porque el f-string esta indentado a 8
+    # espacios; Streamlit's markdown procesa lineas con 4+ espacios de
+    # indentacion (despues de una linea vacia) como bloques de codigo, lo
+    # que rompia el <style> y mostraba el CSS como texto en pantalla.
     st.markdown(
-        f"""
+        textwrap.dedent(f"""
         <div class="is-login-page" aria-hidden="true"></div>
         <style>
         /* Hero como background del viewport entero + overlay para
@@ -3019,7 +3024,7 @@ def _inject_login_background_css():
           </span>
           <span><b>ROBOT&nbsp;SRI&nbsp;AUDIT</b><span class="kicker">Descarga y auditoría del SRI</span></span>
         </div>
-        """,
+        """),
         unsafe_allow_html=True,
     )
 
