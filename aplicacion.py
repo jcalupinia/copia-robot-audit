@@ -2819,25 +2819,23 @@ def _inject_login_background_css():
             url('{hero_uri}') no-repeat center / cover fixed !important;
           background-attachment: fixed !important;
         }}
-        /* Quitamos cualquier padding-top extra del main container del login
-           y lo convertimos en flex centrado verticalmente, con padding lateral
-           generoso para que el card respire del borde derecho. */
+        /* Convertimos el main container del login en un panel vertical de
+           460px de ancho alineado a la derecha del viewport. Como TODO el
+           contenido del login (titulo, subtitulo, card) vive dentro de
+           este container, basta con constrenirlo aqui para que todos los
+           hijos respeten el ancho y queden alineados verticalmente.
+           min-height 100vh + flex centrado lo posiciona en el medio
+           vertical. */
         .stApp:has(.is-login-page) [data-testid="stMainBlockContainer"],
         .stApp:has(.is-login-page) section.main > div.block-container{{
           min-height: 100vh !important;
-          padding: 1.5rem clamp(1.5rem, 6vw, 6rem) !important;
+          max-width: 460px !important;
+          margin-left: auto !important;
+          margin-right: clamp(2rem, 6vw, 5rem) !important;
+          padding: 1.5rem 0 !important;
           display: flex !important;
           flex-direction: column !important;
           justify-content: center !important;
-        }}
-        /* Empuja la columna vertical de widgets hacia la derecha del
-           viewport, ancho fijo ~460px (forma el "panel" del mockup). */
-        .stApp:has(.is-login-page) [data-testid="stMainBlockContainer"]
-          [data-testid="stVerticalBlock"]:first-of-type{{
-          max-width: 460px;
-          width: 100%;
-          margin-left: auto;
-          margin-right: 0;
         }}
         /* Form como card flotante semi-transparente con blur. */
         .stApp:has(.is-login-page) [data-testid="stForm"]{{
