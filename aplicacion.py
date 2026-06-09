@@ -1701,13 +1701,13 @@ section[data-testid="stSidebar"] img{
   width:100%;
 }
 
-/* Contenido de los tabs: lo centramos a un ancho legible (1180px)
-   sin afectar al topbar (que sigue al 100%). Esto da el look del
-   mockup: header full-width arriba + contenido centrado debajo. */
+/* Contenido de los tabs: lo centramos a un ancho amplio (1400px) para
+   que las cards/forms respiren horizontalmente y se vean alargadas
+   como en el mockup, sin afectar al topbar (que sigue al 100%). */
 .stApp [data-testid="stTabs"]{
-  max-width:1180px;
+  max-width:1400px;
   margin:0 auto;
-  padding:0 clamp(1rem,3vw,2rem);
+  padding:0 clamp(1rem,2.5vw,2.5rem);
 }
 .app-topbar .brand{display:flex; align-items:center; gap:.6rem; font-weight:800; letter-spacing:-.01em}
 .app-topbar .brand img{height:32px; width:auto; mix-blend-mode:screen}
