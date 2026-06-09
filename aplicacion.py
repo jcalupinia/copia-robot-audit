@@ -1740,7 +1740,7 @@ section[data-testid="stSidebar"] img{
   left:0 !important;
   right:0 !important;
   z-index:50 !important;
-  height:64px !important;
+  height:85px !important;
   background:color-mix(in srgb, var(--glass) 94%, transparent) !important;
   backdrop-filter:blur(14px);
   -webkit-backdrop-filter:blur(14px);
@@ -1783,7 +1783,7 @@ section[data-testid="stSidebar"] img{
 /* Spacer renderizado debajo del topbar para que el contenido
    real (tabs, formularios) no quede tapado por el topbar fijo. */
 .topbar-spacer{
-  height:64px !important;
+  height:85px !important;
   width:100%;
   display:block;
   margin:0 0 1rem 0;
@@ -1834,10 +1834,22 @@ section[data-testid="stSidebar"] img{
 }
 .topbar-title b{color:var(--text)}
 
-/* Brand (logo + divider + "SRI Robot Audit") */
-.brand{display:flex; align-items:center; gap:.6rem; font-weight:800; letter-spacing:-.01em}
-.brand img{height:30px; width:auto; mix-blend-mode:screen}
-.brand .divider{width:1px; height:22px; background:var(--border)}
+/* Brand (solo logo) */
+.brand{display:flex; align-items:center; justify-content:center; gap:0; white-space:nowrap; margin:0 !important; padding:0 !important; line-height:1; width:100%; height:auto}
+.brand img{height:90px; width:auto; mix-blend-mode:screen; flex-shrink:0; margin:0 !important; padding:0}
+.brand .divider{display:none}
+.brand span{display:none}
+
+/* Asegurar que el elemento-container del brand también esté centrado */
+.stApp .st-key-topbar_container [data-testid="column"] [data-testid="element-container"]:has(.brand){
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  width:100% !important;
+  height:100% !important;
+  margin:0 !important;
+  padding:0 !important;
+}
 
 /* Chip de version */
 .ver-chip{
@@ -3661,7 +3673,7 @@ def _render_topbar(app_version: str) -> None:
         # Pesos: brand izquierda + spacer central (titulo es absolute, no
         # ocupa flujo) + boton tema + icono usuario. La version se removio
         # del topbar — sigue disponible en Ayuda > Acerca de la aplicacion.
-        col_weights = [3, 6.4, 1.1, 0.6]
+        col_weights = [1.2, 7.5, 1.1, 0.6]
         try:
             cols = st.columns(col_weights, vertical_alignment="center")
         except TypeError:
@@ -3673,15 +3685,13 @@ def _render_topbar(app_version: str) -> None:
                 f"""
                 <div class="brand">
                   {logo_img}
-                  <span class="divider"></span>
-                  <span style="font-weight:800">SRI&nbsp;Robot&nbsp;Audit</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
         with cols[1]:
             st.markdown(
-                '<div class="topbar-title">Descarga y <b>Reporte Automático</b></div>',
+                '<div class="topbar-title">SRI Robot Audit |<b> Descarga y Reporte Automático</b></div>',
                 unsafe_allow_html=True,
             )
         with cols[2]:
