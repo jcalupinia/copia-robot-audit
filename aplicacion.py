@@ -1703,11 +1703,29 @@ section[data-testid="stSidebar"] img{
 
 /* Contenido de los tabs: lo centramos a un ancho amplio (1400px) para
    que las cards/forms respiren horizontalmente y se vean alargadas
-   como en el mockup, sin afectar al topbar (que sigue al 100%). */
+   como en el mockup, sin afectar al topbar (que sigue al 100%).
+   IMPORTANTE: width:100% es necesario porque Streamlit por defecto
+   colapsa el ancho del contenedor de tabs al ancho del contenido mas
+   grande. Sin esto, tabs con contenido chico (como Descarga con sus
+   group cards) se ven mas angostas que tabs con contenido ancho
+   (como Reportes con su tabla). */
 .stApp [data-testid="stTabs"]{
+  width:100%;
   max-width:1400px;
   margin:0 auto;
   padding:0 clamp(1rem,2.5vw,2.5rem);
+}
+/* Forzar el panel de contenido del tab activo a ocupar todo el ancho
+   disponible. Sin esto, st.columns + group cards dentro de un tab
+   pueden hacer que el panel se "encoja" al ancho minimo necesario. */
+.stApp [data-testid="stTabs"] [data-baseweb="tab-panel"]{
+  width:100%;
+}
+/* Forzar group cards (st.container border) a ocupar 100% del ancho
+   del tab. Sin esto, el border wrapper de Streamlit a veces se
+   ajusta al ancho del contenido. */
+.stApp [data-testid="stVerticalBlockBorderWrapper"]{
+  width:100% !important;
 }
 .app-topbar .brand{display:flex; align-items:center; gap:.6rem; font-weight:800; letter-spacing:-.01em}
 .app-topbar .brand img{height:32px; width:auto; mix-blend-mode:screen}
@@ -4724,11 +4742,6 @@ with tab3:
         "</div>",
         unsafe_allow_html=True,
     )
-    st.markdown(
-        '<h3 class="section-title" style="color:#ffffff !important;">Consolidar desde carpeta</h3>',
-        unsafe_allow_html=True,
-    )
-    st.write("Genera reportes consolidados desde documentos ya descargados.")
 
     consolidar_dir_actual = st.session_state.get(
         "consolidate_base_dir",
