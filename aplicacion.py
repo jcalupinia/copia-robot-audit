@@ -1727,24 +1727,49 @@ section[data-testid="stSidebar"] img{
 .stApp [data-testid="stVerticalBlockBorderWrapper"]{
   width:100% !important;
 }
-/* ===== Topbar (container con key="topbar_container") =====
-   UNA sola barra sticky pegada arriba — sin doble linea ni doble
-   contenedor. Background glass + un solo border-bottom sutil. */
+/* ===== Topbar FIXED al viewport (no sticky) =====
+   Usamos position:fixed para garantizar que el topbar quede PEGADO
+   al borde superior del viewport, ignorando cualquier padding
+   heredado de los wrappers de Streamlit (que en versiones nuevas
+   meten padding-top/left que cuesta sobreescribir con sticky).
+   El spacer (`.topbar-spacer`) renderizado justo despues empuja
+   el contenido para que no quede tapado. */
 .stApp .st-key-topbar_container{
-  position:sticky !important;
+  position:fixed !important;
   top:0 !important;
-  z-index:30 !important;
-  background:color-mix(in srgb, var(--glass) 92%, transparent) !important;
-  backdrop-filter:blur(12px);
-  -webkit-backdrop-filter:blur(12px);
+  left:0 !important;
+  right:0 !important;
+  z-index:50 !important;
+  height:64px !important;
+  background:color-mix(in srgb, var(--glass) 94%, transparent) !important;
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
   border:0 !important;
   border-bottom:1px solid var(--border) !important;
   border-radius:0 !important;
-  padding:.55rem clamp(1rem, 2.5vw, 1.8rem) !important;
-  margin:0 0 1rem 0 !important;
+  padding:0 clamp(1rem, 2.5vw, 1.8rem) !important;
+  margin:0 !important;
   width:100% !important;
   max-width:none !important;
   box-shadow:none !important;
+  display:flex !important;
+  align-items:center !important;
+}
+.stApp .st-key-topbar_container > [data-testid="stVerticalBlock"]{
+  height:100% !important;
+  width:100% !important;
+}
+.stApp .st-key-topbar_container [data-testid="stHorizontalBlock"]{
+  height:100% !important;
+  align-items:center !important;
+}
+/* Spacer renderizado debajo del topbar para que el contenido
+   real (tabs, formularios) no quede tapado por el topbar fijo. */
+.topbar-spacer{
+  height:64px !important;
+  width:100%;
+  display:block;
+  margin:0 0 1rem 0;
 }
 
 /* FIX doble linea: el `st.markdown('<div class=is-topbar-marker>')`
@@ -1891,55 +1916,105 @@ section[data-testid="stSidebar"] img{
   .ver-chip{display:none}
 }
 
-/* === Pegar el header al borde superior del viewport ===
-   Quitamos padding-top y margin-top de TODOS los wrappers que Streamlit
-   pone arriba del main container. Sin esto, queda una franja vacia
-   entre el browser y el topbar sticky. */
+/* === Pegar el header al borde superior + remover padding lateral ===
+   Reseteamos padding/margin en TODA la cadena de wrappers Streamlit
+   con mayor especificidad (body .stApp ...) para ganarle al CSS
+   default de Streamlit. Sin esto queda gap arriba y a los lados. */
 html, body{
   margin:0 !important;
   padding:0 !important;
 }
-.stApp{
-  padding-top:0 !important;
-  margin-top:0 !important;
+body .stApp{
+  padding:0 !important;
+  margin:0 !important;
 }
-.stApp [data-testid="stAppViewContainer"]{
-  padding-top:0 !important;
+body .stApp [data-testid="stAppViewContainer"]{
+  padding:0 !important;
+  margin:0 !important;
 }
-.stApp section.main,
-.stApp section.main > div.block-container,
-.stApp [data-testid="stMainBlockContainer"]{
+body .stApp section.main,
+body .stApp section[data-testid="stMain"],
+body .stApp section.main > div.block-container,
+body .stApp [data-testid="stMainBlockContainer"]{
   padding-top:0 !important;
-  margin-top:0 !important;
+  padding-left:0 !important;
+  padding-right:0 !important;
+  margin:0 !important;
+  max-width:none !important;
 }
 
-/* === Unificar altura visual de los 3 controles de la derecha ===
-   chip version + boton tema + boton usuario tienen la MISMA altura
-   (38px) y la misma logica de border-radius para verse coherentes. */
+/* Ocultar el toggle del sidebar collapsed (boton flecha arriba-izq)
+   para que no se solape con el topbar fixed. Como el sidebar de la
+   app esta vacio (todo se movio al topbar), no hay razon para
+   exponer el toggle al usuario. */
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebarCollapseButton"],
+button[kind="header"][data-testid="baseButton-header"]{
+  display:none !important;
+}
+
+/* Compensar el contenido lateral con un padding pequeno DENTRO del
+   spacer (no del topbar) para que tabs y forms no toquen el borde. */
+body .stApp section.main > div.block-container{
+  padding-left:clamp(1rem, 2.5vw, 2.5rem) !important;
+  padding-right:clamp(1rem, 2.5vw, 2.5rem) !important;
+}
+body .stApp .st-key-topbar_container{
+  /* El topbar es fixed → vive afuera del block-container, por eso
+     necesita su propio padding (ya definido arriba como 0 ... 1.8rem). */
+}
+
+/* === Controles derechos uniformes: h-11 (44px), text-sm, rounded-xl ===
+   Los 3 controles (chip version + boton tema + icono usuario) comparten
+   altura, border-radius, font-size y padding base para verse coherentes
+   como una sola "fila de pills". */
 .stApp .st-key-topbar_container .ver-chip,
 .stApp .st-key-btn_topbar_theme button,
 .stApp .st-key-topbar_container [data-testid="stPopover"] > div > button{
-  height:38px !important;
-  min-height:38px !important;
+  height:44px !important;
+  min-height:44px !important;
   display:inline-flex !important;
   align-items:center !important;
   justify-content:center !important;
-  padding:0 .9rem !important;
+  font-size:.875rem !important;
   font-weight:600 !important;
+  border:1px solid var(--border) !important;
+  background:var(--input-bg) !important;
   box-shadow:none !important;
+  line-height:1 !important;
+  border-radius:12px !important;
+  transition:border-color .15s ease, background .15s ease;
 }
-/* Border-radius: chip y boton tema usan pill (999px); el icono usuario
-   queda cuadrado redondeado (10px) para diferenciarlo como "icon button". */
-.stApp .st-key-topbar_container .ver-chip,
+/* Chip version: padding pill-style + dot verde antes */
+.stApp .st-key-topbar_container .ver-chip{
+  padding:0 1rem !important;
+  color:var(--text-muted) !important;
+  gap:.45rem;
+}
+/* Boton tema: padding pill-style + icono + label */
 .stApp .st-key-btn_topbar_theme button{
-  border-radius:999px !important;
+  padding:0 1rem !important;
+  color:var(--text) !important;
 }
+.stApp .st-key-btn_topbar_theme button:hover{
+  border-color:var(--accent) !important;
+  background:var(--input-bg-hover) !important;
+}
+/* Icono usuario: cuadrado 44x44 (icon-only) */
 .stApp .st-key-topbar_container [data-testid="stPopover"] > div > button{
-  border-radius:10px !important;
   padding:0 !important;
-  width:38px !important;
-  min-width:38px !important;
-  font-size:1.1rem !important;
+  width:44px !important;
+  min-width:44px !important;
+  font-size:1.15rem !important;
+  color:var(--text) !important;
+}
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button:hover{
+  border-color:var(--accent) !important;
+  background:var(--input-bg-hover) !important;
+}
+/* Gap entre los 3 controles unificado */
+.stApp .st-key-topbar_container [data-testid="stHorizontalBlock"]{
+  gap:12px !important;
 }
 
 /* === pagehead === */
@@ -3644,6 +3719,11 @@ def _render_topbar(app_version: str) -> None:
                         use_container_width=True,
                     ):
                         st.session_state["open_close_app_dialog"] = True
+
+    # Spacer renderizado ABAJO del topbar (que ahora es position:fixed)
+    # para empujar el contenido real (tabs, formularios) y que no quede
+    # tapado. Su altura matchea el `height` del topbar en el CSS.
+    st.markdown('<div class="topbar-spacer" aria-hidden="true"></div>', unsafe_allow_html=True)
 
 
 _render_topbar(_app_version_display)
