@@ -1825,40 +1825,65 @@ section[data-testid="stSidebar"] img{
   border-color:var(--accent) !important;
 }
 
-/* Popover trigger (avatar + email) — estilo pill como el mockup */
-.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button,
-.stApp [data-testid="stVerticalBlockBorderWrapper"]:has(.is-topbar-marker)
-  [data-testid="stPopover"] > div > button{
+/* Hamburguesa (popover trigger ☰) — boton compacto cuadrado en el
+   topbar. Reemplaza al pill de avatar+email que era permanente. */
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button{
   background:var(--input-bg) !important;
   border:1px solid var(--border) !important;
-  border-radius:999px !important;
-  padding:.3rem .8rem .3rem .35rem !important;
-  font-size:.82rem !important;
-  font-weight:600 !important;
-  color:var(--text-muted) !important;
+  border-radius:10px !important;
+  padding:.35rem .55rem !important;
+  font-size:1.05rem !important;
+  font-weight:700 !important;
+  color:var(--text) !important;
   min-height:auto !important;
   height:auto !important;
-  text-align:left !important;
-  justify-content:flex-start !important;
+  width:auto !important;
+  min-width:38px !important;
+  line-height:1 !important;
   display:inline-flex !important;
   align-items:center !important;
-  gap:.55rem !important;
+  justify-content:center !important;
   box-shadow:none !important;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
 }
 .stApp .st-key-topbar_container [data-testid="stPopover"] > div > button:hover{
   border-color:var(--accent) !important;
+  background:var(--input-bg-hover) !important;
 }
-/* Pintar las primeras 2 iniciales del email como avatar verde via ::first-letter
-   no funciona para dos letras; mejor: usamos un ::before con CSS counter
-   o simplemente dejamos el texto tal cual con buen estilo. */
 
-/* Botones dentro del popover (Cerrar sesion / Cerrar app) */
-[data-testid="stPopover"] [data-testid="stMarkdownContainer"],
+/* === Contenido del menu hamburguesa ===
+   Adentro del popover: avatar pequeno + sesion activa + email + divider
+   + boton Cerrar sesion. */
+.user-menu-row{
+  display:flex; align-items:center; gap:.7rem;
+  padding:.55rem .35rem;
+}
+.user-menu-avatar{
+  width:36px; height:36px; flex:0 0 36px;
+  border-radius:50%;
+  display:grid; place-items:center;
+  font-size:.78rem; font-weight:800; color:#04130b;
+  background:linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+.user-menu-info{display:flex; flex-direction:column; gap:.1rem; min-width:0; flex:1}
+.user-menu-label{
+  font-size:.7rem; font-weight:700;
+  text-transform:uppercase; letter-spacing:.05em;
+  color:var(--text-muted);
+}
+.user-menu-email{
+  font-size:.88rem; font-weight:600;
+  color:var(--text-strong);
+  word-break:break-all;
+  overflow:hidden; text-overflow:ellipsis;
+}
+.user-menu-divider{
+  border:0; border-top:1px solid var(--border);
+  margin:.4rem 0;
+}
+
+/* Gap pequeno entre items del popover */
 [data-testid="stPopover"] [data-testid="stVerticalBlock"]{
-  gap:.45rem !important;
+  gap:.4rem !important;
 }
 
 @media (max-width:760px){
@@ -3498,11 +3523,14 @@ def _render_topbar(app_version: str) -> None:
         bar = st.container()
     with bar:
         st.markdown('<div class="is-topbar-marker"></div>', unsafe_allow_html=True)
+        # Pesos: brand izquierda + spacer central (titulo es absolute, no
+        # ocupa flujo) + chip version + boton tema + hamburguesa compacta.
+        col_weights = [3, 5.5, 0.9, 1.1, 0.6]
         try:
-            cols = st.columns([3, 4.2, 0.9, 1.1, 2.4], vertical_alignment="center")
+            cols = st.columns(col_weights, vertical_alignment="center")
         except TypeError:
             # vertical_alignment llego en Streamlit 1.36; fallback sin el kwarg.
-            cols = st.columns([3, 4.2, 0.9, 1.1, 2.4])
+            cols = st.columns(col_weights)
 
         with cols[0]:
             st.markdown(
@@ -3534,10 +3562,26 @@ def _render_topbar(app_version: str) -> None:
                 st.session_state["ui_theme"] = "light" if tema == "dark" else "dark"
                 st.rerun()
         with cols[4]:
-            # Profile popover: el avatar + email es el trigger; al abrir
-            # muestra opciones "Cerrar sesion" (y "Cerrar app" si .exe).
-            popover_label = f"{avatar_initials}  {user_email}"
-            with st.popover(popover_label, use_container_width=True):
+            # Menu hamburguesa: trigger compacto con icono ☰. El email
+            # del usuario y el boton de Cerrar sesion viven ADENTRO del
+            # panel desplegable — NO en el topbar como chip permanente.
+            with st.popover("☰", use_container_width=True, help="Menú"):
+                # Email del usuario adentro del panel
+                st.markdown(
+                    f"""
+                    <div class="user-menu-row">
+                      <span class="user-menu-avatar">{html.escape(avatar_initials)}</span>
+                      <div class="user-menu-info">
+                        <span class="user-menu-label">Sesión activa</span>
+                        <span class="user-menu-email">{html.escape(user_email)}</span>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.markdown('<hr class="user-menu-divider"/>', unsafe_allow_html=True)
+                # Boton Cerrar sesion — mismo handler que tenia antes (no toco la
+                # logica de auth: solo se mueve de ubicacion visual).
                 if st.button(
                     "🚪  Cerrar sesión",
                     key="btn_popover_logout",
