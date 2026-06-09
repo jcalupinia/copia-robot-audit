@@ -3030,7 +3030,16 @@ def _inject_login_background_css():
     # selectores multi-linea siguen siendo validos), y se evita que
     # markdown lo trate como bloque de codigo.
     _login_html = "\n".join(line.lstrip() for line in _login_html.split("\n"))
-    st.markdown(_login_html, unsafe_allow_html=True)
+    # Usamos st.html (Streamlit 1.33+) en vez de st.markdown porque st.html
+    # bypassa el parser de markdown completamente. st.markdown procesa
+    # caracteres especiales (backticks, asteriscos, indentacion) dentro del
+    # contenido aunque este envuelto en <style>, lo que rompia el bloque y
+    # mostraba CSS como texto en la pantalla. Si st.html no esta disponible
+    # (Streamlit < 1.33), cae a markdown como fallback.
+    if hasattr(st, "html"):
+        st.html(_login_html)
+    else:
+        st.markdown(_login_html, unsafe_allow_html=True)
 
 
 def _render_auth_header(title: str, subtitle: str):
