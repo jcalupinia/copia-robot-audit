@@ -1752,15 +1752,32 @@ section[data-testid="stSidebar"] img{
   width:100% !important;
   max-width:none !important;
   box-shadow:none !important;
-  display:flex !important;
-  align-items:center !important;
+  /* NO usar display:flex aqui — eso colapsaba las columnas internas
+     de Streamlit. El stVerticalBlock interno YA es display:flex
+     column. Solo necesitamos que ocupe 100% width/height del topbar. */
+  overflow:hidden;
 }
+/* El stVerticalBlock interno toma el ancho/alto completo del topbar.
+   Su display:flex column ya lo mete Streamlit por defecto. */
 .stApp .st-key-topbar_container > [data-testid="stVerticalBlock"]{
-  height:100% !important;
   width:100% !important;
-}
-.stApp .st-key-topbar_container [data-testid="stHorizontalBlock"]{
   height:100% !important;
+  flex-direction:column !important;
+  justify-content:center !important;
+}
+/* La fila de columnas (stHorizontalBlock) debe ocupar el 100% del
+   ancho disponible, mantener align-items:center y position:relative
+   para que el titulo absoluto se centre matematicamente respecto a
+   ESTA fila (que abarca todo el viewport). */
+.stApp .st-key-topbar_container [data-testid="stHorizontalBlock"]{
+  width:100% !important;
+  align-items:center !important;
+  position:relative;
+}
+/* Cada columna individual debe respetar el alineamiento center sin
+   colapsar. */
+.stApp .st-key-topbar_container [data-testid="column"]{
+  display:flex !important;
   align-items:center !important;
 }
 /* Spacer renderizado debajo del topbar para que el contenido
