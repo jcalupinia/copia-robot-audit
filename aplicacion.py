@@ -2795,12 +2795,13 @@ def _inject_login_background_css():
         if logo_html:
             st.markdown(logo_html, unsafe_allow_html=True)
         return
-    # NOTA: usamos textwrap.dedent porque el f-string esta indentado a 8
-    # espacios; Streamlit's markdown procesa lineas con 4+ espacios de
-    # indentacion (despues de una linea vacia) como bloques de codigo, lo
-    # que rompia el <style> y mostraba el CSS como texto en pantalla.
-    st.markdown(
-        textwrap.dedent(f"""
+    # NOTA: el f-string esta indentado adentro de la funcion. Streamlit's
+    # markdown procesa lineas con 4+ espacios como bloques de codigo, asi
+    # que strippeamos TODA leading whitespace de cada linea antes de
+    # rendear (textwrap.dedent no alcanza porque los selectores CSS multi-
+    # linea tienen indentacion adicional de continuacion que sigue arriba
+    # del umbral de 4 espacios despues del dedent).
+    _login_html = f"""
         <div class="is-login-page" aria-hidden="true"></div>
         <style>
         /* Hero como background del viewport entero + overlay para
@@ -3024,9 +3025,12 @@ def _inject_login_background_css():
           </span>
           <span><b>ROBOT&nbsp;SRI&nbsp;AUDIT</b><span class="kicker">Descarga y auditoría del SRI</span></span>
         </div>
-        """),
-        unsafe_allow_html=True,
-    )
+        """
+    # Strippear leading whitespace de cada linea: el CSS no se altera (los
+    # selectores multi-linea siguen siendo validos), y se evita que
+    # markdown lo trate como bloque de codigo.
+    _login_html = "\n".join(line.lstrip() for line in _login_html.split("\n"))
+    st.markdown(_login_html, unsafe_allow_html=True)
 
 
 def _render_auth_header(title: str, subtitle: str):
