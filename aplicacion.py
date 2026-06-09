@@ -1727,11 +1727,10 @@ section[data-testid="stSidebar"] img{
 .stApp [data-testid="stVerticalBlockBorderWrapper"]{
   width:100% !important;
 }
-/* ===== Topbar nuevo (container con key="topbar_container") =====
-   El st.container ahora vive PEGADO arriba del viewport, con fondo
-   glass + border-bottom. Theme toggle + perfil popover viven adentro. */
-.stApp .st-key-topbar_container,
-.stApp [data-testid="stVerticalBlockBorderWrapper"]:has(.is-topbar-marker){
+/* ===== Topbar (container con key="topbar_container") =====
+   UNA sola barra sticky pegada arriba — sin doble linea ni doble
+   contenedor. Background glass + un solo border-bottom sutil. */
+.stApp .st-key-topbar_container{
   position:sticky !important;
   top:0 !important;
   z-index:30 !important;
@@ -1747,20 +1746,56 @@ section[data-testid="stSidebar"] img{
   max-width:none !important;
   box-shadow:none !important;
 }
-/* El marker invisible (solo para fallback de :has) */
+
+/* FIX doble linea: el `st.markdown('<div class=is-topbar-marker>')`
+   crea un element-container que ocupa una fila vertical adentro del
+   topbar. Escondemos TODO el element-container del marker (no solo
+   el div interno) para que no genere espaciado fantasma. */
+.stApp .st-key-topbar_container [data-testid="element-container"]:has(.is-topbar-marker){
+  display:none !important;
+}
 .is-topbar-marker{display:none}
+
+/* Quitar el `gap: 1rem` por defecto de Streamlit dentro del topbar.
+   Sin esto, queda una banda vacia entre el marker oculto y la fila
+   de columnas que se ve como "segunda barra". */
+.stApp .st-key-topbar_container > [data-testid="stVerticalBlock"]{
+  gap:0 !important;
+}
+.stApp .st-key-topbar_container > [data-testid="stVerticalBlock"] > [data-testid="element-container"]{
+  margin:0 !important;
+}
+/* El stHorizontalBlock (la fila de columnas) tambien debe estar a 0 */
+.stApp .st-key-topbar_container [data-testid="stHorizontalBlock"]{
+  margin:0 !important;
+  gap:.7rem !important;
+}
+
+/* === Layout 3-zonas con titulo CENTRADO al viewport ===
+   En vez de depender de pesos de columnas (asimetrico por brand
+   ancho + 3 controles a la derecha), posicionamos el titulo en
+   absolute relative al topbar para garantizar centrado real al
+   ancho del viewport. */
+.stApp .st-key-topbar_container{position:sticky; /* contexto para absolute */}
+.stApp .st-key-topbar_container [data-testid="stHorizontalBlock"]{
+  position:relative;
+}
+.topbar-title{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%, -50%);
+  font-size:.95rem; color:var(--text-muted); font-weight:600;
+  text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  pointer-events:none;
+  max-width:50vw;
+}
+.topbar-title b{color:var(--text)}
 
 /* Brand (logo + divider + "SRI Robot Audit") */
 .brand{display:flex; align-items:center; gap:.6rem; font-weight:800; letter-spacing:-.01em}
 .brand img{height:30px; width:auto; mix-blend-mode:screen}
 .brand .divider{width:1px; height:22px; background:var(--border)}
-
-/* Titulo del topbar */
-.topbar-title{
-  font-size:.95rem; color:var(--text-muted); font-weight:600;
-  text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-}
-.topbar-title b{color:var(--text)}
 
 /* Chip de version */
 .ver-chip{
