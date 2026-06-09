@@ -3371,15 +3371,10 @@ def _render_topbar(app_version: str) -> None:
         unsafe_allow_html=True,
     )
 
-    # Fila compacta con los botones reales. Streamlit no permite renderizar
-    # botones interactivos dentro del HTML markdown, asi que los ponemos
-    # debajo. El CSS los pone con estilo "ghost" y los alinea a la derecha.
-    cols = st.columns([6, 1.1, 1.4, 1.4]) if getattr(sys, "frozen", False) else st.columns([6, 1.1, 1.4])
+    # Fila compacta con los botones reales (sin "Tema" — ya existe el toggle
+    # global "Modo claro/oscuro" arriba a la derecha via _render_theme_toggle).
+    cols = st.columns([6, 1.4, 1.4]) if getattr(sys, "frozen", False) else st.columns([6, 1.4])
     with cols[1]:
-        if st.button("Tema", key="btn_topbar_theme", help="Alternar tema claro/oscuro"):
-            st.session_state["ui_theme"] = "light" if st.session_state.get("ui_theme") == "dark" else "dark"
-            st.rerun()
-    with cols[2]:
         if st.button("Cerrar sesión", key="btn_topbar_logout"):
             device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
             _clear_cached_auth_only()
@@ -3388,7 +3383,7 @@ def _render_topbar(app_version: str) -> None:
                 st.session_state["_device_id"] = device_id
             st.rerun()
     if getattr(sys, "frozen", False):
-        with cols[3]:
+        with cols[2]:
             if st.button("Cerrar app", key="btn_open_close_app"):
                 st.session_state["open_close_app_dialog"] = True
 
@@ -3502,273 +3497,280 @@ with tab1:
             _start_first_use_tour(reset_step=True)
             st.rerun()
 
-    col_base1, col_base2 = st.columns([2, 2])
-    with col_base1:
-        ruc_input = st.text_input("RUC", placeholder="Ejemplo: 0999999001")
-        ruc = re.sub(r"\s+", "", ruc_input or "").strip()
-        ci_adicional_input = ""
-        clave = st.text_input("Clave del SRI", type="password", placeholder="********")
+    with _group_card(1, "Credenciales", "Datos del SRI"):
+        col_ruc, col_clave = st.columns([1, 1])
+        with col_ruc:
+            ruc_input = st.text_input("RUC", placeholder="Ejemplo: 0999999001")
+            ruc = re.sub(r"\s+", "", ruc_input or "").strip()
+            ci_adicional_input = ""
+        with col_clave:
+            clave = st.text_input("Clave del SRI", type="password", placeholder="********")
 
-    with col_base2:
-        origen = st.selectbox("Origen de comprobantes", ["Recibidos", "Emitidos"], index=0)
-        if origen == "Recibidos":
-            tipo_opciones = [
-                "Facturas",
-                "Retenciones",
-                "Notas de crédito",
-                "Notas de débito",
-                "Liquidación de compra",
-            ]
-        else:
-            tipo_opciones = [
-                "Facturas",
-                "Liquidación de compra",
-                "Retenciones",
-                "Notas de crédito",
-                "Notas de débito",
-                "Guía de remisión",
-            ]
-        tipo = st.selectbox("Tipo de comprobante", tipo_opciones)
-
-    estado_emitidos = None
-    establecimiento_input = None
-    punto_emision_input = None
-    formatos = []
-    descargar_pdf_emitidos = False
-    descargar_xml_emitidos = False
-    anio_emitidos = datetime.now().year
-    mes_emitidos = datetime.now().month
-    dia_emitidos = datetime.now().day
-    mes_fin_emitidos = datetime.now().month
-    anio_recibidos = datetime.now().year
-    mes_recibidos = datetime.now().month
-    dia_recibidos = 0
-    mes_fin_recibidos = datetime.now().month
-    meses_es = [
-        "Enero",
-        "Febrero",
-        "Marzo",
-        "Abril",
-        "Mayo",
-        "Junio",
-        "Julio",
-        "Agosto",
-        "Septiembre",
-        "Octubre",
-        "Noviembre",
-        "Diciembre",
-    ]
-    modo_fechas_recibidos = "Mes y dí­a"
-    modo_fechas_emitidos = "Mes y día"
-
-    if origen == "Recibidos":
-        modo_fechas_recibidos = st.radio(
-            "Modo de fecha",
-            ["Mes y día", "Rango de meses", "Año completo"],
-            horizontal=True,
-            key="modo_fechas_recibidos",
-        )
-        if modo_fechas_recibidos == "Rango de meses":
-            col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
-            with col_r1:
-                anio_recibidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
-                )
-            with col_r2:
-                mes_inicio_label = st.selectbox(
-                    "Mes inicio",
-                    meses_es,
-                    index=mes_recibidos - 1,
-                    key="mes_inicio_recibidos",
-                )
-            with col_r3:
-                mes_fin_label = st.selectbox(
-                    "Mes fin",
-                    meses_es,
-                    index=mes_fin_recibidos - 1,
-                    key="mes_fin_recibidos",
-                )
-            mes_recibidos = meses_es.index(mes_inicio_label) + 1
-            mes_fin_recibidos = meses_es.index(mes_fin_label) + 1
-            dia_recibidos = 0
-        elif modo_fechas_recibidos == "Año completo":
-            col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
-            with col_r1:
-                anio_recibidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
-                )
-            mes_recibidos = 1
-            mes_fin_recibidos = 12
-            dia_recibidos = 0
-        else:
-            col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
-            with col_r1:
-                anio_recibidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
-                )
-            with col_r2:
-                mes_label = st.selectbox(
-                    "Mes",
-                    meses_es,
-                    index=mes_recibidos - 1,
-                    key="mes_recibidos",
-                )
-            mes_recibidos = meses_es.index(mes_label) + 1
-            with col_r3:
-                dia_recibidos = st.number_input(
-                    "Día (0 = Todos)", min_value=0, max_value=31, value=0, step=1,
-                    help="Elige 0 para descargar todo el mes o un día específico (1-31).",
-                )
-        formatos = st.multiselect("Formatos a descargar", ["XML", "PDF"], default=["XML", "PDF"])
-    else:
-        modo_fechas_emitidos = st.radio(
-            "Modo de fecha",
-            ["Mes y día", "Rango de meses", "Año completo"],
-            horizontal=True,
-            key="modo_fechas_emitidos",
-        )
-        if modo_fechas_emitidos == "Rango de meses":
-            col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
-            with col_f1:
-                anio_emitidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
-                )
-            with col_f2:
-                mes_inicio_label = st.selectbox(
-                    "Mes inicio",
-                    meses_es,
-                    index=mes_emitidos - 1,
-                    key="mes_inicio_emitidos",
-                )
-            with col_f3:
-                mes_fin_label = st.selectbox(
-                    "Mes fin",
-                    meses_es,
-                    index=mes_fin_emitidos - 1,
-                    key="mes_fin_emitidos",
-                )
-            mes_emitidos = meses_es.index(mes_inicio_label) + 1
-            mes_fin_emitidos = meses_es.index(mes_fin_label) + 1
-            dia_emitidos = 0
-        elif modo_fechas_emitidos == "Año completo":
-            col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
-            with col_f1:
-                anio_emitidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
-                )
-            mes_emitidos = 1
-            mes_fin_emitidos = 12
-            dia_emitidos = 0
-        else:
-            col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
-            with col_f1:
-                anio_emitidos = st.number_input(
-                    "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
-                )
-            with col_f2:
-                mes_label = st.selectbox(
-                    "Mes",
-                    meses_es,
-                    index=mes_emitidos - 1,
-                    key="mes_emitidos",
-                )
-            mes_emitidos = meses_es.index(mes_label) + 1
-            with col_f3:
-                dia_emitidos = st.number_input(
-                    "Día (0 = Todos)",
-                    min_value=0,
-                    max_value=31,
-                    value=datetime.now().day,
-                    step=1,
-                    help="Ingresa 0 para descargar todos los días del mes.",
-                )
-        estado_emitidos = st.selectbox(
-            "Estado de autorización", ["Autorizados", "No autorizados"], index=0
-        )
-        col_e1, col_e2 = st.columns([1, 1])
-        with col_e1:
-            establecimiento_input = st.text_input(
-                "Establecimiento",
-                value="Todos",
-                help="Escribe 'Todos' o un número de 3 dígitos (ej. 001).",
-            )
-        with col_e2:
-            punto_emision_input = st.text_input(
-                "Punto de emisión (opcional)",
-                value="",
-                max_chars=3,
-                key="punto_emision_input",
-                help="Hasta 3 dígitos numéricos (ej. 001).",
-            )
-            if punto_emision_input:
-                solo_digitos = "".join(ch for ch in punto_emision_input if ch.isdigit())
-                if solo_digitos != punto_emision_input:
-                    st.session_state.punto_emision_input = solo_digitos
-                    punto_emision_input = solo_digitos
-        descargar_pdf_emitidos = st.checkbox(
-            'Descargar PDFs individuales',
-            value=False,
-            help='Genera un PDF por cada comprobante emitido.',
-        )
-        descargar_xml_emitidos = st.checkbox(
-            'Descargar XMLs individuales',
-            value=False,
-            help='Extrae el comprobante XML autorizado y lo organiza en la carpeta XML.',
-        )
-        formatos = ["Excel"]
-        if descargar_pdf_emitidos:
-            formatos.append("PDF")
-        if descargar_xml_emitidos:
-            formatos.append("XML")
-    st.markdown("---")
-    st.markdown('<h3 class="section-title">Carpeta base donde se guardarán las descargas</h3>', unsafe_allow_html=True)
-    current_dir = st.session_state.get("download_base_dir", str(DESC_DIR))
-    st.text_input(
-        "Ruta seleccionada",
-        value=current_dir,
-        help="Ej: C:\\\\RespaldosSRI o /home/usuario/SRI.",
-        disabled=True,
-    )
-    if st.button("Seleccionar carpeta de descarga"):
-        seleccionada, error = _select_directory_dialog(current_dir)
-        if seleccionada:
-            try:
-                nueva_ruta = Path(seleccionada).expanduser()
-                nueva_ruta.mkdir(parents=True, exist_ok=True)
-                st.session_state["download_base_dir"] = str(nueva_ruta)
-                _persist_user_preferences()
-                st.success(f" Carpeta configurada: {nueva_ruta}")
-            except Exception as err:
-                st.error(f"No se pudo usar la carpeta indicada: {err}")
-        elif error:
-            st.session_state["show_manual_dir"] = True
-            st.session_state["last_manual_dir_error"] = error
-
-    if st.session_state.get("show_manual_dir"):
-        manual_default = st.session_state.get("download_base_dir", str(DESC_DIR))
-        manual_dir = st.text_input("Ruta de carpeta (manual)", value=manual_default)
-        if st.button("Guardar carpeta"):
-            try:
-                nueva_ruta = Path(manual_dir).expanduser()
-                nueva_ruta.mkdir(parents=True, exist_ok=True)
-                st.session_state["download_base_dir"] = str(nueva_ruta)
-                _persist_user_preferences()
-                st.success(f" Carpeta configurada: {nueva_ruta}")
-                st.session_state["show_manual_dir"] = False
-                st.session_state["last_manual_dir_error"] = None
-            except Exception as err:
-                st.error(f"No se pudo usar la carpeta indicada: {err}")
-        last_err = st.session_state.get("last_manual_dir_error")
-        if last_err:
-            if "tk" in str(last_err).lower() or "libtk" in str(last_err).lower():
-                st.info("El selector nativo no está disponible en este entorno. Usa la ruta manual.")
+    with _group_card(2, "Filtros", "Qué descargar"):
+        col_origen, col_tipo = st.columns([1, 1])
+        with col_origen:
+            origen = st.selectbox("Origen de comprobantes", ["Recibidos", "Emitidos"], index=0)
+            if origen == "Recibidos":
+                tipo_opciones = [
+                    "Facturas",
+                    "Retenciones",
+                    "Notas de crédito",
+                    "Notas de débito",
+                    "Liquidación de compra",
+                ]
             else:
-                st.warning(last_err)
-    st.caption(
-        f"Carpeta activa: `{st.session_state.get('download_base_dir', str(DESC_DIR))}`. Dentro se almacenarán tus descargas."
-    )
-    start_clicked = st.button(" Iniciar proceso", use_container_width=True, type="primary", key="start_process")
-    stop_clicked = st.button(" Detener proceso", use_container_width=True, key="stop_process")
+                tipo_opciones = [
+                    "Facturas",
+                    "Liquidación de compra",
+                    "Retenciones",
+                    "Notas de crédito",
+                    "Notas de débito",
+                    "Guía de remisión",
+                ]
+        with col_tipo:
+            tipo = st.selectbox("Tipo de comprobante", tipo_opciones)
+
+        estado_emitidos = None
+        establecimiento_input = None
+        punto_emision_input = None
+        formatos = []
+        descargar_pdf_emitidos = False
+        descargar_xml_emitidos = False
+        anio_emitidos = datetime.now().year
+        mes_emitidos = datetime.now().month
+        dia_emitidos = datetime.now().day
+        mes_fin_emitidos = datetime.now().month
+        anio_recibidos = datetime.now().year
+        mes_recibidos = datetime.now().month
+        dia_recibidos = 0
+        mes_fin_recibidos = datetime.now().month
+        meses_es = [
+            "Enero",
+            "Febrero",
+            "Marzo",
+            "Abril",
+            "Mayo",
+            "Junio",
+            "Julio",
+            "Agosto",
+            "Septiembre",
+            "Octubre",
+            "Noviembre",
+            "Diciembre",
+        ]
+        modo_fechas_recibidos = "Mes y dí­a"
+        modo_fechas_emitidos = "Mes y día"
+
+        if origen == "Recibidos":
+            modo_fechas_recibidos = st.radio(
+                "Modo de fecha",
+                ["Mes y día", "Rango de meses", "Año completo"],
+                horizontal=True,
+                key="modo_fechas_recibidos",
+            )
+            if modo_fechas_recibidos == "Rango de meses":
+                col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
+                with col_r1:
+                    anio_recibidos = st.number_input(
+                        "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    )
+                with col_r2:
+                    mes_inicio_label = st.selectbox(
+                        "Mes inicio",
+                        meses_es,
+                        index=mes_recibidos - 1,
+                        key="mes_inicio_recibidos",
+                    )
+                with col_r3:
+                    mes_fin_label = st.selectbox(
+                        "Mes fin",
+                        meses_es,
+                        index=mes_fin_recibidos - 1,
+                        key="mes_fin_recibidos",
+                    )
+                mes_recibidos = meses_es.index(mes_inicio_label) + 1
+                mes_fin_recibidos = meses_es.index(mes_fin_label) + 1
+                dia_recibidos = 0
+            elif modo_fechas_recibidos == "Año completo":
+                col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
+                with col_r1:
+                    anio_recibidos = st.number_input(
+                        "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    )
+                mes_recibidos = 1
+                mes_fin_recibidos = 12
+                dia_recibidos = 0
+            else:
+                col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
+                with col_r1:
+                    anio_recibidos = st.number_input(
+                        "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    )
+                with col_r2:
+                    mes_label = st.selectbox(
+                        "Mes",
+                        meses_es,
+                        index=mes_recibidos - 1,
+                        key="mes_recibidos",
+                    )
+                mes_recibidos = meses_es.index(mes_label) + 1
+                with col_r3:
+                    dia_recibidos = st.number_input(
+                        "Día (0 = Todos)", min_value=0, max_value=31, value=0, step=1,
+                        help="Elige 0 para descargar todo el mes o un día específico (1-31).",
+                    )
+            formatos = st.multiselect("Formatos a descargar", ["XML", "PDF"], default=["XML", "PDF"])
+        else:
+            modo_fechas_emitidos = st.radio(
+                "Modo de fecha",
+                ["Mes y día", "Rango de meses", "Año completo"],
+                horizontal=True,
+                key="modo_fechas_emitidos",
+            )
+            if modo_fechas_emitidos == "Rango de meses":
+                col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
+                with col_f1:
+                    anio_emitidos = st.number_input(
+                        "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    )
+                with col_f2:
+                    mes_inicio_label = st.selectbox(
+                        "Mes inicio",
+                        meses_es,
+                        index=mes_emitidos - 1,
+                        key="mes_inicio_emitidos",
+                    )
+                with col_f3:
+                    mes_fin_label = st.selectbox(
+                        "Mes fin",
+                        meses_es,
+                        index=mes_fin_emitidos - 1,
+                        key="mes_fin_emitidos",
+                    )
+                mes_emitidos = meses_es.index(mes_inicio_label) + 1
+                mes_fin_emitidos = meses_es.index(mes_fin_label) + 1
+                dia_emitidos = 0
+            elif modo_fechas_emitidos == "Año completo":
+                col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
+                with col_f1:
+                    anio_emitidos = st.number_input(
+                        "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    )
+                mes_emitidos = 1
+                mes_fin_emitidos = 12
+                dia_emitidos = 0
+            else:
+                col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
+                with col_f1:
+                    anio_emitidos = st.number_input(
+                        "Año", min_value=2015, max_value=datetime.now().year, value=datetime.now().year, step=1
+                    )
+                with col_f2:
+                    mes_label = st.selectbox(
+                        "Mes",
+                        meses_es,
+                        index=mes_emitidos - 1,
+                        key="mes_emitidos",
+                    )
+                mes_emitidos = meses_es.index(mes_label) + 1
+                with col_f3:
+                    dia_emitidos = st.number_input(
+                        "Día (0 = Todos)",
+                        min_value=0,
+                        max_value=31,
+                        value=datetime.now().day,
+                        step=1,
+                        help="Ingresa 0 para descargar todos los días del mes.",
+                    )
+            estado_emitidos = st.selectbox(
+                "Estado de autorización", ["Autorizados", "No autorizados"], index=0
+            )
+            col_e1, col_e2 = st.columns([1, 1])
+            with col_e1:
+                establecimiento_input = st.text_input(
+                    "Establecimiento",
+                    value="Todos",
+                    help="Escribe 'Todos' o un número de 3 dígitos (ej. 001).",
+                )
+            with col_e2:
+                punto_emision_input = st.text_input(
+                    "Punto de emisión (opcional)",
+                    value="",
+                    max_chars=3,
+                    key="punto_emision_input",
+                    help="Hasta 3 dígitos numéricos (ej. 001).",
+                )
+                if punto_emision_input:
+                    solo_digitos = "".join(ch for ch in punto_emision_input if ch.isdigit())
+                    if solo_digitos != punto_emision_input:
+                        st.session_state.punto_emision_input = solo_digitos
+                        punto_emision_input = solo_digitos
+            descargar_pdf_emitidos = st.checkbox(
+                'Descargar PDFs individuales',
+                value=False,
+                help='Genera un PDF por cada comprobante emitido.',
+            )
+            descargar_xml_emitidos = st.checkbox(
+                'Descargar XMLs individuales',
+                value=False,
+                help='Extrae el comprobante XML autorizado y lo organiza en la carpeta XML.',
+            )
+            formatos = ["Excel"]
+            if descargar_pdf_emitidos:
+                formatos.append("PDF")
+            if descargar_xml_emitidos:
+                formatos.append("XML")
+
+    with _group_card(3, "Carpeta base", "Dónde se guardan las descargas"):
+        current_dir = st.session_state.get("download_base_dir", str(DESC_DIR))
+        st.text_input(
+            "Ruta seleccionada",
+            value=current_dir,
+            help="Ej: C:\\\\RespaldosSRI o /home/usuario/SRI.",
+            disabled=True,
+        )
+        if st.button("Seleccionar carpeta de descarga"):
+            seleccionada, error = _select_directory_dialog(current_dir)
+            if seleccionada:
+                try:
+                    nueva_ruta = Path(seleccionada).expanduser()
+                    nueva_ruta.mkdir(parents=True, exist_ok=True)
+                    st.session_state["download_base_dir"] = str(nueva_ruta)
+                    _persist_user_preferences()
+                    st.success(f" Carpeta configurada: {nueva_ruta}")
+                except Exception as err:
+                    st.error(f"No se pudo usar la carpeta indicada: {err}")
+            elif error:
+                st.session_state["show_manual_dir"] = True
+                st.session_state["last_manual_dir_error"] = error
+
+        if st.session_state.get("show_manual_dir"):
+            manual_default = st.session_state.get("download_base_dir", str(DESC_DIR))
+            manual_dir = st.text_input("Ruta de carpeta (manual)", value=manual_default)
+            if st.button("Guardar carpeta"):
+                try:
+                    nueva_ruta = Path(manual_dir).expanduser()
+                    nueva_ruta.mkdir(parents=True, exist_ok=True)
+                    st.session_state["download_base_dir"] = str(nueva_ruta)
+                    _persist_user_preferences()
+                    st.success(f" Carpeta configurada: {nueva_ruta}")
+                    st.session_state["show_manual_dir"] = False
+                    st.session_state["last_manual_dir_error"] = None
+                except Exception as err:
+                    st.error(f"No se pudo usar la carpeta indicada: {err}")
+            last_err = st.session_state.get("last_manual_dir_error")
+            if last_err:
+                if "tk" in str(last_err).lower() or "libtk" in str(last_err).lower():
+                    st.info("El selector nativo no está disponible en este entorno. Usa la ruta manual.")
+                else:
+                    st.warning(last_err)
+        st.caption(
+            f"Carpeta activa: `{st.session_state.get('download_base_dir', str(DESC_DIR))}`. Dentro se almacenarán tus descargas."
+        )
+
+    with _group_card(4, "Ejecutar"):
+        start_clicked = st.button(" Iniciar proceso", use_container_width=True, type="primary", key="start_process")
+        stop_clicked = st.button(" Detener proceso", use_container_width=True, key="stop_process")
 
     if stop_clicked and st.session_state.download_status in {"running", "cancelling"}:
         from robot.downloader import request_cancel
