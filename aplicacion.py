@@ -1727,36 +1727,116 @@ section[data-testid="stSidebar"] img{
 .stApp [data-testid="stVerticalBlockBorderWrapper"]{
   width:100% !important;
 }
-.app-topbar .brand{display:flex; align-items:center; gap:.6rem; font-weight:800; letter-spacing:-.01em}
-.app-topbar .brand img{height:32px; width:auto; mix-blend-mode:screen}
-.app-topbar .brand .divider{width:1px; height:24px; background:var(--border)}
-.app-topbar .title{font-size:.95rem; color:var(--text-muted); font-weight:600}
-.app-topbar .title b{color:var(--text)}
-.app-topbar .ver-chip{
+/* ===== Topbar nuevo (container con key="topbar_container") =====
+   El st.container ahora vive PEGADO arriba del viewport, con fondo
+   glass + border-bottom. Theme toggle + perfil popover viven adentro. */
+.stApp .st-key-topbar_container,
+.stApp [data-testid="stVerticalBlockBorderWrapper"]:has(.is-topbar-marker){
+  position:sticky !important;
+  top:0 !important;
+  z-index:30 !important;
+  background:color-mix(in srgb, var(--glass) 92%, transparent) !important;
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  border:0 !important;
+  border-bottom:1px solid var(--border) !important;
+  border-radius:0 !important;
+  padding:.55rem clamp(1rem, 2.5vw, 1.8rem) !important;
+  margin:0 0 1rem 0 !important;
+  width:100% !important;
+  max-width:none !important;
+  box-shadow:none !important;
+}
+/* El marker invisible (solo para fallback de :has) */
+.is-topbar-marker{display:none}
+
+/* Brand (logo + divider + "SRI Robot Audit") */
+.brand{display:flex; align-items:center; gap:.6rem; font-weight:800; letter-spacing:-.01em}
+.brand img{height:30px; width:auto; mix-blend-mode:screen}
+.brand .divider{width:1px; height:22px; background:var(--border)}
+
+/* Titulo del topbar */
+.topbar-title{
+  font-size:.95rem; color:var(--text-muted); font-weight:600;
+  text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.topbar-title b{color:var(--text)}
+
+/* Chip de version */
+.ver-chip{
   display:inline-flex; align-items:center; gap:.35rem;
   font-size:.72rem; font-weight:600; color:var(--text-muted);
   border:1px solid var(--border); border-radius:999px;
   padding:.25rem .65rem; background:var(--input-bg);
 }
-.app-topbar .ver-chip::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--accent)}
-.app-topbar .top-actions{display:flex; align-items:center; gap:.55rem}
+.ver-chip::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--accent)}
 
-/* Mini-banda inferior con email del usuario (avatar + email) */
-.app-topbar .profile-mini{
-  display:flex; align-items:center; gap:.55rem;
-  padding:.3rem .7rem .3rem .35rem;
-  border:1px solid var(--border); border-radius:999px;
-  background:var(--input-bg);
+/* Theme toggle button DENTRO del topbar — estilo pill compacto */
+.stApp .st-key-btn_topbar_theme button{
+  background:var(--input-bg) !important;
+  border:1px solid var(--border) !important;
+  border-radius:999px !important;
+  padding:.35rem .7rem !important;
+  font-size:.8rem !important;
+  font-weight:600 !important;
+  color:var(--text) !important;
+  min-height:auto !important;
+  height:auto !important;
+  box-shadow:none !important;
+  white-space:nowrap;
 }
-.app-topbar .avatar{
-  width:28px; height:28px; border-radius:50%;
-  display:grid; place-items:center;
-  font-size:.7rem; font-weight:800; color:#04130b;
-  background:linear-gradient(135deg, var(--accent), var(--accent-2));
+.stApp .st-key-btn_topbar_theme button:hover{
+  background:var(--input-bg-hover) !important;
+  border-color:var(--accent) !important;
 }
-.app-topbar .email{font-size:.82rem; color:var(--text-muted)}
+
+/* Popover trigger (avatar + email) — estilo pill como el mockup */
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button,
+.stApp [data-testid="stVerticalBlockBorderWrapper"]:has(.is-topbar-marker)
+  [data-testid="stPopover"] > div > button{
+  background:var(--input-bg) !important;
+  border:1px solid var(--border) !important;
+  border-radius:999px !important;
+  padding:.3rem .8rem .3rem .35rem !important;
+  font-size:.82rem !important;
+  font-weight:600 !important;
+  color:var(--text-muted) !important;
+  min-height:auto !important;
+  height:auto !important;
+  text-align:left !important;
+  justify-content:flex-start !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  gap:.55rem !important;
+  box-shadow:none !important;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button:hover{
+  border-color:var(--accent) !important;
+}
+/* Pintar las primeras 2 iniciales del email como avatar verde via ::first-letter
+   no funciona para dos letras; mejor: usamos un ::before con CSS counter
+   o simplemente dejamos el texto tal cual con buen estilo. */
+
+/* Botones dentro del popover (Cerrar sesion / Cerrar app) */
+[data-testid="stPopover"] [data-testid="stMarkdownContainer"],
+[data-testid="stPopover"] [data-testid="stVerticalBlock"]{
+  gap:.45rem !important;
+}
+
 @media (max-width:760px){
-  .app-topbar .title, .app-topbar .email{display:none}
+  .topbar-title{display:none}
+  .ver-chip{display:none}
+}
+
+/* === Eliminar padding-top del main container para que el topbar quede
+   PEGADO arriba sin gap visible. El stMainBlockContainer ya tiene
+   padding-top:0 desde otra regla, pero por las dudas reforzamos. === */
+.stApp section.main > div.block-container,
+.stApp [data-testid="stMainBlockContainer"]{
+  padding-top:0 !important;
 }
 
 /* === pagehead === */
@@ -1944,7 +2024,8 @@ section[data-testid="stSidebar"] img{
 if "ui_theme" not in st.session_state:
     st.session_state["ui_theme"] = "dark"
 st.markdown(_build_global_css(st.session_state["ui_theme"]), unsafe_allow_html=True)
-_render_theme_toggle()
+# El theme toggle ahora vive DENTRO del topbar (ver `_render_topbar`),
+# por eso ya no llamamos al toggle suelto flotante aqui.
 
 
 _init_download_state()
@@ -3352,10 +3433,12 @@ else:
 
 
 def _render_topbar(app_version: str) -> None:
-    """Renderiza el topbar sticky superior del mockup: branding a la izquierda,
-    titulo en el centro, chip de version + perfil a la derecha. Los botones
-    interactivos (Cerrar sesion / Cerrar app) van debajo en una fila compacta
-    que el CSS alinea visualmente con el topbar.
+    """Topbar sticky pegado arriba con brand a la izquierda, titulo al
+    centro, version + theme toggle + profile popover a la derecha.
+
+    El theme toggle y el menu de perfil (Cerrar sesion / Cerrar app)
+    viven todos DENTRO del topbar — no hay botones flotantes sueltos
+    en otras partes de la pantalla.
     """
     user_email = st.session_state.get("user_email") or "No disponible"
     initials_seed = (user_email.split("@")[0] or "U").replace(".", " ")
@@ -3367,43 +3450,77 @@ def _render_topbar(app_version: str) -> None:
         if logo_uri
         else ""
     )
+    is_frozen = getattr(sys, "frozen", False)
 
-    st.markdown(
-        f"""
-        <div class="app-topbar">
-          <div class="brand">
-            {logo_img}
-            <span class="divider"></span>
-            <span style="font-weight:800">SRI&nbsp;Robot&nbsp;Audit</span>
-          </div>
-          <span class="title">Descarga y <b>Reporte Automático</b></span>
-          <div class="top-actions">
-            <span class="ver-chip" title="Versión actual">v{html.escape(app_version)}</span>
-            <div class="profile-mini" title="Usuario conectado">
-              <span class="avatar">{html.escape(avatar_initials)}</span>
-              <span class="email">{html.escape(user_email)}</span>
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Container con key para que el CSS le aplique aspecto de topbar
+    # (sticky, glass background, border-bottom). Streamlit emite la clase
+    # `st-key-topbar_container` sobre el wrapper, que es lo que apunta el CSS.
+    # Adentro: 5 columnas alineadas verticalmente al centro.
+    try:
+        bar = st.container(key="topbar_container")
+    except TypeError:
+        # `key` en st.container llego en Streamlit 1.34; fallback con marker.
+        bar = st.container()
+    with bar:
+        st.markdown('<div class="is-topbar-marker"></div>', unsafe_allow_html=True)
+        try:
+            cols = st.columns([3, 4.2, 0.9, 1.1, 2.4], vertical_alignment="center")
+        except TypeError:
+            # vertical_alignment llego en Streamlit 1.36; fallback sin el kwarg.
+            cols = st.columns([3, 4.2, 0.9, 1.1, 2.4])
 
-    # Fila compacta con los botones reales (sin "Tema" — ya existe el toggle
-    # global "Modo claro/oscuro" arriba a la derecha via _render_theme_toggle).
-    cols = st.columns([6, 1.4, 1.4]) if getattr(sys, "frozen", False) else st.columns([6, 1.4])
-    with cols[1]:
-        if st.button("Cerrar sesión", key="btn_topbar_logout"):
-            device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
-            _clear_cached_auth_only()
-            st.session_state.clear()
-            if device_id:
-                st.session_state["_device_id"] = device_id
-            st.rerun()
-    if getattr(sys, "frozen", False):
+        with cols[0]:
+            st.markdown(
+                f"""
+                <div class="brand">
+                  {logo_img}
+                  <span class="divider"></span>
+                  <span style="font-weight:800">SRI&nbsp;Robot&nbsp;Audit</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                '<div class="topbar-title">Descarga y <b>Reporte Automático</b></div>',
+                unsafe_allow_html=True,
+            )
         with cols[2]:
-            if st.button("Cerrar app", key="btn_open_close_app"):
-                st.session_state["open_close_app_dialog"] = True
+            st.markdown(
+                f'<div class="ver-chip" title="Versión actual">v{html.escape(app_version)}</div>',
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            # Theme toggle DENTRO del topbar (reemplaza al boton flotante
+            # _render_theme_toggle que vivia arriba a la derecha).
+            tema = st.session_state.get("ui_theme", "dark")
+            label = "☀️ Claro" if tema == "dark" else "🌙 Oscuro"
+            if st.button(label, key="btn_topbar_theme", help="Cambiar tema claro/oscuro", use_container_width=True):
+                st.session_state["ui_theme"] = "light" if tema == "dark" else "dark"
+                st.rerun()
+        with cols[4]:
+            # Profile popover: el avatar + email es el trigger; al abrir
+            # muestra opciones "Cerrar sesion" (y "Cerrar app" si .exe).
+            popover_label = f"{avatar_initials}  {user_email}"
+            with st.popover(popover_label, use_container_width=True):
+                if st.button(
+                    "🚪  Cerrar sesión",
+                    key="btn_popover_logout",
+                    use_container_width=True,
+                ):
+                    device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
+                    _clear_cached_auth_only()
+                    st.session_state.clear()
+                    if device_id:
+                        st.session_state["_device_id"] = device_id
+                    st.rerun()
+                if is_frozen:
+                    if st.button(
+                        "⏻  Cerrar app",
+                        key="btn_popover_close_app",
+                        use_container_width=True,
+                    ):
+                        st.session_state["open_close_app_dialog"] = True
 
 
 _render_topbar(_app_version_display)
