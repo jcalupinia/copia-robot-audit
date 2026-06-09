@@ -1891,12 +1891,55 @@ section[data-testid="stSidebar"] img{
   .ver-chip{display:none}
 }
 
-/* === Eliminar padding-top del main container para que el topbar quede
-   PEGADO arriba sin gap visible. El stMainBlockContainer ya tiene
-   padding-top:0 desde otra regla, pero por las dudas reforzamos. === */
+/* === Pegar el header al borde superior del viewport ===
+   Quitamos padding-top y margin-top de TODOS los wrappers que Streamlit
+   pone arriba del main container. Sin esto, queda una franja vacia
+   entre el browser y el topbar sticky. */
+html, body{
+  margin:0 !important;
+  padding:0 !important;
+}
+.stApp{
+  padding-top:0 !important;
+  margin-top:0 !important;
+}
+.stApp [data-testid="stAppViewContainer"]{
+  padding-top:0 !important;
+}
+.stApp section.main,
 .stApp section.main > div.block-container,
 .stApp [data-testid="stMainBlockContainer"]{
   padding-top:0 !important;
+  margin-top:0 !important;
+}
+
+/* === Unificar altura visual de los 3 controles de la derecha ===
+   chip version + boton tema + boton usuario tienen la MISMA altura
+   (38px) y la misma logica de border-radius para verse coherentes. */
+.stApp .st-key-topbar_container .ver-chip,
+.stApp .st-key-btn_topbar_theme button,
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button{
+  height:38px !important;
+  min-height:38px !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:0 .9rem !important;
+  font-weight:600 !important;
+  box-shadow:none !important;
+}
+/* Border-radius: chip y boton tema usan pill (999px); el icono usuario
+   queda cuadrado redondeado (10px) para diferenciarlo como "icon button". */
+.stApp .st-key-topbar_container .ver-chip,
+.stApp .st-key-btn_topbar_theme button{
+  border-radius:999px !important;
+}
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button{
+  border-radius:10px !important;
+  padding:0 !important;
+  width:38px !important;
+  min-width:38px !important;
+  font-size:1.1rem !important;
 }
 
 /* === pagehead === */
@@ -3562,10 +3605,11 @@ def _render_topbar(app_version: str) -> None:
                 st.session_state["ui_theme"] = "light" if tema == "dark" else "dark"
                 st.rerun()
         with cols[4]:
-            # Menu hamburguesa: trigger compacto con icono ☰. El email
-            # del usuario y el boton de Cerrar sesion viven ADENTRO del
-            # panel desplegable — NO en el topbar como chip permanente.
-            with st.popover("☰", use_container_width=True, help="Menú"):
+            # Menu de usuario: trigger compacto con silueta de persona
+            # (👤) en vez de hamburguesa. El email del usuario y el
+            # boton Cerrar sesion viven ADENTRO del panel desplegable
+            # — NO en el topbar como chip permanente.
+            with st.popover("👤", use_container_width=True, help="Menú de usuario"):
                 # Email del usuario adentro del panel
                 st.markdown(
                     f"""
