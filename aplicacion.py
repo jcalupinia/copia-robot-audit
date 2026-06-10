@@ -1163,12 +1163,13 @@ _THEME_TOKENS = {
         "--table-row": "#ffffff",
         "--table-row-alt": "#f4f7fb",
         "--table-hover": "#e7edf6",
-        # Sombra elevada + borde marcado para que cada step quede
-        # claramente recortado del fondo claro. Valores anteriores
-        # (5-6% opacidad, borde #c2cce0) eran demasiado sutiles para
-        # diferenciar las cards del bg gris claro de la pagina.
-        "--card-shadow": "0 1px 3px rgba(15,23,42,0.14), 0 6px 18px rgba(15,23,42,0.10)",
-        "--card-border": "#a4afca",
+        # Sombra prominente + borde marcado para que cada step quede
+        # claramente recortado del fondo claro — match con mockup.
+        # Subimos el peso del borde (1.5px) y opacidades del shadow
+        # a 0.22/0.14 para que los recuadros se vean SIN ambiguedad
+        # incluso a primer vistazo.
+        "--card-shadow": "0 2px 6px rgba(15,23,42,0.22), 0 12px 28px rgba(15,23,42,0.14)",
+        "--card-border": "#7c8cae",
     },
 }
 
@@ -2199,22 +2200,26 @@ body .stApp .st-key-topbar_container{
   border-color:var(--accent) !important;
   background:var(--input-bg-hover) !important;
 }
-/* Icono usuario: cuadrado 44x44 (icon-only) — selector permisivo
-   para cubrir cualquier nesting que Streamlit aplique al popover. */
+/* Boton Perfil: pill con icono 👤 + texto "Perfil". Antes era
+   cuadrado icon-only de 44x44; ahora se expande al texto pero
+   mantiene la altura 44px para alinear con el toggle de tema.
+   Selector permisivo para cubrir cualquier nesting que Streamlit
+   aplique al popover (con/sin un div extra). */
 .stApp .st-key-topbar_container [data-testid="stPopover"] button,
 .stApp .st-key-topbar_container [data-testid="stPopover"] > div > button,
 .stApp .st-key-topbar_container [data-testid="stPopover"] > div > div > button{
-  padding:0 !important;
-  width:44px !important;
-  min-width:44px !important;
+  padding:0 .9rem !important;
   height:44px !important;
   min-height:44px !important;
-  font-size:1.15rem !important;
+  font-size:.875rem !important;
+  font-weight:600 !important;
   color:var(--text) !important;
   background:var(--input-bg) !important;
   border:1px solid var(--border) !important;
   border-radius:12px !important;
   box-shadow:none !important;
+  white-space:nowrap !important;
+  gap:.4rem !important;
 }
 .stApp .st-key-topbar_container [data-testid="stPopover"] button:hover,
 .stApp .st-key-topbar_container [data-testid="stPopover"] > div > button:hover,
@@ -3863,7 +3868,7 @@ def _render_topbar(app_version: str) -> None:
         # Pesos: brand izquierda + spacer central (titulo es absolute, no
         # ocupa flujo) + boton tema + icono usuario. La version se removio
         # del topbar — sigue disponible en Ayuda > Acerca de la aplicacion.
-        col_weights = [1.2, 8.0, 0.6, 0.6]
+        col_weights = [1.2, 7.6, 0.6, 1.0]
         try:
             cols = st.columns(col_weights, vertical_alignment="center")
         except TypeError:
@@ -3899,7 +3904,7 @@ def _render_topbar(app_version: str) -> None:
             # (👤) en vez de hamburguesa. El email del usuario y el
             # boton Cerrar sesion viven ADENTRO del panel desplegable
             # — NO en el topbar como chip permanente.
-            with st.popover("👤", use_container_width=True, help="Menú de usuario"):
+            with st.popover("👤 Perfil", use_container_width=True, help="Menú de usuario"):
                 # Email del usuario adentro del panel
                 st.markdown(
                     f"""
