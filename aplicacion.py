@@ -5191,346 +5191,349 @@ with tab3:
         unsafe_allow_html=True,
     )
 
-    consolidar_dir_actual = st.session_state.get(
-        "consolidate_base_dir",
-        st.session_state.get("download_base_dir", str(DESC_DIR)),
-    )
-    st.text_input(
-        "Carpeta origen para consolidar",
-        value=consolidar_dir_actual,
-        help="Puedes elegir la carpeta base de descargas, una carpeta RUC o una subcarpeta de Recibidos/Emitidos.",
-        disabled=True,
-    )
-    col_sel_c1, col_sel_c2 = st.columns([1, 1])
-    with col_sel_c1:
-        if st.button("Seleccionar carpeta para consolidar", key="btn_select_consolidate_dir"):
-            seleccionada, error = _select_directory_dialog(consolidar_dir_actual)
-            if seleccionada:
-                try:
-                    ruta_cons = Path(seleccionada).expanduser()
-                    ruta_cons.mkdir(parents=True, exist_ok=True)
-                    st.session_state["consolidate_base_dir"] = str(ruta_cons)
-                    _persist_user_preferences()
-                    st.success(f" Carpeta de consolidacion: {ruta_cons}")
-                except Exception as err:
-                    st.error(f"No se pudo usar la carpeta indicada: {err}")
-            elif error:
-                st.session_state["show_manual_consolidate_dir"] = True
-                st.session_state["last_manual_consolidate_dir_error"] = error
-    with col_sel_c2:
-        if st.button("Usar carpeta de descargas activa", key="btn_use_download_dir_for_consolidate"):
-            st.session_state["consolidate_base_dir"] = st.session_state.get("download_base_dir", str(DESC_DIR))
-            _persist_user_preferences()
-            st.success("Se usara la carpeta de descargas activa para consolidar.")
-
-    if st.session_state.get("show_manual_consolidate_dir"):
-        manual_default_cons = st.session_state.get(
+    with _group_card(1, "Carpeta origen a consolidar", "Dónde buscar documentos"):
+        consolidar_dir_actual = st.session_state.get(
             "consolidate_base_dir",
             st.session_state.get("download_base_dir", str(DESC_DIR)),
         )
-        manual_cons = st.text_input(
-            "Ruta de carpeta para consolidar (manual)",
-            value=manual_default_cons,
-            key="manual_consolidate_dir_input",
+        st.text_input(
+            "Carpeta origen para consolidar",
+            value=consolidar_dir_actual,
+            help="Puedes elegir la carpeta base de descargas, una carpeta RUC o una subcarpeta de Recibidos/Emitidos.",
+            disabled=True,
         )
-        if st.button("Guardar carpeta de consolidacion", key="btn_save_manual_consolidate_dir"):
-            try:
-                nueva_ruta = Path(manual_cons).expanduser()
-                nueva_ruta.mkdir(parents=True, exist_ok=True)
-                st.session_state["consolidate_base_dir"] = str(nueva_ruta)
+        col_sel_c1, col_sel_c2 = st.columns([1, 1])
+        with col_sel_c1:
+            if st.button("Seleccionar carpeta para consolidar", key="btn_select_consolidate_dir"):
+                seleccionada, error = _select_directory_dialog(consolidar_dir_actual)
+                if seleccionada:
+                    try:
+                        ruta_cons = Path(seleccionada).expanduser()
+                        ruta_cons.mkdir(parents=True, exist_ok=True)
+                        st.session_state["consolidate_base_dir"] = str(ruta_cons)
+                        _persist_user_preferences()
+                        st.success(f" Carpeta de consolidacion: {ruta_cons}")
+                    except Exception as err:
+                        st.error(f"No se pudo usar la carpeta indicada: {err}")
+                elif error:
+                    st.session_state["show_manual_consolidate_dir"] = True
+                    st.session_state["last_manual_consolidate_dir_error"] = error
+        with col_sel_c2:
+            if st.button("Usar carpeta de descargas activa", key="btn_use_download_dir_for_consolidate"):
+                st.session_state["consolidate_base_dir"] = st.session_state.get("download_base_dir", str(DESC_DIR))
                 _persist_user_preferences()
-                st.success(f" Carpeta de consolidacion: {nueva_ruta}")
-                st.session_state["show_manual_consolidate_dir"] = False
-                st.session_state["last_manual_consolidate_dir_error"] = None
-            except Exception as err:
-                st.error(f"No se pudo usar la carpeta indicada: {err}")
-        last_err_cons = st.session_state.get("last_manual_consolidate_dir_error")
-        if last_err_cons:
-            if "tk" in str(last_err_cons).lower() or "libtk" in str(last_err_cons).lower():
-                st.info("El selector nativo no esta disponible en este entorno. Usa la ruta manual.")
-            else:
-                st.warning(last_err_cons)
+                st.success("Se usara la carpeta de descargas activa para consolidar.")
 
-    st.caption(
-        f"Carpeta de busqueda activa para consolidacion: `{st.session_state.get('consolidate_base_dir', consolidar_dir_actual)}`"
-    )
-
-    col_ruc_cons, col_origen_cons = st.columns([1.2, 1.2])
-    with col_ruc_cons:
-        ruc_consolidar = st.text_input(
-            "RUC a buscar (opcional)",
-            value=ruc,
-            help="Si lo dejas vacio, se intentara consolidar desde la carpeta seleccionada.",
-            key="consolidar_ruc_hint",
-        )
-    with col_origen_cons:
-        origen_consolidar = st.selectbox(
-            "Origen a consolidar",
-            ["Recibidos", "Emitidos"],
-            index=0 if origen == "Recibidos" else 1,
-            key="consolidar_origen",
-        )
-
-    col_c1, col_c2, col_c3 = st.columns([1.2, 1, 1])
-    with col_c1:
-        if origen_consolidar == "Emitidos":
-            tipos_disponibles = [
-                "Facturas",
-                "Liquidacion de compra",
-                "Guia de remision",
-                "Retencion",
-                "Notas de debito",
-                "Notas de credito",
-            ]
-        else:
-            tipos_disponibles = [
-                "Retencion",
-                "Facturas",
-                "Notas de debito",
-                "Notas de credito",
-                "Liquidacion de compra",
-            ]
-        tipo_consolidar = st.selectbox(
-            "Tipo de comprobante",
-            tipos_disponibles,
-            index=tipos_disponibles.index(tipo) if tipo in tipos_disponibles else 0,
-            key="consolidar_tipo",
-        )
-    with col_c2:
-        anio_consolidar = st.number_input(
-            "Año a consolidar",
-            min_value=2015,
-            max_value=datetime.now().year,
-            value=int(datetime.now().year),
-            step=1,
-            key="consolidar_anio",
-        )
-    with col_c3:
-        estado_consolidar = None
-        if origen_consolidar == "Emitidos":
-            estado_default = (
-                st.session_state.get("estado_autorizacion")
-                or (estado_emitidos if "estado_emitidos" in locals() else None)
-                or "Autorizados"
-            )
-            estado_consolidar = st.selectbox(
-                "Estado autorizacion",
-                ["Autorizados", "No Autorizados"],
-                index=0 if estado_default == "Autorizados" else 1,
-                key="consolidar_estado",
-            )
-        else:
-            st.write("")
-
-    modo_fecha_consolidar = st.radio(
-        "Modo de fecha",
-        ["Mes y dia", "Rango de meses", "Año completo"],
-        horizontal=True,
-        key="consolidar_modo_fechas",
-    )
-
-    mes_inicio_consolidar = 1
-    mes_fin_consolidar = 12
-    dia_consolidar = 0
-    mes_actual = int(datetime.now().month)
-    if modo_fecha_consolidar == "Rango de meses":
-        col_fr1, col_fr2 = st.columns([1, 1])
-        with col_fr1:
-            mes_inicio_label = st.selectbox(
-                "Mes inicio",
-                MESES_ES,
-                index=mes_actual - 1,
-                key="consolidar_mes_inicio",
-            )
-        with col_fr2:
-            mes_fin_label = st.selectbox(
-                "Mes fin",
-                MESES_ES,
-                index=mes_actual - 1,
-                key="consolidar_mes_fin",
-            )
-        mes_inicio_consolidar = MESES_ES.index(mes_inicio_label) + 1
-        mes_fin_consolidar = MESES_ES.index(mes_fin_label) + 1
-    elif modo_fecha_consolidar == "Mes y dia":
-        col_fd1, col_fd2 = st.columns([1, 1])
-        with col_fd1:
-            mes_label = st.selectbox(
-                "Mes",
-                MESES_ES,
-                index=mes_actual - 1,
-                key="consolidar_mes",
-            )
-            mes_inicio_consolidar = MESES_ES.index(mes_label) + 1
-            mes_fin_consolidar = mes_inicio_consolidar
-        with col_fd2:
-            dia_consolidar = st.number_input(
-                "Dia (0 = Todos)",
-                min_value=0,
-                max_value=31,
-                value=0,
-                step=1,
-                key="consolidar_dia",
-            )
-    else:
-        mes_inicio_consolidar = 1
-        mes_fin_consolidar = 12
-        dia_consolidar = 0
-
-    col_f1, col_f2 = st.columns([1, 1])
-    with col_f1:
-        incluir_xml = st.checkbox("Consolidar XML", value=True, key="consolidar_xml")
-    with col_f2:
-        incluir_pdf = st.checkbox("Consolidar PDF", value=True, key="consolidar_pdf")
-
-    if st.button("Consolidar desde carpeta", use_container_width=True, key="btn_run_consolidation"):
-        carpeta_base_cons = Path(
-            st.session_state.get(
+        if st.session_state.get("show_manual_consolidate_dir"):
+            manual_default_cons = st.session_state.get(
                 "consolidate_base_dir",
                 st.session_state.get("download_base_dir", str(DESC_DIR)),
             )
-        ).expanduser()
-        if not carpeta_base_cons.exists():
-            st.error(f"La carpeta seleccionada no existe: {carpeta_base_cons}")
-            st.stop()
-        if not incluir_xml and not incluir_pdf:
-            st.warning("Selecciona al menos una opcion: XML o PDF.")
-            st.stop()
-        if modo_fecha_consolidar == "Rango de meses" and int(mes_fin_consolidar) < int(mes_inicio_consolidar):
-            st.error("El mes fin debe ser mayor o igual al mes inicio.")
-            st.stop()
-
-        tipo_visible = TIPOS_MAP.get(tipo_consolidar, tipo_consolidar)
-        tipo_slug = _slug_tipo(tipo_visible or tipo_consolidar)
-        _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo_consolidar)
-        anio_int = int(anio_consolidar)
-        estado_slug = _slug_estado_emitidos(estado_consolidar or "Sin Estado") if origen_consolidar == "Emitidos" else None
-        periodo_suffix = _sufijo_periodo_consolidacion(
-            modo_fecha_consolidar,
-            anio_int,
-            int(mes_inicio_consolidar),
-            int(mes_fin_consolidar),
-            int(dia_consolidar),
-        )
-
-        base_search = _resolver_busqueda_consolidacion(
-            carpeta_base_cons,
-            origen_consolidar,
-            ruc_hint=ruc_consolidar,
-            estado_slug=estado_slug,
-        )
-        if not base_search.exists():
-            st.error(f"No se encontro una carpeta valida para buscar reportes: {base_search}")
-            st.stop()
-
-        prefix_base = "recibidos_reporte" if origen_consolidar == "Recibidos" else "emitidos_reporte"
-        destino_anual_dir = carpeta_base_cons / "Consolidados" / origen_consolidar
-        if origen_consolidar == "Emitidos" and estado_slug:
-            destino_anual_dir = destino_anual_dir / estado_slug
-        if modo_fecha_consolidar == "Ano completo":
-            destino_anual_dir = destino_anual_dir / f"{anio_int:04d}"
-        else:
-            destino_anual_dir = destino_anual_dir / periodo_suffix
-        destino_anual_dir.mkdir(parents=True, exist_ok=True)
-
-        st.caption(f"Buscando reportes en: `{base_search}`")
-        st.caption(f"Guardando consolidados en: `{destino_anual_dir}`")
-
-        if incluir_xml:
-            reportes_xml = _buscar_reportes_por_periodo(
-                base_search,
-                origen_consolidar,
-                tipo_slug,
-                "xml",
-                modo_fecha_consolidar,
-                anio_int,
-                int(mes_inicio_consolidar),
-                int(mes_fin_consolidar),
-                int(dia_consolidar),
+            manual_cons = st.text_input(
+                "Ruta de carpeta para consolidar (manual)",
+                value=manual_default_cons,
+                key="manual_consolidate_dir_input",
             )
-            xml_files = _colectar_documentos_por_periodo(
-                base_search,
-                tipo_prefijo,
-                "xml",
-                modo_fecha_consolidar,
-                anio_int,
-                int(mes_inicio_consolidar),
-                int(mes_fin_consolidar),
-                int(dia_consolidar),
-                tipo_slug_archivo=tipo_slug,
-            )
-            st.caption(f"Reportes XML base encontrados: {len(reportes_xml)}")
-            st.caption(f"Documentos XML encontrados: {len(xml_files)}")
-            destino_xml = destino_anual_dir / f"{prefix_base}_xml_{tipo_slug}_{periodo_suffix}.xlsx"
-            anual_xml = None
-            if xml_files:
-                estado_default_reporte = None
-                if origen_consolidar == "Emitidos":
-                    estado_txt = (estado_consolidar or "").strip().lower()
-                    if "no autoriz" in estado_txt:
-                        estado_default_reporte = estado_consolidar
+            if st.button("Guardar carpeta de consolidacion", key="btn_save_manual_consolidate_dir"):
                 try:
-                    construir_reporte(base_search, destino_xml, estado_default_reporte, xml_files=xml_files)
+                    nueva_ruta = Path(manual_cons).expanduser()
+                    nueva_ruta.mkdir(parents=True, exist_ok=True)
+                    st.session_state["consolidate_base_dir"] = str(nueva_ruta)
+                    _persist_user_preferences()
+                    st.success(f" Carpeta de consolidacion: {nueva_ruta}")
+                    st.session_state["show_manual_consolidate_dir"] = False
+                    st.session_state["last_manual_consolidate_dir_error"] = None
                 except Exception as err:
-                    st.error(f"No se pudo generar el reporte XML desde los documentos: {err}")
-                if destino_xml.exists():
-                    anual_xml = destino_xml
-            elif reportes_xml:
-                anual_xml = _consolidar_reportes_xml_desde_excels(reportes_xml, destino_xml)
-            if anual_xml:
-                st.success(f"Reporte XML consolidado: {anual_xml}")
-            else:
-                st.info("No se encontraron insumos XML para consolidar.")
-
-            destino_copia_xml = destino_anual_dir / "XML"
-            copiados_xml = _copiar_documentos_unicos(xml_files, destino_copia_xml)
-            if copiados_xml > 0:
-                st.success(f"XML copiados: {copiados_xml} en `{destino_copia_xml}`")
-            else:
-                st.info("No se copiaron XML porque no hubo documentos para el periodo seleccionado.")
-
-        if incluir_pdf:
-            reportes_pdf = _buscar_reportes_por_periodo(
-                base_search,
-                origen_consolidar,
-                tipo_slug,
-                "pdf",
-                modo_fecha_consolidar,
-                anio_int,
-                int(mes_inicio_consolidar),
-                int(mes_fin_consolidar),
-                int(dia_consolidar),
-            )
-            pdf_files = _colectar_documentos_por_periodo(
-                base_search,
-                tipo_prefijo,
-                "pdf",
-                modo_fecha_consolidar,
-                anio_int,
-                int(mes_inicio_consolidar),
-                int(mes_fin_consolidar),
-                int(dia_consolidar),
-                tipo_slug_archivo=tipo_slug,
-            )
-            st.caption(f"Reportes PDF encontrados: {len(reportes_pdf)}")
-            st.caption(f"Documentos PDF encontrados: {len(pdf_files)}")
-            if reportes_pdf:
-                destino_pdf = destino_anual_dir / f"{prefix_base}_pdf_{tipo_slug}_{periodo_suffix}.xlsx"
-                anual_pdf = _consolidar_reportes_excel(
-                    [str(p) for p in reportes_pdf], destino_pdf
-                )
-                if anual_pdf:
-                    st.success(f"Reporte PDF consolidado: {anual_pdf}")
+                    st.error(f"No se pudo usar la carpeta indicada: {err}")
+            last_err_cons = st.session_state.get("last_manual_consolidate_dir_error")
+            if last_err_cons:
+                if "tk" in str(last_err_cons).lower() or "libtk" in str(last_err_cons).lower():
+                    st.info("El selector nativo no esta disponible en este entorno. Usa la ruta manual.")
                 else:
-                    st.error("No se pudo generar el reporte PDF consolidado.")
-            else:
-                st.info("No se encontraron reportes PDF para consolidar.")
+                    st.warning(last_err_cons)
 
-            destino_copia_pdf = destino_anual_dir / "PDF"
-            copiados_pdf = _copiar_documentos_unicos(pdf_files, destino_copia_pdf)
-            if copiados_pdf > 0:
-                st.success(f"PDF copiados: {copiados_pdf} en `{destino_copia_pdf}`")
+        st.caption(
+            f"Carpeta de busqueda activa para consolidacion: `{st.session_state.get('consolidate_base_dir', consolidar_dir_actual)}`"
+        )
+
+    with _group_card(2, "Filtros", "RUC, origen, tipo, año y periodo"):
+        col_ruc_cons, col_origen_cons = st.columns([1.2, 1.2])
+        with col_ruc_cons:
+            ruc_consolidar = st.text_input(
+                "RUC a buscar (opcional)",
+                value=ruc,
+                help="Si lo dejas vacio, se intentara consolidar desde la carpeta seleccionada.",
+                key="consolidar_ruc_hint",
+            )
+        with col_origen_cons:
+            origen_consolidar = st.selectbox(
+                "Origen a consolidar",
+                ["Recibidos", "Emitidos"],
+                index=0 if origen == "Recibidos" else 1,
+                key="consolidar_origen",
+            )
+
+        col_c1, col_c2, col_c3 = st.columns([1.2, 1, 1])
+        with col_c1:
+            if origen_consolidar == "Emitidos":
+                tipos_disponibles = [
+                    "Facturas",
+                    "Liquidacion de compra",
+                    "Guia de remision",
+                    "Retencion",
+                    "Notas de debito",
+                    "Notas de credito",
+                ]
             else:
-                st.info("No se copiaron PDF porque no hubo documentos para el periodo seleccionado.")
+                tipos_disponibles = [
+                    "Retencion",
+                    "Facturas",
+                    "Notas de debito",
+                    "Notas de credito",
+                    "Liquidacion de compra",
+                ]
+            tipo_consolidar = st.selectbox(
+                "Tipo de comprobante",
+                tipos_disponibles,
+                index=tipos_disponibles.index(tipo) if tipo in tipos_disponibles else 0,
+                key="consolidar_tipo",
+            )
+        with col_c2:
+            anio_consolidar = st.number_input(
+                "Año a consolidar",
+                min_value=2015,
+                max_value=datetime.now().year,
+                value=int(datetime.now().year),
+                step=1,
+                key="consolidar_anio",
+            )
+        with col_c3:
+            estado_consolidar = None
+            if origen_consolidar == "Emitidos":
+                estado_default = (
+                    st.session_state.get("estado_autorizacion")
+                    or (estado_emitidos if "estado_emitidos" in locals() else None)
+                    or "Autorizados"
+                )
+                estado_consolidar = st.selectbox(
+                    "Estado autorizacion",
+                    ["Autorizados", "No Autorizados"],
+                    index=0 if estado_default == "Autorizados" else 1,
+                    key="consolidar_estado",
+                )
+            else:
+                st.write("")
+
+        modo_fecha_consolidar = st.radio(
+            "Modo de fecha",
+            ["Mes y dia", "Rango de meses", "Año completo"],
+            horizontal=True,
+            key="consolidar_modo_fechas",
+        )
+
+        mes_inicio_consolidar = 1
+        mes_fin_consolidar = 12
+        dia_consolidar = 0
+        mes_actual = int(datetime.now().month)
+        if modo_fecha_consolidar == "Rango de meses":
+            col_fr1, col_fr2 = st.columns([1, 1])
+            with col_fr1:
+                mes_inicio_label = st.selectbox(
+                    "Mes inicio",
+                    MESES_ES,
+                    index=mes_actual - 1,
+                    key="consolidar_mes_inicio",
+                )
+            with col_fr2:
+                mes_fin_label = st.selectbox(
+                    "Mes fin",
+                    MESES_ES,
+                    index=mes_actual - 1,
+                    key="consolidar_mes_fin",
+                )
+            mes_inicio_consolidar = MESES_ES.index(mes_inicio_label) + 1
+            mes_fin_consolidar = MESES_ES.index(mes_fin_label) + 1
+        elif modo_fecha_consolidar == "Mes y dia":
+            col_fd1, col_fd2 = st.columns([1, 1])
+            with col_fd1:
+                mes_label = st.selectbox(
+                    "Mes",
+                    MESES_ES,
+                    index=mes_actual - 1,
+                    key="consolidar_mes",
+                )
+                mes_inicio_consolidar = MESES_ES.index(mes_label) + 1
+                mes_fin_consolidar = mes_inicio_consolidar
+            with col_fd2:
+                dia_consolidar = st.number_input(
+                    "Dia (0 = Todos)",
+                    min_value=0,
+                    max_value=31,
+                    value=0,
+                    step=1,
+                    key="consolidar_dia",
+                )
+        else:
+            mes_inicio_consolidar = 1
+            mes_fin_consolidar = 12
+            dia_consolidar = 0
+
+    with _group_card(3, "Salida", "Formatos y ejecución"):
+        col_f1, col_f2 = st.columns([1, 1])
+        with col_f1:
+            incluir_xml = st.checkbox("Consolidar XML", value=True, key="consolidar_xml")
+        with col_f2:
+            incluir_pdf = st.checkbox("Consolidar PDF", value=True, key="consolidar_pdf")
+
+        if st.button("Consolidar desde carpeta", use_container_width=True, key="btn_run_consolidation"):
+            carpeta_base_cons = Path(
+                st.session_state.get(
+                    "consolidate_base_dir",
+                    st.session_state.get("download_base_dir", str(DESC_DIR)),
+                )
+            ).expanduser()
+            if not carpeta_base_cons.exists():
+                st.error(f"La carpeta seleccionada no existe: {carpeta_base_cons}")
+                st.stop()
+            if not incluir_xml and not incluir_pdf:
+                st.warning("Selecciona al menos una opcion: XML o PDF.")
+                st.stop()
+            if modo_fecha_consolidar == "Rango de meses" and int(mes_fin_consolidar) < int(mes_inicio_consolidar):
+                st.error("El mes fin debe ser mayor o igual al mes inicio.")
+                st.stop()
+
+            tipo_visible = TIPOS_MAP.get(tipo_consolidar, tipo_consolidar)
+            tipo_slug = _slug_tipo(tipo_visible or tipo_consolidar)
+            _, _, tipo_prefijo = _prefijo_tipo(tipo_visible or tipo_consolidar)
+            anio_int = int(anio_consolidar)
+            estado_slug = _slug_estado_emitidos(estado_consolidar or "Sin Estado") if origen_consolidar == "Emitidos" else None
+            periodo_suffix = _sufijo_periodo_consolidacion(
+                modo_fecha_consolidar,
+                anio_int,
+                int(mes_inicio_consolidar),
+                int(mes_fin_consolidar),
+                int(dia_consolidar),
+            )
+
+            base_search = _resolver_busqueda_consolidacion(
+                carpeta_base_cons,
+                origen_consolidar,
+                ruc_hint=ruc_consolidar,
+                estado_slug=estado_slug,
+            )
+            if not base_search.exists():
+                st.error(f"No se encontro una carpeta valida para buscar reportes: {base_search}")
+                st.stop()
+
+            prefix_base = "recibidos_reporte" if origen_consolidar == "Recibidos" else "emitidos_reporte"
+            destino_anual_dir = carpeta_base_cons / "Consolidados" / origen_consolidar
+            if origen_consolidar == "Emitidos" and estado_slug:
+                destino_anual_dir = destino_anual_dir / estado_slug
+            if modo_fecha_consolidar == "Ano completo":
+                destino_anual_dir = destino_anual_dir / f"{anio_int:04d}"
+            else:
+                destino_anual_dir = destino_anual_dir / periodo_suffix
+            destino_anual_dir.mkdir(parents=True, exist_ok=True)
+
+            st.caption(f"Buscando reportes en: `{base_search}`")
+            st.caption(f"Guardando consolidados en: `{destino_anual_dir}`")
+
+            if incluir_xml:
+                reportes_xml = _buscar_reportes_por_periodo(
+                    base_search,
+                    origen_consolidar,
+                    tipo_slug,
+                    "xml",
+                    modo_fecha_consolidar,
+                    anio_int,
+                    int(mes_inicio_consolidar),
+                    int(mes_fin_consolidar),
+                    int(dia_consolidar),
+                )
+                xml_files = _colectar_documentos_por_periodo(
+                    base_search,
+                    tipo_prefijo,
+                    "xml",
+                    modo_fecha_consolidar,
+                    anio_int,
+                    int(mes_inicio_consolidar),
+                    int(mes_fin_consolidar),
+                    int(dia_consolidar),
+                    tipo_slug_archivo=tipo_slug,
+                )
+                st.caption(f"Reportes XML base encontrados: {len(reportes_xml)}")
+                st.caption(f"Documentos XML encontrados: {len(xml_files)}")
+                destino_xml = destino_anual_dir / f"{prefix_base}_xml_{tipo_slug}_{periodo_suffix}.xlsx"
+                anual_xml = None
+                if xml_files:
+                    estado_default_reporte = None
+                    if origen_consolidar == "Emitidos":
+                        estado_txt = (estado_consolidar or "").strip().lower()
+                        if "no autoriz" in estado_txt:
+                            estado_default_reporte = estado_consolidar
+                    try:
+                        construir_reporte(base_search, destino_xml, estado_default_reporte, xml_files=xml_files)
+                    except Exception as err:
+                        st.error(f"No se pudo generar el reporte XML desde los documentos: {err}")
+                    if destino_xml.exists():
+                        anual_xml = destino_xml
+                elif reportes_xml:
+                    anual_xml = _consolidar_reportes_xml_desde_excels(reportes_xml, destino_xml)
+                if anual_xml:
+                    st.success(f"Reporte XML consolidado: {anual_xml}")
+                else:
+                    st.info("No se encontraron insumos XML para consolidar.")
+
+                destino_copia_xml = destino_anual_dir / "XML"
+                copiados_xml = _copiar_documentos_unicos(xml_files, destino_copia_xml)
+                if copiados_xml > 0:
+                    st.success(f"XML copiados: {copiados_xml} en `{destino_copia_xml}`")
+                else:
+                    st.info("No se copiaron XML porque no hubo documentos para el periodo seleccionado.")
+
+            if incluir_pdf:
+                reportes_pdf = _buscar_reportes_por_periodo(
+                    base_search,
+                    origen_consolidar,
+                    tipo_slug,
+                    "pdf",
+                    modo_fecha_consolidar,
+                    anio_int,
+                    int(mes_inicio_consolidar),
+                    int(mes_fin_consolidar),
+                    int(dia_consolidar),
+                )
+                pdf_files = _colectar_documentos_por_periodo(
+                    base_search,
+                    tipo_prefijo,
+                    "pdf",
+                    modo_fecha_consolidar,
+                    anio_int,
+                    int(mes_inicio_consolidar),
+                    int(mes_fin_consolidar),
+                    int(dia_consolidar),
+                    tipo_slug_archivo=tipo_slug,
+                )
+                st.caption(f"Reportes PDF encontrados: {len(reportes_pdf)}")
+                st.caption(f"Documentos PDF encontrados: {len(pdf_files)}")
+                if reportes_pdf:
+                    destino_pdf = destino_anual_dir / f"{prefix_base}_pdf_{tipo_slug}_{periodo_suffix}.xlsx"
+                    anual_pdf = _consolidar_reportes_excel(
+                        [str(p) for p in reportes_pdf], destino_pdf
+                    )
+                    if anual_pdf:
+                        st.success(f"Reporte PDF consolidado: {anual_pdf}")
+                    else:
+                        st.error("No se pudo generar el reporte PDF consolidado.")
+                else:
+                    st.info("No se encontraron reportes PDF para consolidar.")
+
+                destino_copia_pdf = destino_anual_dir / "PDF"
+                copiados_pdf = _copiar_documentos_unicos(pdf_files, destino_copia_pdf)
+                if copiados_pdf > 0:
+                    st.success(f"PDF copiados: {copiados_pdf} en `{destino_copia_pdf}`")
+                else:
+                    st.info("No se copiaron PDF porque no hubo documentos para el periodo seleccionado.")
 
 with tab4:
     # ===== Encabezado =====
