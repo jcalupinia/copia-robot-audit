@@ -1133,6 +1133,11 @@ _THEME_TOKENS = {
         "--table-row": "transparent",
         "--table-row-alt": "rgba(255,255,255,0.02)",
         "--table-hover": "#172238",
+        # Sombra y borde de los group cards. En dark no se necesita
+        # elevacion (el borde + bg oscuro ya recortan); en light se usa
+        # una sombra suave para diferenciar visualmente cada paso.
+        "--card-shadow": "none",
+        "--card-border": "#1f2b45",
     },
     "light": {
         # Paleta light del mockup: bg #eef2f8, panel #ffffff, panel-2 #f4f7fb.
@@ -1158,6 +1163,10 @@ _THEME_TOKENS = {
         "--table-row": "#ffffff",
         "--table-row-alt": "#f4f7fb",
         "--table-hover": "#e7edf6",
+        # Sombra elevada + borde mas marcado para que cada step quede
+        # claramente recortado del fondo claro (mismo efecto del mockup).
+        "--card-shadow": "0 2px 6px rgba(30,42,80,0.06), 0 8px 24px rgba(30,42,80,0.05)",
+        "--card-border": "#c2cce0",
     },
 }
 
@@ -1431,6 +1440,58 @@ div[data-testid="stForm"] div[data-baseweb="input"] svg,
 .stApp div[data-baseweb="input"] svg{
   color:var(--text) !important;
   fill:var(--text) !important;
+}
+
+/* ===================== Inputs deshabilitados (paths, lectura) =====================
+   Sin esto el navegador oscurece/desatura el texto y en light queda
+   casi invisible. Forzamos color sólido y opacidad alta. */
+.stApp [data-testid="stTextInput"] input:disabled,
+.stApp [data-testid="stNumberInput"] input:disabled,
+.stApp [data-testid="stTextArea"] textarea:disabled,
+.stApp input:disabled,
+.stApp textarea:disabled{
+  color:var(--text) !important;
+  -webkit-text-fill-color:var(--text) !important;
+  background:var(--input-bg) !important;
+  opacity:.92 !important;
+}
+
+/* ===================== Stepper buttons del number_input (+/-) =====================
+   Streamlit por defecto los pinta oscuros; en modo claro se ven
+   como bloques negros. Forzamos var(--input-bg) + texto temado. */
+.stApp [data-testid="stNumberInput"] button{
+  background:var(--input-bg) !important;
+  color:var(--text) !important;
+  border:1px solid var(--border) !important;
+  box-shadow:none !important;
+}
+.stApp [data-testid="stNumberInput"] button:hover{
+  background:var(--input-bg-hover) !important;
+  border-color:var(--accent) !important;
+}
+.stApp [data-testid="stNumberInput"] button svg,
+.stApp [data-testid="stNumberInput"] button [data-testid="stIcon"]{
+  color:var(--text) !important;
+  fill:var(--text) !important;
+}
+
+/* ===================== Inline `<code>` (markdown backticks) =====================
+   `st.caption(f"... `{path}`")` genera <code> que Streamlit pinta de
+   negro por defecto. En light se ven barras negras ilegibles.
+   Los tematizamos para que respeten claro/oscuro. */
+.stApp [data-testid="stMarkdownContainer"] code,
+.stApp [data-testid="stCaptionContainer"] code,
+.stApp [data-testid="stCaption"] code,
+.stApp p code,
+.stApp small code,
+.stApp code{
+  background:var(--input-bg) !important;
+  color:var(--text) !important;
+  border:1px solid var(--border) !important;
+  padding:.08rem .38rem !important;
+  border-radius:6px !important;
+  font-size:.86em !important;
+  font-family:'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace !important;
 }
 
 /* ===================== Boton primario (submit de formularios) ===================== */
@@ -2095,17 +2156,32 @@ body .stApp .st-key-topbar_container{
   border-color:var(--accent) !important;
   background:var(--input-bg-hover) !important;
 }
-/* Icono usuario: cuadrado 44x44 (icon-only) */
-.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button{
+/* Icono usuario: cuadrado 44x44 (icon-only) — selector permisivo
+   para cubrir cualquier nesting que Streamlit aplique al popover. */
+.stApp .st-key-topbar_container [data-testid="stPopover"] button,
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button,
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > div > button{
   padding:0 !important;
   width:44px !important;
   min-width:44px !important;
+  height:44px !important;
+  min-height:44px !important;
   font-size:1.15rem !important;
   color:var(--text) !important;
+  background:var(--input-bg) !important;
+  border:1px solid var(--border) !important;
+  border-radius:12px !important;
+  box-shadow:none !important;
 }
-.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button:hover{
+.stApp .st-key-topbar_container [data-testid="stPopover"] button:hover,
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > button:hover,
+.stApp .st-key-topbar_container [data-testid="stPopover"] > div > div > button:hover{
   border-color:var(--accent) !important;
   background:var(--input-bg-hover) !important;
+}
+/* Por si Streamlit aplica un span/div interno con color hardcoded */
+.stApp .st-key-topbar_container [data-testid="stPopover"] button *{
+  color:var(--text) !important;
 }
 /* Gap entre los 3 controles unificado */
 .stApp .st-key-topbar_container [data-testid="stHorizontalBlock"]{
@@ -2129,11 +2205,11 @@ body .stApp .st-key-topbar_container{
 */
 .stApp [data-testid="stVerticalBlockBorderWrapper"]:has(> div > div > .group-h-marker){
   background:var(--glass) !important;
-  border:1px solid var(--border) !important;
+  border:1px solid var(--card-border, var(--border)) !important;
   border-radius:var(--radius) !important;
   padding:1.1rem 1.2rem !important;
   margin-bottom:1rem !important;
-  box-shadow:none !important;
+  box-shadow:var(--card-shadow, none) !important;
 }
 .group-h-marker{
   display:flex; align-items:center; gap:.7rem;
