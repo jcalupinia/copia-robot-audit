@@ -1137,7 +1137,7 @@ _THEME_TOKENS = {
         # elevacion (el borde + bg oscuro ya recortan); en light se usa
         # una sombra suave para diferenciar visualmente cada paso.
         "--card-shadow": "none",
-        "--card-border": "#1f2b45",
+        "--card-border": "#ced1adc0",
     },
     "light": {
         # Paleta light del mockup: bg #eef2f8, panel #ffffff, panel-2 #f4f7fb.
@@ -1169,7 +1169,7 @@ _THEME_TOKENS = {
         # a 0.22/0.14 para que los recuadros se vean SIN ambiguedad
         # incluso a primer vistazo.
         "--card-shadow": "0 2px 6px rgba(15,23,42,0.22), 0 12px 28px rgba(15,23,42,0.14)",
-        "--card-border": "#7c8cae",
+        "--card-border": "#666666",
     },
 }
 
@@ -2251,13 +2251,28 @@ body .stApp .st-key-topbar_container{
    Aplicamos look "group" al wrapper que Streamlit renderiza para los
    containers que llevan nuestro header `.group-h-marker` (truco con :has).
 */
+/* La cadena `> div > div > .group-h-marker` matchea SOLO al wrapper
+   que es el PADRE INMEDIATO del marker. Si usaramos `:has(.group-h-marker)`
+   sin la cadena, cualquier ancestro (wrapper externo del tab, wrappers
+   intermedios) tambien matchearia porque tiene markers descendientes
+   transitivos — eso producia bordes redondeados anidados por todos lados. */
 .stApp [data-testid="stVerticalBlockBorderWrapper"]:has(> div > div > .group-h-marker){
   background:var(--glass) !important;
-  border:1px solid var(--card-border, var(--border)) !important;
+  border:1.5px solid var(--card-border, var(--border)) !important;
   border-radius:var(--radius) !important;
   padding:1.1rem 1.2rem !important;
   margin-bottom:1rem !important;
   box-shadow:var(--card-shadow, none) !important;
+}
+/* Quitar borde de contenedores que NO son cards numerados (mismo
+   criterio estricto que el :has de arriba). Asi los wrappers externos
+   o intermedios que contengan cards anidados no muestran su propio
+   borde, padding ni sombra. */
+.stApp [data-testid="stVerticalBlockBorderWrapper"]:not(:has(> div > div > .group-h-marker)){
+  border:none !important;
+  box-shadow:none !important;
+  padding:0 !important;
+  background:transparent !important;
 }
 .group-h-marker{
   display:flex; align-items:center; gap:.7rem;
