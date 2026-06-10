@@ -2180,6 +2180,70 @@ body .stApp [data-testid="stHorizontalBlock"]{
   min-width:0 !important;
   box-sizing:border-box !important;
 }
+
+/* === FIX OVERFLOW GLOBAL DE WIDGETS ===
+   Streamlit's JavaScript calcula el ancho de cada widget basado en
+   el ancho del padre EXTERNO (sin descontar padding) y lo inyecta
+   inline como `style="width: 989px"` o `width="989"`. Cuando el card
+   tiene padding 1.2rem, eso son ~38px de mas que se desbordan a la
+   derecha. Las DevTools del usuario lo confirmaron:
+     - stMultiSelect → style="width: 989.438px"
+     - stElementContainer → width="989.4375"
+     - stTextInput → width="989.437"
+   Forzamos max-width:100% + min-width:0 + box-sizing:border-box en
+   TODOS los testids de widgets de Streamlit Y en sus wrappers BaseWeb.
+   El `!important` derrota tanto el inline style como el atributo HTML. */
+body .stApp [data-testid="stTextInput"],
+body .stApp [data-testid="stTextArea"],
+body .stApp [data-testid="stNumberInput"],
+body .stApp [data-testid="stSelectbox"],
+body .stApp [data-testid="stMultiSelect"],
+body .stApp [data-testid="stDateInput"],
+body .stApp [data-testid="stTimeInput"],
+body .stApp [data-testid="stRadio"],
+body .stApp [data-testid="stCheckbox"],
+body .stApp [data-testid="stSlider"],
+body .stApp [data-testid="stFileUploader"],
+body .stApp [data-testid="stButton"],
+body .stApp [data-testid="stDownloadButton"],
+body .stApp [data-testid="stPopover"],
+body .stApp [data-testid="stExpander"],
+body .stApp [data-testid="stForm"],
+body .stApp [data-testid="stElementContainer"],
+body .stApp [data-testid="stColumn"]{
+  width:auto !important;
+  max-width:100% !important;
+  min-width:0 !important;
+  box-sizing:border-box !important;
+}
+/* Wrappers BaseWeb internos (input, select, popover, textarea). */
+body .stApp [data-baseweb="input"],
+body .stApp [data-baseweb="base-input"],
+body .stApp [data-baseweb="select"],
+body .stApp [data-baseweb="textarea"],
+body .stApp [data-baseweb="checkbox"],
+body .stApp [data-baseweb="radio"]{
+  max-width:100% !important;
+  min-width:0 !important;
+  box-sizing:border-box !important;
+}
+/* Header de los group cards: el .group-h-marker es flex con title +
+   subtitle (small a la derecha via margin-left:auto). Aseguramos que
+   tampoco se pase del card. */
+.group-h-marker{
+  max-width:100% !important;
+  min-width:0 !important;
+  flex-wrap:nowrap;
+  overflow:hidden;
+}
+.group-h-marker small{
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  min-width:0;
+  flex:0 1 auto;
+}
+
 /* Evitar scroll horizontal a nivel del body por cualquier overflow. */
 body{
   overflow-x:hidden !important;
