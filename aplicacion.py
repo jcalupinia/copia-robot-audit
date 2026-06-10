@@ -1271,6 +1271,66 @@ div[data-testid="stDecoration"]{
   color:var(--text-strong) !important;
   letter-spacing:-0.01em;
 }
+/* ===== Pills de estado y autorizacion (historial — estilo mockup) ===== */
+.pill{
+  display:inline-flex; align-items:center; gap:.35rem;
+  padding:.18rem .65rem;
+  border-radius:999px;
+  font-size:.78rem; font-weight:600;
+  border:1px solid transparent;
+  line-height:1;
+}
+/* Estado: ok verde, pendiente amarillo, error rojo, otros gris */
+.pill-ok{
+  background:color-mix(in srgb, #10b981 18%, transparent);
+  color:#10b981; border-color:color-mix(in srgb, #10b981 35%, transparent);
+}
+.pill-pendiente{
+  background:color-mix(in srgb, #f59e0b 18%, transparent);
+  color:#f59e0b; border-color:color-mix(in srgb, #f59e0b 35%, transparent);
+}
+.pill-error{
+  background:color-mix(in srgb, #ef4444 18%, transparent);
+  color:#ef4444; border-color:color-mix(in srgb, #ef4444 35%, transparent);
+}
+.pill-other{
+  background:color-mix(in srgb, var(--text-muted) 15%, transparent);
+  color:var(--text-muted); border-color:var(--border);
+}
+/* Autorizacion: Autorizados azul, No autorizados naranja */
+.pill-auth-yes{
+  background:color-mix(in srgb, #3b82f6 18%, transparent);
+  color:#3b82f6; border-color:color-mix(in srgb, #3b82f6 35%, transparent);
+}
+.pill-auth-no{
+  background:color-mix(in srgb, #f97316 18%, transparent);
+  color:#f97316; border-color:color-mix(in srgb, #f97316 35%, transparent);
+}
+.pill-auth-none{
+  background:color-mix(in srgb, var(--text-muted) 15%, transparent);
+  color:var(--text-muted); border-color:var(--border);
+}
+
+/* Total de operaciones — barra inferior del historial con badge verde */
+.historial-total{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-top:.8rem; padding:.7rem 1rem;
+  background:color-mix(in srgb, var(--glass) 90%, transparent);
+  border:1px solid var(--border); border-radius:12px;
+}
+.historial-total-label{
+  font-weight:600; color:var(--text);
+}
+.historial-total-badge{
+  display:inline-flex; align-items:center; gap:.35rem;
+  padding:.22rem .7rem;
+  border-radius:999px;
+  font-size:.82rem; font-weight:700;
+  background:color-mix(in srgb, #10b981 20%, transparent);
+  color:#10b981;
+  border:1px solid color-mix(in srgb, #10b981 40%, transparent);
+}
+
 .auth-title{
   text-align:center;
   font-size:1.95rem;
@@ -4576,193 +4636,191 @@ with tab2:
         "</div>",
         unsafe_allow_html=True,
     )
-    st.markdown('<h3 class="section-title">Reporte por fechas</h3>', unsafe_allow_html=True)
-    st.caption("Genera un Excel desde una carpeta ya descargada. Se usarán XML cuando existan y PDF como respaldo para los documentos sin XML.")
+    with _group_card(1, "Reporte por fechas", "Excel y PDF"):
 
-    if "custom_report_base_dir" not in st.session_state:
-        st.session_state["custom_report_base_dir"] = st.session_state.get("download_base_dir", str(DESC_DIR))
-    if "_custom_report_base_dir_pending" in st.session_state:
-        pending_custom_dir = st.session_state.pop("_custom_report_base_dir_pending")
-        st.session_state["custom_report_base_dir"] = pending_custom_dir
-        st.session_state["custom_report_base_dir_input"] = pending_custom_dir
-    if "custom_report_base_dir_input" not in st.session_state:
-        st.session_state["custom_report_base_dir_input"] = st.session_state.get("custom_report_base_dir", str(DESC_DIR))
-    custom_dir_value = st.session_state.get("custom_report_base_dir_input", str(DESC_DIR))
-    st.text_input(
-        "Carpeta fuente",
-        key="custom_report_base_dir_input",
-        help="Selecciona la carpeta donde ya tienes descargados los comprobantes.",
-    )
-    if st.button("Seleccionar carpeta fuente", key="btn_select_custom_report_dir"):
-        seleccionada, error = _select_directory_dialog(custom_dir_value)
-        if seleccionada:
-            st.session_state["_custom_report_base_dir_pending"] = str(Path(seleccionada).expanduser())
-            st.rerun()
-        if error:
-            st.warning(error)
-
-    meses_es_report = [
-        "Enero",
-        "Febrero",
-        "Marzo",
-        "Abril",
-        "Mayo",
-        "Junio",
-        "Julio",
-        "Agosto",
-        "Septiembre",
-        "Octubre",
-        "Noviembre",
-        "Diciembre",
-    ]
-    cr1, cr2, cr3 = st.columns([1.2, 1.2, 1.2])
-    with cr1:
-        custom_origen = st.selectbox("Origen", ["Recibidos", "Emitidos"], key="custom_report_origen")
-    with cr2:
-        custom_tipo = st.selectbox(
-            "Tipo de comprobante",
-            [
-                "Facturas",
-                "Retenciones",
-                "Notas de crédito",
-                "Notas de débito",
-                "Liquidación de compra",
-                "Guía de remisión",
-            ],
-            key="custom_report_tipo",
+        if "custom_report_base_dir" not in st.session_state:
+            st.session_state["custom_report_base_dir"] = st.session_state.get("download_base_dir", str(DESC_DIR))
+        if "_custom_report_base_dir_pending" in st.session_state:
+            pending_custom_dir = st.session_state.pop("_custom_report_base_dir_pending")
+            st.session_state["custom_report_base_dir"] = pending_custom_dir
+            st.session_state["custom_report_base_dir_input"] = pending_custom_dir
+        if "custom_report_base_dir_input" not in st.session_state:
+            st.session_state["custom_report_base_dir_input"] = st.session_state.get("custom_report_base_dir", str(DESC_DIR))
+        custom_dir_value = st.session_state.get("custom_report_base_dir_input", str(DESC_DIR))
+        st.text_input(
+            "Carpeta fuente",
+            key="custom_report_base_dir_input",
+            help="Selecciona la carpeta donde ya tienes descargados los comprobantes.",
         )
-    with cr3:
-        custom_estado_emitidos = None
-        if custom_origen == "Emitidos":
-            custom_estado_emitidos = st.selectbox(
-                "Estado de autorización",
-                ["Autorizados", "No autorizados"],
-                key="custom_report_estado_emitidos",
-            )
+        if st.button("Seleccionar carpeta fuente", key="btn_select_custom_report_dir"):
+            seleccionada, error = _select_directory_dialog(custom_dir_value)
+            if seleccionada:
+                st.session_state["_custom_report_base_dir_pending"] = str(Path(seleccionada).expanduser())
+                st.rerun()
+            if error:
+                st.warning(error)
 
-    custom_mode = st.radio(
-        "Modo de fecha",
-        ["Día específico", "Mes completo", "Rango de fechas", "Rango de meses", "Año completo"],
-        horizontal=True,
-        key="custom_report_mode",
-    )
-    fecha_inicio_custom = None
-    fecha_fin_custom = None
-    today_local = date.today()
-    if custom_mode == "Día específico":
-        fecha_unica = st.date_input("Fecha", value=today_local, key="custom_report_single_date")
-        fecha_inicio_custom = fecha_unica
-        fecha_fin_custom = fecha_unica
-    elif custom_mode == "Mes completo":
-        cm1, cm2 = st.columns([1, 1])
-        with cm1:
-            custom_year = st.number_input(
-                "Año",
-                min_value=2015,
-                max_value=today_local.year,
-                value=today_local.year,
-                step=1,
-                key="custom_report_year_month",
+        meses_es_report = [
+            "Enero",
+            "Febrero",
+            "Marzo",
+            "Abril",
+            "Mayo",
+            "Junio",
+            "Julio",
+            "Agosto",
+            "Septiembre",
+            "Octubre",
+            "Noviembre",
+            "Diciembre",
+        ]
+        cr1, cr2, cr3 = st.columns([1.2, 1.2, 1.2])
+        with cr1:
+            custom_origen = st.selectbox("Origen", ["Recibidos", "Emitidos"], key="custom_report_origen")
+        with cr2:
+            custom_tipo = st.selectbox(
+                "Tipo de comprobante",
+                [
+                    "Facturas",
+                    "Retenciones",
+                    "Notas de crédito",
+                    "Notas de débito",
+                    "Liquidación de compra",
+                    "Guía de remisión",
+                ],
+                key="custom_report_tipo",
             )
-        with cm2:
-            custom_month_label = st.selectbox(
-                "Mes",
-                meses_es_report,
-                index=max(0, today_local.month - 1),
-                key="custom_report_month_label",
-            )
-        custom_month = meses_es_report.index(custom_month_label) + 1
-        fecha_inicio_custom = date(int(custom_year), custom_month, 1)
-        fecha_fin_custom = date(int(custom_year), custom_month, calendar.monthrange(int(custom_year), custom_month)[1])
-    elif custom_mode == "Rango de fechas":
-        rf1, rf2 = st.columns([1, 1])
-        with rf1:
-            fecha_inicio_custom = st.date_input("Fecha inicio", value=today_local.replace(day=1), key="custom_report_start_date")
-        with rf2:
-            fecha_fin_custom = st.date_input("Fecha fin", value=today_local, key="custom_report_end_date")
-    elif custom_mode == "Rango de meses":
-        rm1, rm2, rm3 = st.columns([1, 1, 1])
-        with rm1:
-            custom_year = st.number_input(
-                "Año",
-                min_value=2015,
-                max_value=today_local.year,
-                value=today_local.year,
-                step=1,
-                key="custom_report_year_range",
-            )
-        with rm2:
-            custom_month_start_label = st.selectbox(
-                "Mes inicio",
-                meses_es_report,
-                index=0,
-                key="custom_report_month_start",
-            )
-        with rm3:
-            custom_month_end_label = st.selectbox(
-                "Mes fin",
-                meses_es_report,
-                index=max(0, today_local.month - 1),
-                key="custom_report_month_end",
-            )
-        custom_month_start = meses_es_report.index(custom_month_start_label) + 1
-        custom_month_end = meses_es_report.index(custom_month_end_label) + 1
-        fecha_inicio_custom = date(int(custom_year), custom_month_start, 1)
-        fecha_fin_custom = date(int(custom_year), custom_month_end, calendar.monthrange(int(custom_year), custom_month_end)[1])
-    else:
-        custom_year = st.number_input(
-            "Año",
-            min_value=2015,
-            max_value=today_local.year,
-            value=today_local.year,
-            step=1,
-            key="custom_report_year_full",
+        with cr3:
+            custom_estado_emitidos = None
+            if custom_origen == "Emitidos":
+                custom_estado_emitidos = st.selectbox(
+                    "Estado de autorización",
+                    ["Autorizados", "No autorizados"],
+                    key="custom_report_estado_emitidos",
+                )
+
+        custom_mode = st.radio(
+            "Modo de fecha",
+            ["Día específico", "Mes completo", "Rango de fechas", "Rango de meses", "Año completo"],
+            horizontal=True,
+            key="custom_report_mode",
         )
-        fecha_inicio_custom = date(int(custom_year), 1, 1)
-        fecha_fin_custom = date(int(custom_year), 12, 31)
-
-    if st.button("Generar reporte por fechas", key="btn_generate_custom_report", use_container_width=True):
-        source_dir = Path(st.session_state.get("custom_report_base_dir_input") or "").expanduser()
-        if not source_dir.exists():
-            st.error("La carpeta fuente no existe. Selecciona una ruta válida.")
-        elif fecha_inicio_custom is None or fecha_fin_custom is None:
-            st.error("Debes definir un rango de fechas válido.")
-        elif fecha_inicio_custom > fecha_fin_custom:
-            st.error("La fecha inicio no puede ser mayor que la fecha fin.")
+        fecha_inicio_custom = None
+        fecha_fin_custom = None
+        today_local = date.today()
+        if custom_mode == "Día específico":
+            fecha_unica = st.date_input("Fecha", value=today_local, key="custom_report_single_date")
+            fecha_inicio_custom = fecha_unica
+            fecha_fin_custom = fecha_unica
+        elif custom_mode == "Mes completo":
+            cm1, cm2 = st.columns([1, 1])
+            with cm1:
+                custom_year = st.number_input(
+                    "Año",
+                    min_value=2015,
+                    max_value=today_local.year,
+                    value=today_local.year,
+                    step=1,
+                    key="custom_report_year_month",
+                )
+            with cm2:
+                custom_month_label = st.selectbox(
+                    "Mes",
+                    meses_es_report,
+                    index=max(0, today_local.month - 1),
+                    key="custom_report_month_label",
+                )
+            custom_month = meses_es_report.index(custom_month_label) + 1
+            fecha_inicio_custom = date(int(custom_year), custom_month, 1)
+            fecha_fin_custom = date(int(custom_year), custom_month, calendar.monthrange(int(custom_year), custom_month)[1])
+        elif custom_mode == "Rango de fechas":
+            rf1, rf2 = st.columns([1, 1])
+            with rf1:
+                fecha_inicio_custom = st.date_input("Fecha inicio", value=today_local.replace(day=1), key="custom_report_start_date")
+            with rf2:
+                fecha_fin_custom = st.date_input("Fecha fin", value=today_local, key="custom_report_end_date")
+        elif custom_mode == "Rango de meses":
+            rm1, rm2, rm3 = st.columns([1, 1, 1])
+            with rm1:
+                custom_year = st.number_input(
+                    "Año",
+                    min_value=2015,
+                    max_value=today_local.year,
+                    value=today_local.year,
+                    step=1,
+                    key="custom_report_year_range",
+                )
+            with rm2:
+                custom_month_start_label = st.selectbox(
+                    "Mes inicio",
+                    meses_es_report,
+                    index=0,
+                    key="custom_report_month_start",
+                )
+            with rm3:
+                custom_month_end_label = st.selectbox(
+                    "Mes fin",
+                    meses_es_report,
+                    index=max(0, today_local.month - 1),
+                    key="custom_report_month_end",
+                )
+            custom_month_start = meses_es_report.index(custom_month_start_label) + 1
+            custom_month_end = meses_es_report.index(custom_month_end_label) + 1
+            fecha_inicio_custom = date(int(custom_year), custom_month_start, 1)
+            fecha_fin_custom = date(int(custom_year), custom_month_end, calendar.monthrange(int(custom_year), custom_month_end)[1])
         else:
-            resultado_custom = _build_custom_report_from_folder(
-                source_dir,
-                origen=custom_origen,
-                tipo=custom_tipo,
-                fecha_inicio=fecha_inicio_custom,
-                fecha_fin=fecha_fin_custom,
-                estado_emitidos=custom_estado_emitidos,
+            custom_year = st.number_input(
+                "Año",
+                min_value=2015,
+                max_value=today_local.year,
+                value=today_local.year,
+                step=1,
+                key="custom_report_year_full",
             )
-            st.session_state["custom_report_result"] = resultado_custom
+            fecha_inicio_custom = date(int(custom_year), 1, 1)
+            fecha_fin_custom = date(int(custom_year), 12, 31)
 
-    custom_report_result = st.session_state.get("custom_report_result")
-    if isinstance(custom_report_result, dict):
-        if custom_report_result.get("ok") and custom_report_result.get("path"):
-            output_path = Path(custom_report_result["path"])
-            st.success(
-                f"Reporte generado. Documentos incluidos: {custom_report_result.get('rows', 0)} "
-                f"(XML: {custom_report_result.get('xml_count', 0)} | PDF: {custom_report_result.get('pdf_count', 0)})."
-            )
-            if custom_report_result.get("errors"):
-                st.caption(f"PDF con advertencias omitidos: {len(custom_report_result.get('errors') or [])}")
-            if output_path.exists():
-                with open(output_path, "rb") as custom_file:
-                    st.download_button(
-                        "Descargar reporte por fechas",
-                        custom_file,
-                        file_name=output_path.name,
-                        use_container_width=True,
-                        key="btn_download_custom_report",
-                    )
-        elif custom_report_result.get("message"):
-            st.warning(custom_report_result.get("message"))
+        if st.button("Generar reporte por fechas", key="btn_generate_custom_report", use_container_width=True):
+            source_dir = Path(st.session_state.get("custom_report_base_dir_input") or "").expanduser()
+            if not source_dir.exists():
+                st.error("La carpeta fuente no existe. Selecciona una ruta válida.")
+            elif fecha_inicio_custom is None or fecha_fin_custom is None:
+                st.error("Debes definir un rango de fechas válido.")
+            elif fecha_inicio_custom > fecha_fin_custom:
+                st.error("La fecha inicio no puede ser mayor que la fecha fin.")
+            else:
+                resultado_custom = _build_custom_report_from_folder(
+                    source_dir,
+                    origen=custom_origen,
+                    tipo=custom_tipo,
+                    fecha_inicio=fecha_inicio_custom,
+                    fecha_fin=fecha_fin_custom,
+                    estado_emitidos=custom_estado_emitidos,
+                )
+                st.session_state["custom_report_result"] = resultado_custom
 
-    st.markdown("---")
+        custom_report_result = st.session_state.get("custom_report_result")
+        if isinstance(custom_report_result, dict):
+            if custom_report_result.get("ok") and custom_report_result.get("path"):
+                output_path = Path(custom_report_result["path"])
+                st.success(
+                    f"Reporte generado. Documentos incluidos: {custom_report_result.get('rows', 0)} "
+                    f"(XML: {custom_report_result.get('xml_count', 0)} | PDF: {custom_report_result.get('pdf_count', 0)})."
+                )
+                if custom_report_result.get("errors"):
+                    st.caption(f"PDF con advertencias omitidos: {len(custom_report_result.get('errors') or [])}")
+                if output_path.exists():
+                    with open(output_path, "rb") as custom_file:
+                        st.download_button(
+                            "Descargar reporte por fechas",
+                            custom_file,
+                            file_name=output_path.name,
+                            use_container_width=True,
+                            key="btn_download_custom_report",
+                        )
+            elif custom_report_result.get("message"):
+                st.warning(custom_report_result.get("message"))
+
     st.markdown('<h3 class="historial-title">Historial de ejecuciones recientes</h3>', unsafe_allow_html=True)
     historial = obtener_historial(DEVICE_FINGERPRINT)
     historial_raw = historial.copy()
@@ -5035,6 +5093,35 @@ with tab2:
         historial.insert(0, "No.", range(1, len(historial) + 1))
         historial = historial.rename(columns=columnas_amigables)
 
+
+        # Pills coloreadas para ESTADO y AUTORIZACION (estilo mockup).
+        def _pill_estado(val):
+            v = str(val).strip().lower()
+            if v in {'ok', 'exitoso', 'completado'}:
+                cls = 'pill pill-ok'
+            elif v in {'pendiente', 'en proceso', 'procesando'}:
+                cls = 'pill pill-pendiente'
+            elif v in {'error', 'fallido'}:
+                cls = 'pill pill-error'
+            else:
+                cls = 'pill pill-other'
+            return f"<span class='{cls}'>&#9679; {html.escape(str(val))}</span>"
+
+        def _pill_autorizacion(val):
+            v = str(val).strip().lower()
+            if 'no autoriz' in v:
+                cls = 'pill pill-auth-no'
+            elif 'autoriz' in v:
+                cls = 'pill pill-auth-yes'
+            else:
+                cls = 'pill pill-auth-none'
+            return f"<span class='{cls}'>&#9679; {html.escape(str(val))}</span>"
+
+        if 'Estado' in historial.columns:
+            historial['Estado'] = historial['Estado'].apply(_pill_estado)
+        if 'Estado autorización' in historial.columns:
+            historial['Estado autorización'] = historial['Estado autorización'].apply(_pill_autorizacion)
+
         tabla_html = historial.to_html(
             index=False,
             escape=False,
@@ -5042,7 +5129,14 @@ with tab2:
             classes="historial-table-grid",
         )
         st.markdown(f"<div class='historial-table'>{tabla_html}</div>", unsafe_allow_html=True)
-        st.success(f" Total de operaciones registradas: {len(historial)}")
+        _total_count = len(historial)
+        st.markdown(
+            f'<div class="historial-total">'
+            f'<span class="historial-total-label">Total de operaciones registradas</span>'
+            f'<span class="historial-total-badge">&#9679; {_total_count}</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         descargables = []
         if isinstance(historial_raw, pd.DataFrame):
