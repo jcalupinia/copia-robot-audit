@@ -2169,6 +2169,21 @@ body .stApp [data-testid="stMainBlockContainer"]{
   padding-left:clamp(1rem, 2.5vw, 2.5rem) !important;
   padding-right:clamp(1rem, 2.5vw, 2.5rem) !important;
 }
+
+/* === GLOBAL: ningun stVerticalBlock/stHorizontalBlock puede pasarse
+   de su padre. Streamlit a veces les inyecta un width inline que
+   ignora el padding de su contenedor — esto evita overflow horizontal
+   en TODA la app, no solo en cards. */
+body .stApp [data-testid="stVerticalBlock"],
+body .stApp [data-testid="stHorizontalBlock"]{
+  max-width:100% !important;
+  min-width:0 !important;
+  box-sizing:border-box !important;
+}
+/* Evitar scroll horizontal a nivel del body por cualquier overflow. */
+body{
+  overflow-x:hidden !important;
+}
 body .stApp .st-key-topbar_container{
   /* El topbar es fixed → vive afuera del block-container, por eso
      necesita su propio padding (ya definido arriba como 0 ... 1.8rem). */
@@ -2278,28 +2293,36 @@ body .stApp .st-key-topbar_container{
   margin-bottom:1rem !important;
   box-shadow:var(--card-shadow, none) !important;
   box-sizing:border-box !important;
-  overflow:hidden !important;
 }
-/* Fix de desfase: Streamlit le pone un `width="N"` INLINE al
-   stVerticalBlock interno calculado sobre el ancho del wrapper
-   EXTERNO — sin descontar el padding del card. Resultado: el
-   bloque interno termina mas ancho que el area de contenido
-   disponible y los inputs se desbordan por la derecha (visible
-   sobre todo en el modo claro donde el borde define el limite).
-   Forzamos width/max-width 100% con box-sizing border-box para
-   que respete el padding del card. */
-.stApp [class*="st-key-group_card_"] [data-testid="stVerticalBlock"]{
-  width:100% !important;
-  max-width:100% !important;
-  box-sizing:border-box !important;
-}
-.stApp [class*="st-key-group_card_"] [data-testid="stHorizontalBlock"]{
-  width:100% !important;
-  max-width:100% !important;
-  box-sizing:border-box !important;
-}
+/* Fix de desfase: Streamlit le pone un `width="N"` INLINE
+   (atributo HTML + a veces style="width:Npx") al stVerticalBlock
+   y a otros wrappers internos, calculado sobre el ancho del wrapper
+   EXTERNO sin descontar el padding del card. Resultado: los inputs
+   y botones se desbordan por la derecha. Solucion: forzar width:100%
+   en TODA la cadena descendiente con !important + min-width:0 (para
+   que los flex children no se nieguen a encogerse). Sin `overflow:hidden`
+   porque el usuario quiere ver todo el contenido — confiamos en que
+   las constraints de ancho lo mantengan adentro. */
+.stApp [class*="st-key-group_card_"] [data-testid="stVerticalBlock"],
+.stApp [class*="st-key-group_card_"] [data-testid="stHorizontalBlock"],
+.stApp [class*="st-key-group_card_"] [data-testid="column"],
 .stApp [class*="st-key-group_card_"] [data-testid="element-container"]{
+  width:100% !important;
   max-width:100% !important;
+  min-width:0 !important;
+  box-sizing:border-box !important;
+}
+/* Inputs/textfields/botones tampoco deben pasarse del contenedor.
+   Streamlit a veces les pone min-width hardcoded que les impide
+   encogerse cuando el padre se reduce — lo reseteamos. */
+.stApp [class*="st-key-group_card_"] input,
+.stApp [class*="st-key-group_card_"] textarea,
+.stApp [class*="st-key-group_card_"] button,
+.stApp [class*="st-key-group_card_"] [data-baseweb="input"],
+.stApp [class*="st-key-group_card_"] [data-baseweb="base-input"],
+.stApp [class*="st-key-group_card_"] [data-baseweb="select"]{
+  max-width:100% !important;
+  min-width:0 !important;
   box-sizing:border-box !important;
 }
 /* Cualquier OTRO `stVerticalBlockBorderWrapper` (que NO sea card
