@@ -4185,7 +4185,16 @@ with tab1:
                 delete_download_checkpoint(pending_download_checkpoint.get("_path"))
                 st.rerun()
 
-    col_title, col_tour_link = st.columns([5, 1.6])
+    # vertical_alignment="center" centra el boton verticalmente con
+    # el bloque h1+subtitulo (sin esto Streamlit lo deja arriba por
+    # default, donde queda visualmente desfasado).
+    try:
+        col_title, col_tour_link = st.columns(
+            [5, 1.6], vertical_alignment="center"
+        )
+    except TypeError:
+        # vertical_alignment llego en Streamlit 1.36; fallback sin el kwarg.
+        col_title, col_tour_link = st.columns([5, 1.6])
     with col_title:
         st.markdown(
             "<div class='pagehead'>"
@@ -4195,7 +4204,11 @@ with tab1:
             unsafe_allow_html=True,
         )
     with col_tour_link:
-        if st.button("Primera vez? Ver tour", key="btn_open_tour"):
+        if st.button(
+            "Primera vez? Ver tour",
+            key="btn_open_tour",
+            use_container_width=True,
+        ):
             _start_first_use_tour(reset_step=True)
             st.rerun()
 
