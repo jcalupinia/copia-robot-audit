@@ -2159,8 +2159,13 @@ button[kind="header"][data-testid="baseButton-header"]{
 }
 
 /* Compensar el contenido lateral con un padding pequeno DENTRO del
-   spacer (no del topbar) para que tabs y forms no toquen el borde. */
-body .stApp section.main > div.block-container{
+   spacer (no del topbar) para que tabs y forms no toquen el borde.
+   IMPORTANTE: Hay que incluir el testid stMainBlockContainer (que es
+   el que usa Streamlit 1.39+) además del block-container clásico,
+   sino los cards se pegan a los bordes del viewport y el subtítulo
+   "Datos del SRI" / "Qué descargar" se sale visualmente. */
+body .stApp section.main > div.block-container,
+body .stApp [data-testid="stMainBlockContainer"]{
   padding-left:clamp(1rem, 2.5vw, 2.5rem) !important;
   padding-right:clamp(1rem, 2.5vw, 2.5rem) !important;
 }
