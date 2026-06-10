@@ -2210,7 +2210,12 @@ body .stApp [data-testid="stPopover"],
 body .stApp [data-testid="stExpander"],
 body .stApp [data-testid="stForm"],
 body .stApp [data-testid="stElementContainer"],
-body .stApp [data-testid="stColumn"]{
+body .stApp [data-testid="stColumn"],
+body .stApp [data-testid="stMarkdown"],
+body .stApp [data-testid="stMarkdownContainer"],
+body .stApp [data-testid="stCaption"],
+body .stApp [data-testid="stCaptionContainer"],
+body .stApp [data-testid^="stHeading"]{
   width:auto !important;
   max-width:100% !important;
   min-width:0 !important;
