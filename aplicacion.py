@@ -1836,7 +1836,7 @@ section[data-testid="stSidebar"] img{
 
 /* Brand (solo logo) */
 .brand{display:flex; align-items:center; justify-content:center; gap:0; white-space:nowrap; margin:0 !important; padding:0 !important; line-height:1; width:100%; height:auto}
-.brand img{height:90px; width:auto; mix-blend-mode:screen; flex-shrink:0; margin:0 !important; padding:0}
+.brand img{height: clamp(35px, 10vw, 90px); width:auto; mix-blend-mode:screen; flex-shrink:0; margin:0 !important; padding:0; margin-top:-25px !important}
 .brand .divider{display:none}
 .brand span{display:none}
 
