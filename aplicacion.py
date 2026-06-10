@@ -471,6 +471,9 @@ def _asset_data_uri(filename: str) -> str:
     return f"data:{mime};base64,{encoded}"
 
 
+_group_card_counter = {"n": 0}
+
+
 @contextlib.contextmanager
 def _group_card(step: int | str, title: str, subtitle: str = ""):
     """Context manager para envolver una seccion como `.group` del mockup
@@ -479,10 +482,18 @@ def _group_card(step: int | str, title: str, subtitle: str = ""):
         with _group_card(1, "Credenciales", "Datos del SRI"):
             ...widgets de Streamlit...
 
-    Internamente usa st.container(border=True) y el truco de :has() para
-    aplicar el aspecto del mockup (ver CSS .group-h-marker).
+    Internamente usa st.container(border=True, key=...) y un selector
+    CSS sobre la clase `st-key-group_card_N` que Streamlit emite en el
+    wrapper. Este enfoque es ROBUSTO al nesting del DOM (no depende
+    de la profundidad del marker como hacia el truco de :has() — que
+    se rompia cuando Streamlit metia divs intermedios extra).
     """
-    container = st.container(border=True)
+    # Contador por rerun — Streamlit reinicia el script en cada rerun,
+    # asi que el counter vuelve a 0 y las keys quedan estables entre
+    # reruns para que el mismo card mantenga su clase.
+    _group_card_counter["n"] += 1
+    card_key = f"group_card_{_group_card_counter['n']}"
+    container = st.container(border=True, key=card_key)
     with container:
         subtitle_html = f"<small>{html.escape(subtitle)}</small>" if subtitle else ""
         st.markdown(
@@ -2251,12 +2262,12 @@ body .stApp .st-key-topbar_container{
    Aplicamos look "group" al wrapper que Streamlit renderiza para los
    containers que llevan nuestro header `.group-h-marker` (truco con :has).
 */
-/* La cadena `> div > div > .group-h-marker` matchea SOLO al wrapper
-   que es el PADRE INMEDIATO del marker. Si usaramos `:has(.group-h-marker)`
-   sin la cadena, cualquier ancestro (wrapper externo del tab, wrappers
-   intermedios) tambien matchearia porque tiene markers descendientes
-   transitivos — eso producia bordes redondeados anidados por todos lados. */
-.stApp [data-testid="stVerticalBlockBorderWrapper"]:has(> div > div > .group-h-marker){
+/* Streamlit emite `class="st-key-group_card_N"` en el wrapper del
+   container cuando le pasamos `key="group_card_N"`. Esto nos permite
+   targetear DIRECTAMENTE los cards numerados sin depender de :has()
+   con cadenas de descendientes (que se rompia cuando Streamlit metia
+   divs extra en el DOM). */
+.stApp [data-testid="stVerticalBlockBorderWrapper"][class*="st-key-group_card_"]{
   background:var(--glass) !important;
   border:1.5px solid var(--card-border, var(--border)) !important;
   border-radius:var(--radius) !important;
@@ -2264,11 +2275,11 @@ body .stApp .st-key-topbar_container{
   margin-bottom:1rem !important;
   box-shadow:var(--card-shadow, none) !important;
 }
-/* Quitar borde de contenedores que NO son cards numerados (mismo
-   criterio estricto que el :has de arriba). Asi los wrappers externos
-   o intermedios que contengan cards anidados no muestran su propio
-   borde, padding ni sombra. */
-.stApp [data-testid="stVerticalBlockBorderWrapper"]:not(:has(> div > div > .group-h-marker)){
+/* Cualquier OTRO `stVerticalBlockBorderWrapper` (que NO sea card
+   numerado) queda neutro: sin borde, sin sombra, sin padding extra
+   ni background. Asi los wrappers externos del tab y los intermedios
+   no muestran sus bordes default. */
+.stApp [data-testid="stVerticalBlockBorderWrapper"]:not([class*="st-key-group_card_"]){
   border:none !important;
   box-shadow:none !important;
   padding:0 !important;
