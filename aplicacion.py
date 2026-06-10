@@ -1163,10 +1163,12 @@ _THEME_TOKENS = {
         "--table-row": "#ffffff",
         "--table-row-alt": "#f4f7fb",
         "--table-hover": "#e7edf6",
-        # Sombra elevada + borde mas marcado para que cada step quede
-        # claramente recortado del fondo claro (mismo efecto del mockup).
-        "--card-shadow": "0 2px 6px rgba(30,42,80,0.06), 0 8px 24px rgba(30,42,80,0.05)",
-        "--card-border": "#c2cce0",
+        # Sombra elevada + borde marcado para que cada step quede
+        # claramente recortado del fondo claro. Valores anteriores
+        # (5-6% opacidad, borde #c2cce0) eran demasiado sutiles para
+        # diferenciar las cards del bg gris claro de la pagina.
+        "--card-shadow": "0 1px 3px rgba(15,23,42,0.14), 0 6px 18px rgba(15,23,42,0.10)",
+        "--card-border": "#a4afca",
     },
 }
 
@@ -1535,30 +1537,30 @@ div[data-testid="stForm"] button[data-testid="baseButton-primary"]:disabled{
   border-color:var(--accent) !important;
   transform:translateY(-1px);
 }
-button[aria-label=" Iniciar proceso"],
-button[aria-label="Iniciar proceso"]{
+/* Botones Iniciar/Detener proceso — los aria-label ahora incluyen
+   los emojis ▶️ / ⏹️ porque agregamos iconos al label visible.
+   Mantenemos los selectores antiguos por compatibilidad si alguien
+   revierte el cambio del label. */
+button[aria-label*="Iniciar proceso"]{
   background:linear-gradient(135deg, #16a34a 0%, #22c55e 100%) !important;
   border:none !important;
   color:#ffffff !important;
   font-weight:700 !important;
   box-shadow:0 12px 28px rgba(34,197,94,0.32) !important;
 }
-button[aria-label=" Iniciar proceso"]:hover,
-button[aria-label="Iniciar proceso"]:hover{
+button[aria-label*="Iniciar proceso"]:hover{
   transform:translateY(-2px);
   filter:brightness(1.08);
   box-shadow:0 16px 36px rgba(34,197,94,0.45) !important;
 }
-button[aria-label=" Detener proceso"],
-button[aria-label="Detener proceso"]{
+button[aria-label*="Detener proceso"]{
   background:linear-gradient(135deg, #dc2626 0%, #ef4444 100%) !important;
   border:none !important;
   color:#ffffff !important;
   font-weight:700 !important;
   box-shadow:0 12px 28px rgba(239,68,68,0.30) !important;
 }
-button[aria-label=" Detener proceso"]:hover,
-button[aria-label="Detener proceso"]:hover{
+button[aria-label*="Detener proceso"]:hover{
   transform:translateY(-2px);
   filter:brightness(1.08);
   box-shadow:0 16px 36px rgba(239,68,68,0.42) !important;
@@ -2067,6 +2069,43 @@ section[data-testid="stSidebar"] img{
   gap:.4rem !important;
 }
 
+/* ===== Panel flotante del popover (dropdown del menu de usuario) =====
+   El panel se monta via portal FUERA de la cadena `.stApp`, asi que
+   los selectores prefijados con `.stApp` no lo alcanzan. Usamos los
+   testids/atributos de Streamlit y BaseWeb directos para tematizarlo.
+   Sin esto el panel toma un fondo oscuro por default y en modo claro
+   el email queda casi invisible (texto dark sobre bg dark). */
+[data-testid="stPopoverBody"],
+[data-baseweb="popover"] [data-baseweb="popover-inner"],
+[data-baseweb="popover"] > div > div{
+  background:var(--glass) !important;
+  color:var(--text) !important;
+  border:1px solid var(--border) !important;
+  border-radius:12px !important;
+  box-shadow:var(--shadow) !important;
+}
+[data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"],
+[data-baseweb="popover"] [data-testid="stMarkdownContainer"]{
+  color:var(--text) !important;
+}
+/* Boton "Cerrar sesion" dentro del popover — tematizar para que en
+   modo claro tenga bg claro y texto legible. */
+.st-key-btn_popover_logout button,
+.st-key-btn_popover_close_app button{
+  background:var(--input-bg) !important;
+  color:var(--text) !important;
+  border:1px solid var(--border) !important;
+  border-radius:10px !important;
+  font-weight:600 !important;
+  box-shadow:none !important;
+}
+.st-key-btn_popover_logout button:hover,
+.st-key-btn_popover_close_app button:hover{
+  background:var(--input-bg-hover) !important;
+  border-color:var(--accent) !important;
+  color:var(--text-strong) !important;
+}
+
 @media (max-width:760px){
   .topbar-title{display:none}
   .ver-chip{display:none}
@@ -2147,9 +2186,13 @@ body .stApp .st-key-topbar_container{
   color:var(--text-muted) !important;
   gap:.45rem;
 }
-/* Boton tema: padding pill-style + icono + label */
+/* Boton tema: cuadrado 44x44 icon-only (sol/luna), mismo tamano que
+   el popover de usuario a la derecha. Sin texto, sin padding lateral. */
 .stApp .st-key-btn_topbar_theme button{
-  padding:0 1rem !important;
+  padding:0 !important;
+  width:44px !important;
+  min-width:44px !important;
+  font-size:1.15rem !important;
   color:var(--text) !important;
 }
 .stApp .st-key-btn_topbar_theme button:hover{
@@ -3820,7 +3863,7 @@ def _render_topbar(app_version: str) -> None:
         # Pesos: brand izquierda + spacer central (titulo es absolute, no
         # ocupa flujo) + boton tema + icono usuario. La version se removio
         # del topbar — sigue disponible en Ayuda > Acerca de la aplicacion.
-        col_weights = [1.2, 7.5, 1.1, 0.6]
+        col_weights = [1.2, 8.0, 0.6, 0.6]
         try:
             cols = st.columns(col_weights, vertical_alignment="center")
         except TypeError:
@@ -3845,8 +3888,10 @@ def _render_topbar(app_version: str) -> None:
             # Theme toggle DENTRO del topbar (reemplaza al boton flotante
             # _render_theme_toggle que vivia arriba a la derecha).
             tema = st.session_state.get("ui_theme", "dark")
-            label = "☀️ Claro" if tema == "dark" else "🌙 Oscuro"
-            if st.button(label, key="btn_topbar_theme", help="Cambiar tema claro/oscuro", use_container_width=True):
+            # Solo icono (sin texto "Claro"/"Oscuro") para mantener el
+            # boton compacto cuadrado de 44px como el popover de usuario.
+            label = "☀️" if tema == "dark" else "🌙"
+            if st.button(label, key="btn_topbar_theme", help="Cambiar tema claro/oscuro"):
                 st.session_state["ui_theme"] = "light" if tema == "dark" else "dark"
                 st.rerun()
         with cols[3]:
@@ -4277,8 +4322,8 @@ with tab1:
         )
 
     with _group_card(4, "Ejecutar"):
-        start_clicked = st.button(" Iniciar proceso", use_container_width=True, type="primary", key="start_process")
-        stop_clicked = st.button(" Detener proceso", use_container_width=True, key="stop_process")
+        start_clicked = st.button("▶️  Iniciar proceso", use_container_width=True, type="primary", key="start_process")
+        stop_clicked = st.button("⏹️  Detener proceso", use_container_width=True, key="stop_process")
 
     if stop_clicked and st.session_state.download_status in {"running", "cancelling"}:
         from robot.downloader import request_cancel
