@@ -2272,6 +2272,30 @@ body .stApp .st-key-topbar_container{
   padding:1.1rem 1.2rem !important;
   margin-bottom:1rem !important;
   box-shadow:var(--card-shadow, none) !important;
+  box-sizing:border-box !important;
+  overflow:hidden !important;
+}
+/* Fix de desfase: Streamlit le pone un `width="N"` INLINE al
+   stVerticalBlock interno calculado sobre el ancho del wrapper
+   EXTERNO — sin descontar el padding del card. Resultado: el
+   bloque interno termina mas ancho que el area de contenido
+   disponible y los inputs se desbordan por la derecha (visible
+   sobre todo en el modo claro donde el borde define el limite).
+   Forzamos width/max-width 100% con box-sizing border-box para
+   que respete el padding del card. */
+.stApp [class*="st-key-group_card_"] [data-testid="stVerticalBlock"]{
+  width:100% !important;
+  max-width:100% !important;
+  box-sizing:border-box !important;
+}
+.stApp [class*="st-key-group_card_"] [data-testid="stHorizontalBlock"]{
+  width:100% !important;
+  max-width:100% !important;
+  box-sizing:border-box !important;
+}
+.stApp [class*="st-key-group_card_"] [data-testid="element-container"]{
+  max-width:100% !important;
+  box-sizing:border-box !important;
 }
 /* Cualquier OTRO `stVerticalBlockBorderWrapper` (que NO sea card
    numerado — sin la clase st-key-group_card_) queda neutro:
