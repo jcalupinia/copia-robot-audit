@@ -1186,7 +1186,13 @@ def _build_global_css(theme: str) -> str:
     tokens = dict(_THEME_TOKENS_FIJOS)
     tokens.update(_THEME_TOKENS.get(theme, _THEME_TOKENS["dark"]))
     root = ":root{" + "".join(f"{k}:{v};" for k, v in tokens.items()) + "}"
-    return "<style>\n" + _CSS_IMPORT + "\n" + root + "\n" + _CSS_REGLAS + "\n</style>"
+    # Override solo en modo claro: el logo blanco (logo-acg-white.png) no
+    # debe llevar mix-blend-mode:screen porque blend "screen" con blanco
+    # sobre un fondo claro hace que el logo se funda y desaparezca.
+    extra = ""
+    if theme == "light":
+        extra = "\n.brand img{mix-blend-mode:normal !important;}\n"
+    return "<style>\n" + _CSS_IMPORT + "\n" + root + "\n" + _CSS_REGLAS + extra + "\n</style>"
 
 
 def _render_theme_toggle() -> None:
@@ -3651,7 +3657,12 @@ def _render_topbar(app_version: str) -> None:
     initials_seed = (user_email.split("@")[0] or "U").replace(".", " ")
     avatar_initials = "".join(part[0].upper() for part in initials_seed.split() if part)[:2] or "U"
 
-    logo_uri = _asset_data_uri("logo-acg.png")
+    # Logo segun el tema activo: en modo claro usamos la variante blanca
+    # (logo-acg-white.png) para que el isotipo siga siendo legible sobre
+    # el fondo claro. En modo oscuro se mantiene la version original.
+    _tema_actual = st.session_state.get("ui_theme", "dark")
+    _logo_filename = "logo-acg-white.png" if _tema_actual == "light" else "logo-acg.png"
+    logo_uri = _asset_data_uri(_logo_filename)
     logo_img = (
         f'<img src="{logo_uri}" alt="Audit Consulting Group"/>'
         if logo_uri
