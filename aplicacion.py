@@ -1772,10 +1772,17 @@ section[data-testid="stSidebar"] img{
 }
 
 /* ===================== Boton de tour ===================== */
+/* Wrapper de la columna donde vive el boton: forzamos width:100%
+   + justify-content:flex-end para empujar la pill al borde DERECHO
+   del page header, alineada con el borde derecho de los cards de
+   abajo. Sin esto Streamlit lo alineaba al inicio de la columna
+   (visual flex-start) y quedaba desfasado del eje del resto del
+   contenido. */
 .st-key-btn_open_tour{
-  display:flex;
-  justify-content:flex-start;
-  align-items:center;
+  display:flex !important;
+  justify-content:flex-end !important;
+  align-items:center !important;
+  width:100% !important;
   padding-top:0.3rem;
 }
 .st-key-btn_open_tour button{
@@ -4204,11 +4211,12 @@ with tab1:
             unsafe_allow_html=True,
         )
     with col_tour_link:
-        if st.button(
-            "Primera vez? Ver tour",
-            key="btn_open_tour",
-            use_container_width=True,
-        ):
+        # NO use_container_width=True: queremos el boton a su ancho
+        # natural (pill chip) pegado al borde DERECHO de la columna,
+        # no estirado al ancho completo. El CSS de la clase
+        # st-key-btn_open_tour fuerza display:flex + justify-content:
+        # flex-end para empujarlo a la derecha sin afectar otros botones.
+        if st.button("Primera vez? Ver tour", key="btn_open_tour"):
             _start_first_use_tour(reset_step=True)
             st.rerun()
 
