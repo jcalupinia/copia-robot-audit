@@ -3860,61 +3860,70 @@ def _render_login():
 
 
 def _render_activation():
-    st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
-    _, center_col, _ = st.columns([1, 0.9, 1])
-    with center_col:
-        top_left_col, _ = st.columns([1.2, 4.8])
-        with top_left_col:
-            if st.button(" Volver a inicio de sesión", key="btn_back_login_activation"):
-                device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
-                _clear_cached_auth_only()
-                for key in ("auth_token", "user_email", "license_validated", "license_last_check"):
-                    st.session_state.pop(key, None)
-                if device_id:
-                    st.session_state["_device_id"] = device_id
-                st.rerun()
+    """Pantalla de activación de licencia con el mismo estilo visual del
+    login y recuperación de contraseña: hero background full-viewport,
+    header centrado (titulo + subtitulo) ARRIBA del card, y card unificado
+    `.is-login-card` con badge "Sesión vinculada al dispositivo" + form
+    + boton "Volver a iniciar sesión" adentro. Mantiene EXACTAMENTE la
+    misma logica de activación que tenia antes (LICENSE_CLIENT.activate_license,
+    fingerprint del dispositivo, persistencia de sesión); solo cambia
+    el envoltorio visual para que la familia de pantallas de auth se vea
+    consistente.
+    """
+    _inject_login_background_css()
+    _render_auth_header(
+        "Activación de licencia",
+        "Introduce tu código para vincular este equipo",
+    )
+    client_device_id = _require_client_device_id()
+    if not client_device_id:
+        st.stop()
+    default_fp = st.session_state.get("device_fingerprint") or hashlib.sha256(
+        client_device_id.encode()
+    ).hexdigest()
+    st.session_state["device_fingerprint"] = default_fp
 
-        logo_html = _logo_html(130)
-        if logo_html:
-            st.markdown(logo_html, unsafe_allow_html=True)
+    card = st.container()
+    with card:
+        st.markdown('<div class="is-login-card"></div>', unsafe_allow_html=True)
         st.markdown(
-            "<h1 style='text-align:center; margin: 0.9rem 0;'>Activación de licencia</h1>",
+            '<span class="badge-device">Sesión vinculada al dispositivo</span>',
             unsafe_allow_html=True,
         )
-        st.warning("Introduce tu código de licencia para vincular este equipo.")
-        client_device_id = _require_client_device_id()
-        if not client_device_id:
-            st.stop()
-        default_fp = st.session_state.get("device_fingerprint") or hashlib.sha256(
-            client_device_id.encode()
-        ).hexdigest()
-        st.session_state["device_fingerprint"] = default_fp
         with st.form("activation_form"):
             code = st.text_input("Código de licencia")
-            fingerprint = st.text_input(
+            st.text_input(
                 "Identificador del equipo",
                 value=default_fp,
                 help="Este identificador se genera automáticamente para este equipo.",
                 disabled=True,
             )
             submitted = st.form_submit_button("Activar licencia", type="primary")
-            if submitted:
-                if not code:
-                    st.error("Debes ingresar tu código de licencia.")
-                else:
-                    try:
-                        LICENSE_CLIENT.activate_license(
-                            st.session_state["auth_token"],
-                            code.strip(),
-                            default_fp,
-                        )
-                        st.session_state["license_validated"] = True
-                        st.session_state["license_last_check"] = time.time()
-                        _persist_session_state()
-                        st.success("Licencia activada correctamente.")
-                        st.rerun()
-                    except Exception as err:
-                        st.error(f"No se pudo activar la licencia: {err}")
+        if submitted:
+            if not code:
+                st.error("Debes ingresar tu código de licencia.")
+            else:
+                try:
+                    LICENSE_CLIENT.activate_license(
+                        st.session_state["auth_token"],
+                        code.strip(),
+                        default_fp,
+                    )
+                    st.session_state["license_validated"] = True
+                    st.session_state["license_last_check"] = time.time()
+                    _persist_session_state()
+                    st.success("Licencia activada correctamente.")
+                    st.rerun()
+                except Exception as err:
+                    st.error(f"No se pudo activar la licencia: {err}")
+        if st.button("← Volver a iniciar sesión", key="btn_back_login_activation"):
+            device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
+            _clear_cached_auth_only()
+            for key in ("auth_token", "user_email", "license_validated", "license_last_check"):
+                st.session_state.pop(key, None)
+            if device_id:
+                st.session_state["_device_id"] = device_id
+            st.rerun()
 def _ensure_access():
     if "auth_token" not in st.session_state:
         client_device_id = _require_client_device_id()
