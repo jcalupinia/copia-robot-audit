@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 
-import base64
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 import hashlib
@@ -15,6 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 import boto3
 from botocore.config import Config
@@ -71,6 +71,22 @@ app.add_middleware(
 
 
 Base.metadata.create_all(bind=engine)
+
+
+# === Static mount para los assets del landing nuevo ===
+# El landing vive en `licensing_api/landing/` (HTML + assets/{css, js, fonts, img}).
+# Se sirven los assets bajo la ruta /landing-assets/ para que paths relativos
+# como /landing-assets/styles.css o /landing-assets/img/robot-audit.svg funcionen
+# desde el HTML. El index.html lo lee y sirve el endpoint `landing_page()` con
+# substitucion de placeholders (version + URL de descarga).
+_LANDING_DIR = Path(__file__).resolve().parent / "landing"
+_LANDING_ASSETS_DIR = _LANDING_DIR / "assets"
+if _LANDING_ASSETS_DIR.is_dir():
+    app.mount(
+        "/landing-assets",
+        StaticFiles(directory=str(_LANDING_ASSETS_DIR)),
+        name="landing-assets",
+    )
 
 
 def _require_update_token(request: Request) -> None:
@@ -568,38 +584,18 @@ def updates_download(request: Request):
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archivo de actualizacion no configurado.")
 
 
-def _landing_logo_data_uri() -> str:
-    logo_env = os.getenv("LANDING_LOGO_PATH", "").strip()
-    candidates = []
-    if logo_env:
-        candidates.append(Path(logo_env))
-    candidates.extend(
-        [
-            Path("AUDIT_IA_sin_fondo_transparente_FINAL.png"),
-            Path("LogoAUDIT.png"),
-            Path("logo.png"),
-        ]
-    )
-    for path in candidates:
-        try:
-            if not path.exists():
-                continue
-            ext = path.suffix.lower()
-            if ext == ".svg":
-                mime = "image/svg+xml"
-            elif ext == ".jpg" or ext == ".jpeg":
-                mime = "image/jpeg"
-            else:
-                mime = "image/png"
-            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-            return f"data:{mime};base64,{encoded}"
-        except Exception:
-            continue
-    return ""
-
-
 @app.get("/", response_class=HTMLResponse)
 def landing_page(request: Request):
+    """Sirve la landing nueva (licensing_api/landing/index.html) con la
+    misma funcionalidad de antes: version dinamica + URL de descarga
+    con token + boton "Elegir donde guardar" (showSaveFilePicker).
+    Solo cambia el ENVOLTORIO visual (Tailwind + secciones extendidas
+    del mockup en Proyectos-de-Claude-main/landing/).
+
+    El HTML vive en disco y solo se sustituyen 2 placeholders:
+      - __VERSION__       → version actual (env UPDATE_VERSION o version.txt)
+      - __DOWNLOAD_URL__  → /updates/download[?token=…]
+    """
     version = os.getenv("UPDATE_VERSION", "").strip()
     if not version:
         try:
@@ -612,367 +608,22 @@ def landing_page(request: Request):
     token = os.getenv("UPDATE_TOKEN", "").strip()
     if token:
         download_url = f"{download_url}?token={token}"
-    logo_uri = _landing_logo_data_uri()
-    logo_html = (
-        f"<img src='{logo_uri}' alt='Audit IA' class='logo-img'/>"
-        if logo_uri
-        else "<div class='logo-fallback'>AUDIT IA</div>"
-    )
-    html = f"""
-<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ROBOT AUDIT SRI</title>
-  <style>
-    :root {{
-      --brand-navy: #0b1c54;
-      --brand-blue: #2563eb;
-      --brand-cyan: #16c7d7;
-      --brand-soft: #eaf4ff;
-      --ink: #0f172a;
-      --muted: #475569;
-      --white: #ffffff;
-      --shadow: rgba(15, 23, 42, 0.16);
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: "Segoe UI", "Calibri", sans-serif;
-      color: var(--ink);
-      background:
-        radial-gradient(1200px 620px at 12% 12%, rgba(37,99,235,0.20), transparent 60%),
-        radial-gradient(900px 500px at 88% 14%, rgba(22,199,215,0.24), transparent 60%),
-        linear-gradient(160deg, #f4f9ff 0%, #eaf5ff 46%, #f7fbff 100%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 28px;
-    }}
-    .shell {{
-      max-width: 1080px;
-      width: 100%;
-      display: grid;
-      grid-template-columns: 1.2fr 0.8fr;
-      gap: 24px;
-      background: rgba(255,255,255,0.88);
-      border-radius: 26px;
-      box-shadow: 0 22px 54px var(--shadow);
-      padding: 30px;
-      border: 1px solid rgba(37, 99, 235, 0.16);
-      backdrop-filter: blur(6px);
-    }}
-    .hero {{
-      padding: 8px 8px 8px 10px;
-    }}
-    .brand {{
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      margin-bottom: 16px;
-    }}
-    .logo-img {{
-      width: 64px;
-      height: 64px;
-      object-fit: contain;
-      border-radius: 12px;
-      background: var(--white);
-      border: 1px solid rgba(37,99,235,0.16);
-      padding: 6px;
-    }}
-    .logo-fallback {{
-      width: 64px;
-      height: 64px;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(145deg, var(--brand-blue), var(--brand-cyan));
-      color: var(--white);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-    }}
-    .brand-title {{
-      margin: 0;
-      font-size: 24px;
-      font-weight: 800;
-      letter-spacing: 0.02em;
-      color: var(--brand-navy);
-    }}
-    .tag {{
-      margin: 2px 0 0;
-      color: var(--muted);
-      font-size: 14px;
-      font-weight: 500;
-    }}
-    .hero h1 {{
-      margin: 10px 0 10px;
-      font-size: clamp(32px, 4.2vw, 46px);
-      line-height: 1.08;
-      color: #0f1f57;
-      letter-spacing: -0.02em;
-    }}
-    .lead {{
-      margin: 0 0 20px;
-      font-size: 18px;
-      line-height: 1.6;
-      color: var(--muted);
-      max-width: 90%;
-    }}
-    .benefits {{
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-    }}
-    .benefit {{
-      background: var(--brand-soft);
-      border: 1px solid rgba(37,99,235,0.16);
-      border-radius: 14px;
-      padding: 14px 14px;
-    }}
-    .benefit b {{
-      display: block;
-      margin-bottom: 4px;
-      color: #123375;
-      font-size: 15px;
-    }}
-    .benefit span {{
-      color: #46607f;
-      font-size: 14px;
-      line-height: 1.4;
-    }}
-    .download-card {{
-      background: linear-gradient(170deg, #0f2d70 0%, #0b1f52 62%, #0a1b48 100%);
-      color: var(--white);
-      border-radius: 22px;
-      padding: 26px 24px;
-      box-shadow: 0 18px 40px rgba(11, 28, 84, 0.35);
-      border: 1px solid rgba(115, 169, 255, 0.26);
-    }}
-    .download-card h2 {{
-      margin: 0 0 8px;
-      font-size: 30px;
-      line-height: 1.05;
-      letter-spacing: -0.02em;
-    }}
-    .download-card p {{
-      margin: 0;
-      color: rgba(230,240,255,0.92);
-      font-size: 15px;
-      line-height: 1.5;
-    }}
-    .cta {{
-      margin-top: 20px;
-      width: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-decoration: none;
-      padding: 18px 18px;
-      border-radius: 16px;
-      background: linear-gradient(140deg, var(--brand-cyan), #42d9e6 45%, #6be4ee 100%);
-      color: #08283d;
-      font-weight: 800;
-      font-size: 18px;
-      letter-spacing: 0.01em;
-      border: 0;
-      box-shadow: 0 10px 24px rgba(13, 216, 235, 0.32);
-      transition: transform 0.18s ease, filter 0.18s ease;
-    }}
-    .cta:hover {{
-      transform: translateY(-1px);
-      filter: brightness(1.04);
-    }}
-    .cta-secondary {{
-      margin-top: 10px;
-      width: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-decoration: none;
-      padding: 13px 14px;
-      border-radius: 14px;
-      background: rgba(122, 177, 255, 0.12);
-      color: #d6e9ff;
-      font-weight: 700;
-      font-size: 14px;
-      border: 1px solid rgba(122, 177, 255, 0.26);
-      transition: transform 0.18s ease, filter 0.18s ease, background 0.18s ease;
-    }}
-    .cta-secondary:hover {{
-      transform: translateY(-1px);
-      filter: brightness(1.04);
-      background: rgba(122, 177, 255, 0.18);
-    }}
-    .version {{
-      margin-top: 14px;
-      padding: 11px 12px;
-      border-radius: 12px;
-      background: rgba(122, 177, 255, 0.14);
-      border: 1px solid rgba(122, 177, 255, 0.26);
-      font-weight: 600;
-      color: #d6e9ff;
-      font-size: 14px;
-    }}
-    .note {{
-      margin-top: 12px;
-      font-size: 13px;
-      color: rgba(230,240,255,0.85);
-    }}
-    .trust {{
-      margin-top: 16px;
-      padding-top: 14px;
-      border-top: 1px solid rgba(122, 177, 255, 0.24);
-      font-size: 14px;
-      color: rgba(215, 232, 255, 0.9);
-    }}
-    @media (max-width: 860px) {{
-      .shell {{
-        grid-template-columns: 1fr;
-        padding: 22px;
-      }}
-      .lead {{
-        max-width: 100%;
-      }}
-      .benefits {{
-        grid-template-columns: 1fr;
-      }}
-    }}
-  </style>
-</head>
-<body>
-  <div class="shell">
-    <section class="hero">
-      <div class="brand">
-        {logo_html}
-        <div>
-          <h3 class="brand-title">ROBOT AUDIT SRI</h3>
-          <p class="tag">Audit Consulting</p>
-        </div>
-      </div>
-      <h1>Controla tus comprobantes en minutos.</h1>
-      <p class="lead">
-        Una sola aplicacion para ordenar tu gestion, ahorrar tiempo y mantener tus reportes siempre al dia.
-      </p>
-      <div class="benefits">
-        <div class="benefit">
-          <b>Rapido y simple</b>
-          <span>Reduce tareas repetitivas y gana tiempo desde el primer dia.</span>
-        </div>
-        <div class="benefit">
-          <b>Mas claridad</b>
-          <span>Revisa tu informacion organizada para tomar decisiones con confianza.</span>
-        </div>
-        <div class="benefit">
-          <b>Mejor control</b>
-          <span>Ten todo centralizado para que tu seguimiento sea mas facil.</span>
-        </div>
-        <div class="benefit">
-          <b>Siempre al dia</b>
-          <span>Recibe mejoras continuas sin complicaciones para tu equipo.</span>
-        </div>
-      </div>
-    </section>
-    <aside class="download-card">
-      <h2>Descarga ahora</h2>
-      <p>Instala tu software de forma inmediata y empieza a usarlo hoy mismo.</p>
-      <a class="cta" id="download-direct" href="{download_url}" download="ROBOT_AUDIT_SRI.exe">Descargar ROBOT_AUDIT_SRI.exe</a>
-      <button class="cta-secondary" id="save-btn" type="button">Elegir donde guardar</button>
-      <div class="version">Version actual: {version}</div>
-      <p class="note">Usa el boton principal para descargar normalmente. Si tu navegador lo permite, tambien puedes elegir la ubicacion de guardado.</p>
-      <p class="note" id="download-status" aria-live="polite"></p>
-      <div class="trust">Solucion profesional para equipos que buscan orden, velocidad y confianza.</div>
-    </aside>
-  </div>
-  <script>
-    (function () {{
-      const saveBtn = document.getElementById("save-btn");
-      const directLink = document.getElementById("download-direct");
-      const status = document.getElementById("download-status");
-      const fileName = "ROBOT_AUDIT_SRI.exe";
-      const downloadUrl = directLink ? directLink.href : "";
 
-      function setStatus(msg) {{
-        if (status) status.textContent = msg || "";
-      }}
-
-      async function saveWithPicker() {{
-        const response = await fetch(downloadUrl, {{ credentials: "same-origin" }});
-        if (!response.ok) {{
-          throw new Error("No se pudo iniciar la descarga.");
-        }}
-        if (!response.body) {{
-          throw new Error("El navegador no devolvio el flujo del archivo.");
-        }}
-        const handle = await window.showSaveFilePicker({{
-          suggestedName: fileName,
-          excludeAcceptAllOption: true,
-          types: [{{
-            description: "Application",
-            accept: {{
-              "application/x-msdownload": [".exe"]
-            }}
-          }}]
-        }});
-        const writable = await handle.createWritable();
-        let closed = false;
-        try {{
-          const reader = response.body.getReader();
-          while (true) {{
-            const {{ done, value }} = await reader.read();
-            if (done) break;
-            if (value) {{
-              await writable.write(value);
-            }}
-          }}
-          await writable.close();
-          closed = true;
-        }} catch (err) {{
-          if (!closed) {{
-            try {{
-              await writable.abort();
-            }} catch (_abortErr) {{
-              // Ignorado a proposito.
-            }}
-          }}
-          throw err;
-        }}
-      }}
-
-      if (!saveBtn) {{
-        return;
-      }}
-
-      saveBtn.addEventListener("click", async function () {{
-        if (!downloadUrl) {{
-          setStatus("No se encontro el archivo de descarga.");
-          return;
-        }}
-        saveBtn.disabled = true;
-        setStatus("Preparando descarga...");
-        try {{
-          if (!(window.isSecureContext && "showSaveFilePicker" in window)) {{
-            setStatus("Tu navegador no permite elegir ubicacion desde este boton. Usa la descarga principal.");
-            return;
-          }}
-          await saveWithPicker();
-          setStatus("Descarga completada.");
-        }} catch (err) {{
-          if (err && err.name === "AbortError") {{
-            setStatus("Descarga cancelada.");
-          }} else {{
-            setStatus("No se pudo completar la descarga desde este boton. Usa la descarga principal.");
-          }}
-        }} finally {{
-          saveBtn.disabled = false;
-        }}
-      }});
-    }})();
-  </script>
-</body>
-</html>
-    """
+    index_path = _LANDING_DIR / "index.html"
+    try:
+        html = index_path.read_text(encoding="utf-8")
+    except Exception:
+        # Fallback minimo si el archivo falta (p.ej. deploy mal copiado).
+        return HTMLResponse(
+            content=(
+                "<html><body style='font-family:sans-serif;padding:2rem'>"
+                "<h1>ROBOT AUDIT SRI</h1>"
+                f"<p>Version actual: {version}</p>"
+                f"<p><a href='{download_url}'>Descargar ROBOT_AUDIT_SRI.exe</a></p>"
+                "</body></html>"
+            )
+        )
+    html = html.replace("__VERSION__", version).replace("__DOWNLOAD_URL__", download_url)
     return HTMLResponse(content=html)
+
+

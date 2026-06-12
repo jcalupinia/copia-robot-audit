@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ROBOT AUDIT SRI — Descarga y audita tus comprobantes del SRI en minutos</title>
+  <meta name="description" content="Software de escritorio para descargar, organizar y auditar automáticamente tus comprobantes electrónicos del SRI (Ecuador). Reportes por fechas y consolidación de documentos en minutos.">
+  <meta name="theme-color" content="#070a12">
+  <link rel="canonical" href="https://robotauditsri.com/">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 34'%3E%3Crect x='1.5' y='1.5' width='31' height='31' rx='9' fill='%23070a12' stroke='%2310b981' stroke-width='1.5'/%3E%3Ccircle cx='13' cy='14' r='3.4' fill='%2360a5fa'/%3E%3Ccircle cx='21' cy='14' r='3.4' fill='%2334d399'/%3E%3C/svg%3E">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="ROBOT AUDIT SRI — Controla tus comprobantes en minutos">
+  <meta property="og:description" content="Descarga, organiza y audita tus comprobantes del SRI automáticamente.">
+  <meta property="og:locale" content="es_EC">
+
+  <!-- Fuentes self-hosted: precarga para evitar bloqueo de render -->
+  <link rel="preload" href="/landing-assets/fonts/39ce2001.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/landing-assets/fonts/e769ef35.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/landing-assets/fonts.css">
+  <link rel="stylesheet" href="/landing-assets/styles.css">
+
+  <!-- Datos estructurados: aplicación de software -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "ROBOT AUDIT SRI",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Windows 10, Windows 11",
+    "softwareVersion": "__VERSION__",
+    "description": "Software de escritorio para descargar, organizar y auditar automáticamente los comprobantes electrónicos del SRI de Ecuador.",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "publisher": { "@type": "Organization", "name": "Audit Consulting" },
+    "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.8", "ratingCount": "126" }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      { "@type": "Question", "name": "¿ROBOT AUDIT SRI funciona con el portal del SRI?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Sí. Se conecta con tus credenciales del SRI para descargar comprobantes recibidos y emitidos de forma automática." } },
+      { "@type": "Question", "name": "¿Necesito conocimientos técnicos para usarlo?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. Instalas el ejecutable, ingresas tus filtros y la aplicación descarga y organiza todo por ti." } },
+      { "@type": "Question", "name": "¿Qué reportes genera?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Reportes por rango de fechas, por mes o año completo, y consolidación de documentos lista para tu contabilidad." } }
+    ]
+  }
+  </script>
+</head>
+
+<body class="grain">
+  <a href="#contenido" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 btn-primary">Saltar al contenido</a>
+
+  <!-- ENCABEZADO -->
+  <header class="relative z-10 border-b border-ink-800/80">
+    <div class="container-x flex h-16 items-center justify-between">
+      <a href="#" class="flex items-center gap-3" aria-label="ROBOT AUDIT SRI — inicio">
+        <svg width="34" height="34" viewBox="0 0 34 34" fill="none" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="31" height="31" rx="9" stroke="url(#g1)" stroke-width="1.5"/>
+          <circle cx="13" cy="14" r="3.4" fill="#60a5fa"/>
+          <circle cx="21" cy="14" r="3.4" fill="#34d399"/>
+          <path d="M10 23c2 2.2 4.3 3.3 7 3.3s5-1.1 7-3.3" stroke="#c4cde0" stroke-width="1.6" stroke-linecap="round"/>
+          <defs><linearGradient id="g1" x1="0" y1="0" x2="34" y2="34"><stop stop-color="#3b82f6"/><stop offset="1" stop-color="#10b981"/></linearGradient></defs>
+        </svg>
+        <span class="font-display text-lg font-semibold text-mist-100">ROBOT&nbsp;AUDIT<span class="text-audit-400"> SRI</span></span>
+      </a>
+      <nav class="hidden items-center gap-7 text-sm font-medium text-mist-400 sm:flex" aria-label="Principal">
+        <a href="#funciones" class="hover:text-mist-100">Funciones</a>
+        <a href="#como" class="hover:text-mist-100">Cómo funciona</a>
+        <a href="#faq" class="hover:text-mist-100">Preguntas</a>
+        <a href="#descargar" class="btn-ghost py-2">Descargar</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="contenido">
+    <!-- HERO + DESCARGA -->
+    <section class="relative z-10 overflow-hidden" aria-labelledby="titulo">
+      <div class="container-x grid items-start gap-10 py-16 sm:py-24 lg:grid-cols-[1.1fr_.9fr]">
+        <!-- Columna de mensaje -->
+        <div class="animate-rise">
+          <p class="eyebrow">Audit Consulting · SRI Ecuador</p>
+          <h1 id="titulo" class="mt-5 text-4xl font-semibold leading-[1.05] sm:text-5xl lg:text-6xl">
+            Controla tus comprobantes <span class="bg-gradient-to-r from-beam-400 to-audit-400 bg-clip-text text-transparent">en minutos.</span>
+          </h1>
+          <p class="mt-5 max-w-xl text-lg text-mist-400">
+            Una sola aplicación para descargar, ordenar y auditar tus comprobantes
+            del SRI. Ahorra horas de trabajo manual y manténte siempre al día.
+          </p>
+
+          <ul class="mt-8 grid max-w-xl gap-4 sm:grid-cols-2" role="list">
+            <li class="card p-4">
+              <h2 class="text-base font-semibold text-mist-100">Rápido y simple</h2>
+              <p class="mt-1 text-sm text-mist-400">Descarga masiva de comprobantes recibidos y emitidos con unos clics.</p>
+            </li>
+            <li class="card p-4">
+              <h2 class="text-base font-semibold text-mist-100">Control total</h2>
+              <p class="mt-1 text-sm text-mist-400">Filtra por RUC, fechas, mes o año completo según lo que necesites.</p>
+            </li>
+            <li class="card p-4">
+              <h2 class="text-base font-semibold text-mist-100">Reportes claros</h2>
+              <p class="mt-1 text-sm text-mist-400">Consolida documentos en reportes listos para tu contabilidad.</p>
+            </li>
+            <li class="card p-4">
+              <h2 class="text-base font-semibold text-mist-100">Siempre al día</h2>
+              <p class="mt-1 text-sm text-mist-400">Mantén tus registros organizados y sin comprobantes perdidos.</p>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Tarjeta de descarga (conversión) -->
+        <aside id="descargar" class="card animate-rise p-6 sm:p-8 lg:sticky lg:top-8" aria-labelledby="descarga-titulo" style="animation-delay:.12s">
+          <img src="/landing-assets/img/robot-audit.svg" alt="Robot de auditoría descargando y revisando comprobantes del SRI" width="520" height="360" decoding="async" class="mb-6 w-full rounded-xl border border-ink-700 bg-ink-900/50 p-4">
+          <h2 id="descarga-titulo" class="text-2xl font-semibold">Descarga ahora</h2>
+          <p class="mt-2 text-sm text-mist-400">
+            Instala el software de forma inmediata y empieza a auditar tus
+            comprobantes. Sin configuraciones complejas.
+          </p>
+
+          <a href="__DOWNLOAD_URL__" id="btn-descargar" class="btn-primary mt-6 w-full text-base" download="ROBOT_AUDIT_SRI.exe" data-default-os="Windows">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0l4-4m-4 4l-4-4M5 21h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Descargar ROBOT_AUDIT_SRI<span id="ext">.exe</span>
+          </a>
+          <button type="button" id="save-btn" class="btn-ghost mt-3 w-full text-sm">Elegir dónde guardar</button>
+          <p class="mt-2 text-xs text-mist-500" id="download-status" aria-live="polite"></p>
+
+          <dl class="mt-6 grid grid-cols-2 gap-3 border-t border-ink-700 pt-5 text-sm">
+            <div><dt class="text-mist-500">Versión</dt><dd class="font-medium text-mist-100">__VERSION__</dd></div>
+            <div><dt class="text-mist-500">Tamaño</dt><dd class="font-medium text-mist-100">≈ 48 MB</dd></div>
+            <div><dt class="text-mist-500">Sistema</dt><dd class="font-medium text-mist-100" id="os-label">Windows 10/11</dd></div>
+            <div><dt class="text-mist-500">Licencia</dt><dd class="font-medium text-audit-400">Activación incluida</dd></div>
+          </dl>
+          <p class="mt-4 flex items-center gap-2 text-xs text-mist-500">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2l8 4v5c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V6l8-4z" stroke="#34d399" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            Descarga verificada · sin software adicional empaquetado.
+          </p>
+        </aside>
+      </div>
+    </section>
+
+    <!-- CÓMO FUNCIONA -->
+    <section id="como" class="relative z-10 border-t border-ink-800/80 py-16 sm:py-20" aria-labelledby="como-titulo">
+      <div class="container-x">
+        <h2 id="como-titulo" class="text-3xl font-semibold sm:text-4xl">Tres pasos, cero trabajo manual</h2>
+        <ol class="mt-10 grid gap-6 md:grid-cols-3" role="list">
+          <li class="card p-6">
+            <img src="/landing-assets/img/paso-credenciales.svg" alt="" width="400" height="280" loading="lazy" decoding="async" class="mb-5 h-32 w-full object-contain">
+            <span class="font-display text-3xl text-beam-400">01</span>
+            <h3 class="mt-3 text-lg font-semibold text-mist-100">Ingresa tus credenciales</h3>
+            <p class="mt-2 text-sm text-mist-400">Conecta tu RUC y define el origen: comprobantes recibidos o emitidos.</p>
+          </li>
+          <li class="card p-6">
+            <img src="/landing-assets/img/paso-descarga.svg" alt="" width="400" height="280" loading="lazy" decoding="async" class="mb-5 h-32 w-full object-contain">
+            <span class="font-display text-3xl text-beam-400">02</span>
+            <h3 class="mt-3 text-lg font-semibold text-mist-100">Elige fechas y filtros</h3>
+            <p class="mt-2 text-sm text-mist-400">Por día, mes o año completo. El robot descarga todo automáticamente.</p>
+          </li>
+          <li class="card p-6">
+            <img src="/landing-assets/img/paso-reporte.svg" alt="" width="400" height="280" loading="lazy" decoding="async" class="mb-5 h-32 w-full object-contain">
+            <span class="font-display text-3xl text-beam-400">03</span>
+            <h3 class="mt-3 text-lg font-semibold text-mist-100">Genera el reporte</h3>
+            <p class="mt-2 text-sm text-mist-400">Consolida los documentos en un reporte listo para tu contabilidad.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- FUNCIONES -->
+    <section id="funciones" class="relative z-10 border-t border-ink-800/80 py-16 sm:py-20" aria-labelledby="func-titulo">
+      <div class="container-x">
+        <h2 id="func-titulo" class="text-3xl font-semibold sm:text-4xl">Diseñado para contadores y auditores</h2>
+        <p class="mt-3 max-w-2xl text-mist-400">Todo lo que necesitas para mantener tus comprobantes del SRI bajo control, en una sola herramienta de escritorio.</p>
+        <div class="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <article class="card p-6"><h3 class="text-lg font-semibold text-mist-100">Descarga por lotes</h3><p class="mt-2 text-sm text-mist-400">Miles de comprobantes en una sola corrida, sin abrir el portal uno por uno.</p></article>
+          <article class="card p-6"><h3 class="text-lg font-semibold text-mist-100">Reporte por fechas</h3><p class="mt-2 text-sm text-mist-400">Rangos personalizados, mensuales o anuales con un par de clics.</p></article>
+          <article class="card p-6"><h3 class="text-lg font-semibold text-mist-100">Consolidación</h3><p class="mt-2 text-sm text-mist-400">Une documentos dispersos en un consolidado limpio y exportable.</p></article>
+          <article class="card p-6"><h3 class="text-lg font-semibold text-mist-100">Carpeta organizada</h3><p class="mt-2 text-sm text-mist-400">Define dónde se guardan las descargas y mantén todo ordenado.</p></article>
+          <article class="card p-6"><h3 class="text-lg font-semibold text-mist-100">Modo claro y oscuro</h3><p class="mt-2 text-sm text-mist-400">Trabaja cómodo a cualquier hora con una interfaz que se adapta.</p></article>
+          <article class="card p-6"><h3 class="text-lg font-semibold text-mist-100">Centro de ayuda</h3><p class="mt-2 text-sm text-mist-400">Guías y soporte integrados para resolver dudas sin salir de la app.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq" class="relative z-10 border-t border-ink-800/80 py-16 sm:py-20" aria-labelledby="faq-titulo">
+      <div class="container-x max-w-3xl">
+        <h2 id="faq-titulo" class="text-3xl font-semibold sm:text-4xl">Preguntas frecuentes</h2>
+        <div class="mt-8 divide-y divide-ink-700 rounded-xl2 border border-ink-600/80 bg-ink-800/50">
+          <details class="group p-5" open>
+            <summary class="flex cursor-pointer items-center justify-between text-base font-semibold text-mist-100">¿Funciona con el portal del SRI? <span class="text-mist-500 transition-transform group-open:rotate-45">+</span></summary>
+            <p class="mt-3 text-sm text-mist-400">Sí. Se conecta con tus credenciales del SRI para descargar comprobantes recibidos y emitidos de forma automática.</p>
+          </details>
+          <details class="group p-5">
+            <summary class="flex cursor-pointer items-center justify-between text-base font-semibold text-mist-100">¿Necesito conocimientos técnicos? <span class="text-mist-500 transition-transform group-open:rotate-45">+</span></summary>
+            <p class="mt-3 text-sm text-mist-400">No. Instalas el ejecutable, ingresas tus filtros y la aplicación descarga y organiza todo por ti.</p>
+          </details>
+          <details class="group p-5">
+            <summary class="flex cursor-pointer items-center justify-between text-base font-semibold text-mist-100">¿Qué reportes genera? <span class="text-mist-500 transition-transform group-open:rotate-45">+</span></summary>
+            <p class="mt-3 text-sm text-mist-400">Reportes por rango de fechas, por mes o año completo, y consolidación de documentos lista para tu contabilidad.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA FINAL -->
+    <section class="relative z-10 border-t border-ink-800/80 py-16 sm:py-20" aria-labelledby="cta-titulo">
+      <div class="container-x">
+        <div class="card overflow-hidden p-8 text-center sm:p-12">
+          <h2 id="cta-titulo" class="text-3xl font-semibold sm:text-4xl">Empieza a auditar hoy mismo</h2>
+          <p class="mx-auto mt-3 max-w-xl text-mist-400">Instálalo en tu equipo y ten tus comprobantes del SRI bajo control en minutos.</p>
+          <a href="#descargar" class="btn-primary mx-auto mt-7 text-base">Descargar ROBOT AUDIT SRI</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- PIE -->
+  <footer class="relative z-10 border-t border-ink-800/80 py-10">
+    <div class="container-x flex flex-col items-center justify-between gap-4 text-sm text-mist-500 sm:flex-row">
+      <p>© <span id="anio">2024</span> Audit Consulting · ROBOT AUDIT SRI</p>
+      <p>Hecho para profesionales contables del Ecuador.</p>
+    </div>
+  </footer>
+
+  <script src="/landing-assets/app.js" defer></script>
+  <!-- JS adicional: "Elegir donde guardar" usando File System Access API
+       (mismo comportamiento que la landing anterior). Cae al boton principal
+       si el navegador no soporta showSaveFilePicker (HTTP, Safari, etc.). -->
+  <script>
+    (function () {
+      const saveBtn = document.getElementById("save-btn");
+      const directLink = document.getElementById("btn-descargar");
+      const status = document.getElementById("download-status");
+      const fileName = "ROBOT_AUDIT_SRI.exe";
+      const downloadUrl = directLink ? directLink.href : "";
+
+      function setStatus(msg) {
+        if (status) status.textContent = msg || "";
+      }
+
+      async function saveWithPicker() {
+        const response = await fetch(downloadUrl, { credentials: "same-origin" });
+        if (!response.ok) {
+          throw new Error("No se pudo iniciar la descarga.");
+        }
+        if (!response.body) {
+          throw new Error("El navegador no devolvio el flujo del archivo.");
+        }
+        const handle = await window.showSaveFilePicker({
+          suggestedName: fileName,
+          excludeAcceptAllOption: true,
+          types: [{
+            description: "Application",
+            accept: { "application/x-msdownload": [".exe"] }
+          }]
+        });
+        const writable = await handle.createWritable();
+        let closed = false;
+        try {
+          const reader = response.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) await writable.write(value);
+          }
+          await writable.close();
+          closed = true;
+        } catch (err) {
+          if (!closed) {
+            try { await writable.abort(); } catch (_e) {}
+          }
+          throw err;
+        }
+      }
+
+      if (!saveBtn) return;
+
+      saveBtn.addEventListener("click", async function () {
+        if (!downloadUrl || downloadUrl.endsWith("#")) {
+          setStatus("No se encontro el archivo de descarga.");
+          return;
+        }
+        saveBtn.disabled = true;
+        setStatus("Preparando descarga...");
+        try {
+          if (!(window.isSecureContext && "showSaveFilePicker" in window)) {
+            setStatus("Tu navegador no permite elegir ubicacion desde este boton. Usa la descarga principal.");
+            return;
+          }
+          await saveWithPicker();
+          setStatus("Descarga completada.");
+        } catch (err) {
+          if (err && err.name === "AbortError") {
+            setStatus("Descarga cancelada.");
+          } else {
+            setStatus("No se pudo completar la descarga desde este boton. Usa la descarga principal.");
+          }
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
