@@ -67,6 +67,7 @@ from robot.download_resume import (
     checkpoint_path as build_download_checkpoint_path,
     delete_checkpoint as delete_download_checkpoint,
     deserialize_params as deserialize_download_params,
+    increment_auto_resume_attempts as increment_download_auto_resume_attempts,
     load_checkpoint as load_download_checkpoint,
     mark_checkpoint_failed as mark_download_checkpoint_failed,
     mark_checkpoint_running as mark_download_checkpoint_running,
@@ -1027,9 +1028,23 @@ def _download_worker(params: dict, q: "queue.Queue"):
             delete_download_checkpoint(checkpoint_path)
         q.put(("done", resultado))
     except Exception as err:
+        err_str = str(err)
+        # Detectar si la excepcion vino de que el usuario presiono
+        # "Detener proceso" — la frase "proceso cancelado por el usuario"
+        # se genera explicitamente en el robot cuando se respeta el
+        # cancel_event (ver robot/downloader.request_cancel()).
+        # Si es del usuario => cancel_reason="user" (NO auto-reanudar).
+        # Cualquier otro error tecnico => cancel_reason="error" (auto-reanudar).
+        cancel_reason = (
+            "user"
+            if "proceso cancelado por el usuario" in err_str.lower()
+            else "error"
+        )
         if checkpoint_path:
-            mark_download_checkpoint_failed(checkpoint_path, str(err))
-        q.put(("error", str(err)))
+            mark_download_checkpoint_failed(
+                checkpoint_path, err_str, cancel_reason=cancel_reason
+            )
+        q.put(("error", err_str))
     finally:
         set_user_notifier(None)
 
@@ -4179,6 +4194,48 @@ with tab1:
         resume_origen = str(resume_summary.get("origen") or "No disponible")
         resume_tipo = str(resume_summary.get("tipo") or "No disponible")
         resume_formatos = ", ".join(resume_summary.get("formatos") or []) or "No disponible"
+
+        # AUTO-REANUDACION cuando el motivo NO fue cancelacion del
+        # usuario y aun no se agotaron los intentos automaticos.
+        # Si el usuario presiono "Detener proceso" => cancel_reason="user"
+        # => NO auto-reanuda, muestra los botones manuales como siempre.
+        # Si hubo error tecnico (timeout, navegador, red) => auto-reanuda
+        # hasta MAX_AUTO_RESUME_ATTEMPTS veces consecutivas; despues
+        # de ese limite muestra los botones manuales para evitar loops
+        # infinitos cuando el problema es persistente.
+        MAX_AUTO_RESUME_ATTEMPTS = 3
+        resume_cancel_reason = str(
+            pending_download_checkpoint.get("cancel_reason") or ""
+        ).strip().lower()
+        resume_attempts = int(
+            pending_download_checkpoint.get("auto_resume_attempts") or 0
+        )
+        # Solo intentamos auto-reanudar UNA vez por session_state (la
+        # flag se setea al disparar el rerun y se limpia cuando el
+        # checkpoint se borre por exito o sea descartado manualmente).
+        auto_resume_eligible = (
+            resume_cancel_reason != "user"
+            and resume_attempts < MAX_AUTO_RESUME_ATTEMPTS
+            and not st.session_state.get("_auto_resume_in_progress", False)
+        )
+        if auto_resume_eligible:
+            resume_params = deserialize_download_params(
+                pending_download_checkpoint.get("params")
+            )
+            if resume_params:
+                new_attempts = increment_download_auto_resume_attempts(
+                    pending_download_checkpoint.get("_path")
+                )
+                st.session_state["_auto_resume_in_progress"] = True
+                st.info(
+                    f"🔄 Reanudando descarga automáticamente "
+                    f"(intento {new_attempts}/{MAX_AUTO_RESUME_ATTEMPTS}) — "
+                    f"se detecto que la corrida anterior se interrumpio por "
+                    f"un error tecnico, no por accion del usuario."
+                )
+                _start_download_process(resume_params, resume_download=True)
+                st.rerun()
+
         st.info(
             f"Descarga pendiente detectada. Origen: {resume_origen}. Tipo: {resume_tipo}. "
             f"Periodo: {resume_period}. Ultimo punto guardado: {resume_last_point or 'inicio del proceso'}."
@@ -4187,6 +4244,16 @@ with tab1:
         resume_error = str(pending_download_checkpoint.get("last_error") or "").strip()
         if resume_error:
             st.caption(f"Ultimo error registrado: {resume_error}")
+        if resume_cancel_reason == "user":
+            st.caption(
+                "Motivo: cancelacion manual del usuario. Reanuda cuando estes listo."
+            )
+        elif resume_attempts >= MAX_AUTO_RESUME_ATTEMPTS:
+            st.caption(
+                f"Se alcanzo el limite de {MAX_AUTO_RESUME_ATTEMPTS} reanudaciones "
+                f"automaticas consecutivas. Revisa el error y reanuda manualmente "
+                f"cuando este resuelto."
+            )
         col_resume_1, col_resume_2 = st.columns([1, 1])
         with col_resume_1:
             if st.button("Reanudar descarga", key="btn_resume_download", use_container_width=True, type="secondary"):
@@ -4194,12 +4261,20 @@ with tab1:
                 if not resume_params:
                     st.error("No se pudo recuperar la configuración de la descarga pendiente.")
                 else:
+                    # Reset del contador de auto-resume al reanudar manualmente
+                    # para que tenga otros 3 intentos automaticos si vuelve a fallar.
+                    st.session_state["_auto_resume_in_progress"] = False
                     _start_download_process(resume_params, resume_download=True)
                     st.rerun()
         with col_resume_2:
             if st.button("Descartar", key="btn_discard_resume_download", use_container_width=True):
                 delete_download_checkpoint(pending_download_checkpoint.get("_path"))
+                st.session_state["_auto_resume_in_progress"] = False
                 st.rerun()
+    else:
+        # No hay checkpoint pendiente: limpiar el flag de auto-resume
+        # para que el proximo error sea atendido como un nuevo ciclo.
+        st.session_state["_auto_resume_in_progress"] = False
 
     # vertical_alignment="center" centra el boton verticalmente con
     # el bloque h1+subtitulo (sin esto Streamlit lo deja arriba por

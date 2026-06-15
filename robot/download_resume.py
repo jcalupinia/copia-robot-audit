@@ -100,6 +100,13 @@ def build_checkpoint_payload(user_email: str | None, params: dict[str, Any]) -> 
             "completed_days": 0,
         },
         "last_error": "",
+        # cancel_reason: "user" si el usuario presiono Detener;
+        # "error" o "" si fue una falla tecnica (timeout, navegador,
+        # red, etc.). Permite auto-reanudacion SOLO en el segundo caso.
+        "cancel_reason": "",
+        # Contador de auto-reanudaciones para evitar loops infinitos
+        # si el error es persistente.
+        "auto_resume_attempts": 0,
     }
 
 
@@ -113,12 +120,26 @@ def update_checkpoint(path: str | Path, **changes: Any) -> dict[str, Any] | None
     return data
 
 
-def mark_checkpoint_failed(path: str | Path, error_message: str) -> dict[str, Any] | None:
+def mark_checkpoint_failed(
+    path: str | Path,
+    error_message: str,
+    *,
+    cancel_reason: str = "error",
+) -> dict[str, Any] | None:
+    """Marca el checkpoint como `failed`.
+
+    cancel_reason:
+      - "user"  → el usuario presiono Detener proceso. La app debe mostrar
+                  el boton "Reanudar descarga" pero NO reanudar sola.
+      - "error" → falla tecnica (timeout, navegador caido, red, etc.). La
+                  app puede reanudar automaticamente al volver a abrir.
+    """
     data = load_checkpoint(path)
     if not data:
         return None
     data["status"] = "failed"
     data["last_error"] = str(error_message or "").strip()
+    data["cancel_reason"] = str(cancel_reason or "error").strip().lower()
     data["updated_at"] = datetime.now().isoformat(timespec="seconds")
     save_checkpoint(path, data)
     return data
@@ -130,9 +151,27 @@ def mark_checkpoint_running(path: str | Path) -> dict[str, Any] | None:
         return None
     data["status"] = "running"
     data["last_error"] = ""
+    # Al arrancar (manual o auto), limpiar el motivo previo para que el
+    # proximo fallo sea evaluado independientemente.
+    data["cancel_reason"] = ""
     data["updated_at"] = datetime.now().isoformat(timespec="seconds")
     save_checkpoint(path, data)
     return data
+
+
+def increment_auto_resume_attempts(path: str | Path) -> int:
+    """Incrementa el contador de auto-reanudaciones y devuelve el nuevo
+    valor. Se usa para limitar reanudaciones automaticas y evitar loops
+    cuando el error de raiz es persistente (ej. portal SRI caido).
+    """
+    data = load_checkpoint(path)
+    if not data:
+        return 0
+    current = int(data.get("auto_resume_attempts") or 0)
+    data["auto_resume_attempts"] = current + 1
+    data["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    save_checkpoint(path, data)
+    return current + 1
 
 
 def update_checkpoint_progress(
