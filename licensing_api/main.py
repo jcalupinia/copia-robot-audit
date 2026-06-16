@@ -584,6 +584,31 @@ def updates_download(request: Request):
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archivo de actualizacion no configurado.")
 
 
+@app.get("/manual")
+def download_user_manual():
+    """Sirve el manual de usuario en PDF.
+
+    El archivo MANUAL_USUARIO.pdf vive en la raiz del proyecto.
+    En producccion (Render) la raiz es el cwd del proceso; en dev
+    apuntamos a la carpeta padre del paquete licensing_api/.
+    """
+    candidates = [
+        Path("MANUAL_USUARIO.pdf"),
+        Path(__file__).resolve().parent.parent / "MANUAL_USUARIO.pdf",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return FileResponse(
+                path=str(path),
+                media_type="application/pdf",
+                filename="MANUAL_USUARIO.pdf",
+            )
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Manual de usuario no disponible en el servidor.",
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def landing_page(request: Request):
     """Sirve la landing nueva (licensing_api/landing/index.html) con la

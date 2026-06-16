@@ -28,6 +28,7 @@ pyinstaller --noconfirm --onefile --name "ROBOT_AUDIT_SRI" ^
   --add-data "licensing_client.py;." ^
   --add-data "desktop_launcher.py;." ^
   --add-data "version.txt;." ^
+  --add-data "MANUAL_USUARIO.pdf;." ^
   --add-data "robot;robot" ^
   --add-data "licensing_api;licensing_api" ^
   --add-data ".streamlit;.streamlit" ^

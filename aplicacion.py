@@ -5951,6 +5951,26 @@ with tab4:
             _persist_user_preferences()
             st.success("Listo. El tour volvera a mostrarse.")
 
+    # ===== Descargar manual de usuario en PDF =====
+    # Lo leemos directo del disco (no via la API de licencias) porque
+    # esta app ya tiene acceso al archivo en la raiz del proyecto.
+    _manual_pdf_path = Path(__file__).resolve().parent / "MANUAL_USUARIO.pdf"
+    if _manual_pdf_path.is_file():
+        try:
+            with open(_manual_pdf_path, "rb") as _f_pdf:
+                _manual_pdf_bytes = _f_pdf.read()
+            st.download_button(
+                "📄 Descargar manual de usuario (PDF)",
+                data=_manual_pdf_bytes,
+                file_name="MANUAL_USUARIO.pdf",
+                mime="application/pdf",
+                key="btn_download_user_manual",
+                use_container_width=True,
+                help="Descarga el manual completo en PDF para tenerlo de referencia offline.",
+            )
+        except Exception:
+            pass
+
     # ===== Accordion de ayuda (usando <details> nativo, estilizado como el mockup) =====
     st.markdown(
         """
