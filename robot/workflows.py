@@ -27,6 +27,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from robot._logging import get_logger
 from robot.parser import construir_reporte
 from robot.browser import (
+    _asegurar_en_tabla_emitidos,
     _click_consultar_emitidos,
     _descargar_pdf_emitidos_post_con_viewstate,
     _descargar_pdf_recibidos_post_con_viewstate,
@@ -36,15 +37,20 @@ from robot.browser import (
     _guardar_pdf_desde_enlace,
     _guardar_pdf_desde_jsf,
     _guardar_xml_desde_enlace,
+    _navegar_a_pagina_emitidos,
     _obtener_detalle_emitido_xhr,
     _obtener_form_base_emitidos,
     _obtener_source_detalle_emitido,
     _obtener_view_state,
+    _recuperar_formulario_emitidos,
     _rellenar_input_por_label,
     _resolver_destino_unico,
     _seleccionar,
     _seleccionar_en_select,
     _seleccionar_por_label,
+)
+from robot.download_resume import (
+    update_checkpoint_progress as _update_download_checkpoint_progress,
 )
 from robot.comprobante_types import (
     _coincide_tipo_documental,
@@ -1674,6 +1680,21 @@ def _flujo_emitidos(
     punto_emision: Optional[str],
     formatos: list,
     ruc_emisor: Optional[str] = None,
+    # ---- Granularidad fina para resume / anti-cuelgue (Fix A+B+C) ----
+    # checkpoint_path: si se pasa, el flujo actualiza el checkpoint despues
+    #   de cada lote (10 filas) con la pagina/fila exacta. Tambien lo usa
+    #   para reintentar recuperacion si el SRI redirige al home.
+    # resume_page / resume_row_index: punto exacto donde retomar — solo
+    #   tiene efecto SI estamos resumiendo este mismo dia (la primera vez
+    #   que ese dia entra a la tabla). Despues de saltar a esa posicion
+    #   el flujo continua normalmente.
+    # current_month / current_day: identificadores para el checkpoint
+    #   update — los necesita para que el callback sepa de que dia hablar.
+    checkpoint_path: Optional[str] = None,
+    resume_page: int = 1,
+    resume_row_index: int = 0,
+    current_month: Optional[int] = None,
+    current_day: Optional[int] = None,
 ):
     _check_cancel("inicio_emitidos")
     es_retencion = False
@@ -2023,6 +2044,33 @@ def _flujo_emitidos(
         lote_size = 10
         claves_guardadas = set()
         request_context = page.context.request
+
+        # RESUME: si el caller indica que veniamos parados en pagina N fila M
+        # de este mismo dia, navegamos a esa pagina y guardamos el row index
+        # a saltear en el primer for. El flag se consume despues de la
+        # primera iteracion del while para no aplicarse a paginas siguientes.
+        _resume_first_page = 1
+        _resume_skip_until = 0
+        try:
+            _rp = int(resume_page) if resume_page else 1
+            _rr = int(resume_row_index) if resume_row_index else 0
+        except (TypeError, ValueError):
+            _rp, _rr = 1, 0
+        if _rp > 1:
+            logger.info(
+                f"_flujo_emitidos: resume detectado — navegando a pagina {_rp} "
+                f"para retomar desde fila {_rr}."
+            )
+            if _navegar_a_pagina_emitidos(page, _rp):
+                pagina = _rp
+                _resume_first_page = _rp
+                _resume_skip_until = _rr
+            else:
+                logger.warning(
+                    f"No se pudo navegar a pagina {_rp} (resume). Empezando en 1."
+                )
+        elif _rr > 0:
+            _resume_skip_until = _rr
         payload_base = _obtener_form_base_emitidos(page)
         # OPTIMIZACION: capturar referer_url UNA SOLA VEZ — antes se leia
         # page.url en CADA llamada a `_descargar_pdf_emitidos_post_con_viewstate`
@@ -2083,8 +2131,95 @@ def _flujo_emitidos(
             lote_contador = 0
             lote_xml_ok = 0
             lote_pdf_ok = 0
+            # Si estamos resumiendo en esta pagina, calculamos el indice
+            # desde donde empezar (skip las filas previas ya procesadas).
+            _skip_until_this_page = (
+                _resume_skip_until if pagina == _resume_first_page else 0
+            )
+            if _skip_until_this_page > 0:
+                logger.info(
+                    f"_flujo_emitidos: salteando filas 0..{_skip_until_this_page - 1} "
+                    f"de pag {pagina} (resume)."
+                )
+            # Flag para abortar el row loop y forzar break del while-page-loop
+            # (se setea si la recuperacion falla 3 veces y debemos abandonar
+            # el dia para que la auto-reanudacion lo retome despues).
+            _abort_row_loop = False
             for idx in range(total_filas):
                 _check_cancel("emitidos_fila")
+                # SKIP filas anteriores al checkpoint (resume only on first page)
+                if idx < _skip_until_this_page:
+                    continue
+
+                # === FIX A+B: detectar "fui al home del SRI" antes de tocar
+                # los links de la fila. Sin esta guardia, cuando el portal
+                # nos devuelve al perfil, cada click hace timeout 30s y
+                # acumula ~10 minutos de cuelgue por dia. ===
+                if not _asegurar_en_tabla_emitidos(page, timeout=1500):
+                    recovery_ok = False
+                    for _intento_rec in range(1, 4):
+                        logger.warning(
+                            f"Tabla de Emitidos no accesible en fila {idx+1}/pag {pagina}. "
+                            f"Intento de recuperacion {_intento_rec}/3..."
+                        )
+                        if _recuperar_formulario_emitidos(
+                            page,
+                            tipo_visible=tipo_visible,
+                            estado_visible=estado_visible,
+                            fecha_emision=fecha_emision,
+                            establecimiento=establecimiento,
+                            punto_emision=punto_emision,
+                            pagina_destino=pagina,
+                        ):
+                            recovery_ok = True
+                            logger.info(
+                                f"Recuperacion exitosa en intento {_intento_rec}. "
+                                f"Continuando desde fila {idx+1}/pag {pagina}."
+                            )
+                            break
+                        # Backoff antes de reintentar: 2s, 4s, 6s.
+                        try:
+                            page.wait_for_timeout(2000 * _intento_rec)
+                        except Exception:
+                            pass
+                    if not recovery_ok:
+                        logger.warning(
+                            f"Recuperacion fallida tras 3 intentos en fila {idx+1}/pag {pagina}. "
+                            f"Abandono el dia — la auto-reanudacion retomara desde el ultimo lote guardado."
+                        )
+                        # Persistir el checkpoint con el punto exacto donde
+                        # fallamos antes de abortar, asi el resume retoma
+                        # justo aca.
+                        if checkpoint_path:
+                            try:
+                                _update_download_checkpoint_progress(
+                                    checkpoint_path,
+                                    next_month=current_month,
+                                    next_day=current_day,
+                                    last_completed_day=None,
+                                    last_completed_label=(
+                                        f"{(current_day or 0):02d}/{(current_month or 0):02d}"
+                                        f" (pag {pagina}, fila {idx}/{total_filas} — recuperacion fallida)"
+                                    ),
+                                    current_page=pagina,
+                                    current_row_index=idx,
+                                    total_rows_on_page=total_filas,
+                                )
+                            except Exception:
+                                pass
+                        _abort_row_loop = True
+                        break
+                    # Recuperacion OK: re-fetch filas y total porque el DOM
+                    # cambio tras el Consultar.
+                    filas = tabla_emitidos.locator("tr")
+                    total_filas = filas.count()
+                    if idx >= total_filas:
+                        logger.warning(
+                            f"Tras recuperar, total_filas={total_filas} < idx={idx}. "
+                            f"Saltamos a la siguiente pagina."
+                        )
+                        break
+
                 fila = filas.nth(idx)
                 celdas = fila.locator("td")
                 # OPTIMIZACION: 1 round-trip CDP en vez de 9. all_inner_texts()
@@ -2489,9 +2624,40 @@ def _flujo_emitidos(
                     lote_contador = 0
                     lote_xml_ok = 0
                     lote_pdf_ok = 0
+                    # === FIX C: persistir checkpoint con granularidad pag+fila
+                    # despues de cerrar cada lote (10 filas). Si el navegador
+                    # se cierra ahora, el resume retomara exactamente desde
+                    # `idx + 1` en `pagina` — no desde fila 1 pag 1 del dia. ===
+                    if checkpoint_path:
+                        try:
+                            _update_download_checkpoint_progress(
+                                checkpoint_path,
+                                next_month=current_month,
+                                next_day=current_day,
+                                last_completed_day=None,  # dia NO terminado todavia
+                                last_completed_label=(
+                                    f"{(current_day or 0):02d}/{(current_month or 0):02d}"
+                                    f" (pag {pagina}, lote cerrado en fila {idx+1}/{total_filas})"
+                                ),
+                                current_page=pagina,
+                                current_row_index=idx + 1,
+                                total_rows_on_page=total_filas,
+                            )
+                        except Exception as _cp_err:
+                            logger.warning(f"No se pudo actualizar checkpoint: {_cp_err}")
 
             duracion_pagina = time.perf_counter() - page_inicio
             logger.info(f"Pag {pagina} completa: {total_filas} filas en {duracion_pagina:.2f}s")
+
+            if _abort_row_loop:
+                # Recuperacion fallida en el row loop — abandonamos el dia
+                # entero. El caller capturara la excepcion o el resultado
+                # vacio y el checkpoint ya fue guardado en el momento del
+                # abort con la posicion exacta.
+                logger.warning(
+                    f"Saliendo del flujo de Emitidos por recuperacion fallida en pag {pagina}."
+                )
+                break
 
             boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
             if boton_siguiente.count():

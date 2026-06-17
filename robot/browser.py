@@ -2086,6 +2086,216 @@ def _abrir_modulo_consultas(page, origen: str):
     return page
 
 
+# ===========================================================================
+# Verificadores y recuperadores del formulario de Emitidos (anti-cuelgue 30s)
+# ===========================================================================
+def _asegurar_en_tabla_emitidos(page, timeout: int = 1500) -> bool:
+    """Verifica que la pagina sigue mostrando la tabla de comprobantes
+    Emitidos (no se fue al home / perfil del SRI por timeout de sesion,
+    redirect de JSF, rate limit, etc).
+
+    Devuelve True si:
+      - La URL contiene `recuperarComprobantes.jsf` o `comprobantesRecibidos.jsf`
+      - El selector `#frmPrincipal:tablaCompEmitidos_data` esta presente y visible
+
+    Devuelve False si:
+      - La URL fue redirigida a `/contribuyente/perfil` o similar
+      - La tabla no esta en el DOM
+      - Hay cualquier error de comunicacion con la pagina
+
+    Esta funcion es la "guardia previa" antes de clickear PDF/XML links;
+    evita el cuelgue clasico de 30 segundos x N filas cuando el SRI devuelve
+    al navegador a la pantalla principal.
+    """
+    try:
+        url_actual = (page.url or "").lower()
+    except Exception:
+        return False
+    en_formulario_url = (
+        "recuperarcomprobantes.jsf" in url_actual
+        or "comprobantesrecibidos.jsf" in url_actual
+    )
+    if not en_formulario_url:
+        # En perfil/home u otra pagina — explicitamente NO estamos en el form.
+        logger.warning(
+            f"_asegurar_en_tabla_emitidos: URL inesperada '{page.url}' "
+            f"— el portal devolvio al usuario fuera del formulario."
+        )
+        return False
+    try:
+        tabla = page.locator("#frmPrincipal\\:tablaCompEmitidos_data")
+        if not tabla.count():
+            logger.warning(
+                "_asegurar_en_tabla_emitidos: tabla no presente en el DOM."
+            )
+            return False
+        # is_visible con timeout corto — si tarda mas de 1.5s asumimos que
+        # la tabla no esta cargada y reportamos False.
+        return bool(tabla.first.is_visible(timeout=timeout))
+    except Exception as err:
+        logger.warning(f"_asegurar_en_tabla_emitidos: error de verificacion: {err}")
+        return False
+
+
+def _navegar_a_pagina_emitidos(page, pagina_destino: int, max_clicks: int = 200) -> bool:
+    """Navega la tabla paginada de Emitidos hasta la `pagina_destino` (1-based)
+    haciendo click en el boton "siguiente" de PrimeFaces (`>` / next button).
+
+    Devuelve True si llego a la pagina pedida, False si se agotaron los clicks
+    o no se pudo identificar el control de paginacion.
+
+    El selector tipico del paginador de PrimeFaces en este formulario es
+    `a.ui-paginator-next` dentro del wrapper de la tabla. Tras cada click
+    esperamos al AJAX antes de validar.
+    """
+    if pagina_destino <= 1:
+        return True
+    paginador_actual_sel = "span.ui-paginator-current"
+    next_sel = "#frmPrincipal\\:tablaCompEmitidos_paginator_top a.ui-paginator-next"
+    next_sel_alt = "a.ui-paginator-next"
+    for click_idx in range(max_clicks):
+        # Leer indicador "(X of Y)" — si ya estamos en la pagina destino, salir.
+        try:
+            ind = page.locator(paginador_actual_sel)
+            if ind.count():
+                texto = (ind.first.inner_text() or "").strip()
+                # Formato esperado: "(1 of 12)" o "(8 de 12)"
+                m = re.search(r"\(\s*(\d+)\s*(?:of|de)\s*\d+\s*\)", texto, re.IGNORECASE)
+                if m and int(m.group(1)) >= pagina_destino:
+                    return True
+        except Exception:
+            pass
+        # Hacer click en "siguiente"
+        try:
+            nxt = page.locator(next_sel)
+            if not nxt.count():
+                nxt = page.locator(next_sel_alt)
+            if not nxt.count():
+                logger.warning(
+                    "_navegar_a_pagina_emitidos: no se encontro boton siguiente."
+                )
+                return False
+            # Si el boton next esta deshabilitado, ya estamos en la ultima pagina
+            try:
+                cls_attr = (nxt.first.get_attribute("class") or "").lower()
+                if "ui-state-disabled" in cls_attr:
+                    return click_idx + 1 >= pagina_destino  # llegamos al final
+            except Exception:
+                pass
+            nxt.first.click(timeout=3000)
+            _esperar_ajax(page, timeout=4000)
+            page.wait_for_timeout(200)
+        except Exception as err:
+            logger.warning(
+                f"_navegar_a_pagina_emitidos: click siguiente fallo en iter {click_idx}: {err}"
+            )
+            return False
+    logger.warning(
+        f"_navegar_a_pagina_emitidos: agote {max_clicks} clicks sin llegar a pagina {pagina_destino}."
+    )
+    return False
+
+
+def _recuperar_formulario_emitidos(
+    page,
+    *,
+    tipo_visible: Optional[str] = None,
+    estado_visible: Optional[str] = None,
+    fecha_emision: Optional[str] = None,
+    establecimiento: Optional[str] = None,
+    punto_emision: Optional[str] = None,
+    pagina_destino: int = 1,
+) -> bool:
+    """Recupera el formulario de Emitidos despues de una redireccion no deseada
+    (ej. SRI devolvio el navegador a `/contribuyente/perfil`).
+
+    Pasos:
+      1. Re-abrir el modulo Consultas → Emitidos (sin re-loguear; las cookies
+         vivas suelen alcanzar). Si el SRI exige login, devuelve False y
+         el caller debe propagar para que el worker maneje la reautenticacion.
+      2. Re-aplicar los filtros que estaban activos (tipo, estado, fecha,
+         establecimiento, punto emision).
+      3. Hacer click en Consultar para regenerar la tabla.
+      4. Navegar paginando hasta `pagina_destino` para retomar la posicion.
+
+    Devuelve True si la tabla quedo lista en la pagina pedida; False si fallo
+    en algun paso (el caller debe registrar el error y eventualmente abortar).
+    """
+    try:
+        _abrir_modulo_consultas(page, "Emitidos")
+    except Exception as err:
+        logger.warning(f"_recuperar_formulario_emitidos: no se pudo abrir modulo: {err}")
+        return False
+
+    # Re-aplicar filtros con tolerancia a fallos parciales — algun filtro
+    # opcional puede no estar presente segun el caso.
+    if tipo_visible:
+        try:
+            _seleccionar_en_select(
+                page, "select#frmPrincipal\\:cmbTipoComprobante", tipo_visible
+            )
+        except Exception as err:
+            logger.warning(f"recuperar: no se pudo set tipo='{tipo_visible}': {err}")
+    if estado_visible:
+        try:
+            _seleccionar_en_select(
+                page, "select#frmPrincipal\\:cmbEstadoAutorizacion", estado_visible
+            )
+        except Exception as err:
+            logger.warning(f"recuperar: no se pudo set estado='{estado_visible}': {err}")
+    if fecha_emision:
+        try:
+            fecha_loc = page.locator("input#frmPrincipal\\:calendarFechaDesde_input")
+            if fecha_loc.count():
+                fecha_loc.first.fill("")
+                fecha_loc.first.fill(fecha_emision)
+        except Exception as err:
+            logger.warning(f"recuperar: no se pudo set fecha='{fecha_emision}': {err}")
+    if establecimiento:
+        try:
+            _seleccionar_en_select(
+                page, "select#frmPrincipal\\:cmbEstablecimiento", establecimiento
+            )
+        except Exception:
+            pass
+    if punto_emision:
+        try:
+            pto_loc = page.locator("input#frmPrincipal\\:txtPuntoEmision")
+            if pto_loc.count():
+                pto_loc.first.fill("")
+                pto_loc.first.fill(punto_emision)
+        except Exception:
+            pass
+
+    # Click Consultar
+    try:
+        consultar_btn = page.locator(
+            "input[type='submit'][value='Consultar'], button:has-text('Consultar')"
+        )
+        if consultar_btn.count():
+            consultar_btn.first.click()
+            page.wait_for_load_state("networkidle", timeout=15000)
+        _esperar_ajax(page, timeout=5000)
+    except Exception as err:
+        logger.warning(f"recuperar: click Consultar fallo: {err}")
+        return False
+
+    # Validar que la tabla quedo visible
+    if not _asegurar_en_tabla_emitidos(page, timeout=3000):
+        logger.warning("recuperar: tabla no quedo visible tras Consultar.")
+        return False
+
+    # Navegar a la pagina destino
+    if pagina_destino > 1:
+        if not _navegar_a_pagina_emitidos(page, pagina_destino):
+            logger.warning(
+                f"recuperar: no se llego a pagina {pagina_destino} despues de consultar."
+            )
+            return False
+
+    return True
+
+
 def _esperar_ajax(page, timeout: int = 1000):
     """Espera a que la cola AJAX de PrimeFaces quede vacia para evitar sobrescrituras."""
     try:

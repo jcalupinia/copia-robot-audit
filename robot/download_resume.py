@@ -98,6 +98,15 @@ def build_checkpoint_payload(user_email: str | None, params: dict[str, Any]) -> 
             "last_completed_day": None,
             "last_completed_label": "",
             "completed_days": 0,
+            # Granularidad fina (paginacion en SRI). Cuando el robot se
+            # interrumpe a mitad de un dia (por ej. timeout, SRI tira al
+            # home, navegador cerrado), estos campos permiten retomar
+            # exactamente desde la pagina y fila donde quedo, en lugar de
+            # re-empezar el dia desde pag 1 fila 1. Se actualizan al
+            # cerrar cada lote (cada 10 filas procesadas).
+            "current_page": 1,           # pagina actual en la tabla del SRI (1-based)
+            "current_row_index": 0,      # indice de fila ya completada (0-based)
+            "total_rows_on_page": 0,     # total de filas en la pagina actual
         },
         "last_error": "",
         # cancel_reason: "user" si el usuario presiono Detener;
@@ -181,7 +190,32 @@ def update_checkpoint_progress(
     next_day: int | None,
     last_completed_day: int | None,
     last_completed_label: str,
+    current_page: int | None = None,
+    current_row_index: int | None = None,
+    total_rows_on_page: int | None = None,
 ) -> dict[str, Any] | None:
+    """Actualiza el progreso del checkpoint.
+
+    Los 3 kwargs nuevos (`current_page`, `current_row_index`, `total_rows_on_page`)
+    son OPCIONALES — si vienen en None NO se modifican los valores previos.
+    Esto preserva compatibilidad con todas las llamadas existentes (Recibidos
+    y cierres de mes en Emitidos) que solo manejan granularidad por dia.
+
+    Llamada desde el flujo de Emitidos al cerrar cada lote (10 filas):
+        update_checkpoint_progress(
+            path, next_month=5, next_day=15, last_completed_day=None,
+            last_completed_label="15/05/2024 (pag 8, lote 3 = 30/50 filas)",
+            current_page=8, current_row_index=30, total_rows_on_page=50,
+        )
+
+    Al cerrar un dia completo (limpia el progreso fino para arrancar fresco
+    el dia siguiente):
+        update_checkpoint_progress(
+            path, next_month=5, next_day=16, last_completed_day=15,
+            last_completed_label="15/05/2024",
+            current_page=1, current_row_index=0, total_rows_on_page=0,
+        )
+    """
     data = load_checkpoint(path)
     if not data:
         return None
@@ -196,6 +230,13 @@ def update_checkpoint_progress(
             "completed_days": completed_days,
         }
     )
+    # Campos finos: solo updated si se pasa un valor (no None).
+    if current_page is not None:
+        progress["current_page"] = int(current_page)
+    if current_row_index is not None:
+        progress["current_row_index"] = int(current_row_index)
+    if total_rows_on_page is not None:
+        progress["total_rows_on_page"] = int(total_rows_on_page)
     data["status"] = "running"
     data["progress"] = progress
     data["last_error"] = ""

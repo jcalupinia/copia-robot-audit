@@ -2374,9 +2374,40 @@ def _map_factura_legada_a_emitidos_row(legacy: dict | None) -> dict:
         row["Forma Pago"] = "No Disponible - No Disponible"
     total_sin_imp = _numero_emitidos_retencion(legacy.get("subtotalSinImpuestos"))
     row["Total Sin Impuestos"] = total_sin_imp
-    row["Base Gravada"] = 0
-    row["Base No Gravada"] = total_sin_imp
-    row["Tarifas IVA"] = "0%"
+    # Bases por tarifa. Antes estaba HARDCODED `Base Gravada = 0` y
+    # `Base No Gravada = total_sin_imp` (incorrecto: total_sin_imp es la
+    # base TOTAL, mezcla gravada + no gravada). Ahora sumamos por tarifa:
+    # - Gravada = subtotal15 + subtotal12 + subtotal8 + subtotal5
+    # - No gravada = subtotal0 + exento IVA + no objeto IVA
+    base_gravada_total = sum(
+        v for v in [
+            _numero_emitidos_retencion(legacy.get("subtotal15")) or 0,
+            _numero_emitidos_retencion(legacy.get("subtotal12")) or 0,
+            _numero_emitidos_retencion(legacy.get("subtotal8")) or 0,
+            _numero_emitidos_retencion(legacy.get("subtotal5")) or 0,
+        ]
+    )
+    base_no_gravada_total = sum(
+        v for v in [
+            _numero_emitidos_retencion(legacy.get("subtotal0")) or 0,
+            _numero_emitidos_retencion(legacy.get("subtotalExentoIVA")) or 0,
+            _numero_emitidos_retencion(legacy.get("subtotalNoObjetoIVA")) or 0,
+        ]
+    )
+    row["Base Gravada"] = base_gravada_total
+    row["Base No Gravada"] = base_no_gravada_total
+    # Tarifas IVA: detectar cual de las tarifas aplico en esta factura
+    # (antes hardcoded "0%" que no se correspondia con la realidad).
+    if _numero_emitidos_retencion(legacy.get("iva15")):
+        row["Tarifas IVA"] = "15%"
+    elif _numero_emitidos_retencion(legacy.get("iva12")):
+        row["Tarifas IVA"] = "12%"
+    elif _numero_emitidos_retencion(legacy.get("iva8")):
+        row["Tarifas IVA"] = "8%"
+    elif _numero_emitidos_retencion(legacy.get("iva5")):
+        row["Tarifas IVA"] = "5%"
+    else:
+        row["Tarifas IVA"] = "0%"
     row["Monto IVA"] = (
         _numero_emitidos_retencion(legacy.get("iva15"))
         or _numero_emitidos_retencion(legacy.get("iva12"))
@@ -2386,7 +2417,16 @@ def _map_factura_legada_a_emitidos_row(legacy: dict | None) -> dict:
     row["Total Descuento"] = _numero_emitidos_retencion(legacy.get("totalDescuento"))
     row["Propina"] = _numero_emitidos_retencion(legacy.get("propina"))
     row["Importe Total"] = _numero_emitidos_retencion(legacy.get("valorTotal"))
-    row["Total Pago"] = 0
+    # Total Pago: antes hardcoded a 0. Ahora usamos el monto de la primera
+    # forma de pago detectada (el extractor del PDF guarda en
+    # formaPagoPrimeraMonto el numero que aparece en la fila de
+    # "01 - SIN UTILIZACION DEL SISTEMA FINANCIERO  9.48"). Si no se
+    # detecto, hacemos fallback al Importe Total (la mayoria de facturas
+    # con UNA sola forma de pago tienen Total Pago = Importe Total).
+    total_pago = _numero_emitidos_retencion(legacy.get("formaPagoPrimeraMonto"))
+    if not total_pago:
+        total_pago = row["Importe Total"]
+    row["Total Pago"] = total_pago
     # Campos Adicionales: el formato EMITIDOS usa "; " como separador entre
     # cada item (eMail:, Vendedor:, Telefono:, etc.), no "\n" como el legacy.
     info_adic = legacy.get("informacionAdicional")
@@ -2397,7 +2437,13 @@ def _map_factura_legada_a_emitidos_row(legacy: dict | None) -> dict:
         row["Campos Adicionales"] = info_adic
     else:
         row["Campos Adicionales"] = "No Disponible"
-    row["Base No Gravada 0%"] = total_sin_imp
+    # Base No Gravada 0% = subtotal con tarifa 0% (SUBTOTAL 0% del PDF).
+    # Antes estaba con total_sin_imp (BASE TOTAL, no solo la del 0%) —
+    # eso ponia el subtotal completo en una columna que deberia ser solo
+    # la base 0%.
+    row["Base No Gravada 0%"] = (
+        _numero_emitidos_retencion(legacy.get("subtotal0")) or 0
+    )
     return row
 
 
@@ -3275,9 +3321,35 @@ def _extraer_datos_pdf_factura(pdf_path: Path) -> dict:
         with pdfplumber.open(pdf_path) as pdf:
             if not pdf.pages:
                 return datos
-            page = pdf.pages[0]
-            words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
-            tables = page.extract_tables() or []
+            # MULTI-PAGINA: las facturas grandes (>=2 paginas) tienen los
+            # totales (SUBTOTAL, IVA, VALOR TOTAL, etc.) en la pagina final,
+            # NO en la pagina 1. Si solo leyeramos pages[0] todos los campos
+            # numericos quedan en "0". Acumulamos palabras y tablas de
+            # TODAS las paginas y desplazamos las coordenadas Y de cada
+            # pagina por la altura acumulada de las anteriores para
+            # preservar el orden visual al agrupar lineas (la funcion
+            # _agrupar_palabras_visuales usa Y para juntar palabras de una
+            # misma linea — sin shift, palabras de pag 2 con el mismo Y
+            # que palabras de pag 1 se mezclarian rompiendo el orden).
+            words = []
+            tables = []
+            y_offset = 0.0
+            for page in pdf.pages:
+                pw = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
+                if y_offset > 0:
+                    for w in pw:
+                        for k in ("top", "bottom", "y0", "y1", "doctop"):
+                            if k in w:
+                                try:
+                                    w[k] = w[k] + y_offset
+                                except (TypeError, ValueError):
+                                    pass
+                words.extend(pw)
+                tables.extend(page.extract_tables() or [])
+                try:
+                    y_offset += float(page.height or 0)
+                except (TypeError, ValueError):
+                    pass
     except Exception as exc:
         logger.warning("PDF factura: error abriendo %s: %s", pdf_path, exc)
         return datos

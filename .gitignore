@@ -34,3 +34,7 @@ desktop_config.json
 
 # Carpeta del mockup de referencia (no se commitea al repo de la app real).
 Proyectos-de-Claude-main/
+
+# Datos del SRI compartidos para debugging — NUNCA commitearlos.
+Emitidos-Facturas-Reporte/
+_debug_*/

@@ -1326,9 +1326,35 @@ def descargar_sri(
                 reportes_pdf_generados = []
                 reportes_xml_generados = []
                 resultado_mes = None
+                # Para resume con granularidad pagina+fila: leer del progress
+                # del checkpoint los campos current_page / current_row_index.
+                # Solo aplican al PRIMER dia que entre al loop (idx_dia == 0).
+                _resume_page_start = 1
+                _resume_row_start = 0
+                if (
+                    resume_download
+                    and isinstance(progress_data, dict)
+                    and mes_actual == resume_month
+                ):
+                    try:
+                        _resume_page_start = max(1, int(progress_data.get("current_page") or 1))
+                        _resume_row_start = max(0, int(progress_data.get("current_row_index") or 0))
+                    except (TypeError, ValueError):
+                        _resume_page_start, _resume_row_start = 1, 0
                 for idx_dia, dia_iter in enumerate(dias_consultar):
                     _check_cancel("emitidos_dia")
                     fecha_actual = f"{dia_iter:02d}/{mes_actual:02d}/{anio}"
+                    # El resume fino (pagina/fila) SOLO aplica al primer dia
+                    # del loop y SOLO si coincide con el dia donde quedo el
+                    # checkpoint. Para los siguientes dias arrancamos en pag 1
+                    # fila 0 normalmente.
+                    _aplica_resume_fino = (
+                        idx_dia == 0
+                        and resume_download
+                        and dia_iter == resume_day
+                    )
+                    _page_param = _resume_page_start if _aplica_resume_fino else 1
+                    _row_param = _resume_row_start if _aplica_resume_fino else 0
                     resultado_dia = _flujo_emitidos(
                         modulo_page,
                         destino_objetivo,
@@ -1339,6 +1365,11 @@ def descargar_sri(
                         punto_emision,
                         formatos,
                         ruc_emisor=ruc,
+                        checkpoint_path=checkpoint_path_str or None,
+                        resume_page=_page_param,
+                        resume_row_index=_row_param,
+                        current_month=int(mes_actual),
+                        current_day=int(dia_iter),
                     )
                     detalle_dias.append(
                         {
@@ -1368,6 +1399,13 @@ def descargar_sri(
                             next_day=int(dias_consultar[idx_dia + 1]),
                             last_completed_day=int(dia_iter),
                             last_completed_label=f"{dia_iter:02d}/{mes_actual:02d}/{anio}",
+                            # Reset granularidad fina: el siguiente dia empieza
+                            # desde pag 1 fila 0. Si NO reseteamos, el resume
+                            # de un dia subsiguiente intentaria saltar a la
+                            # pagina del dia previo, fallando.
+                            current_page=1,
+                            current_row_index=0,
+                            total_rows_on_page=0,
                         )
                     n_registros_dia = int(resultado_dia.get("n_registros", 0) or 0)
                     hay_mas_trabajo = (
