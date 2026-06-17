@@ -5196,6 +5196,180 @@ with tab2:
             elif custom_report_result.get("message"):
                 st.warning(custom_report_result.get("message"))
 
+    # =====================================================================
+    # MODULO AISLADO: Cruce de Notas de Credito vs Facturas modificadas.
+    # Este card es INDEPENDIENTE del flujo normal de descarga (no usa
+    # las credenciales del tab1) — el usuario debe ingresarlas aqui
+    # explicitamente para evitar mezclar RUCs de NCs vs Facturas.
+    # =====================================================================
+    with _group_card(
+        2,
+        "Reporte Notas de Crédito vs Facturas",
+        "Cruce automático con búsqueda local + portal SRI",
+    ):
+        st.markdown(
+            "Genera un Excel que cruza cada **Nota de Crédito** con la "
+            "**Factura original** que modifica, y calcula el **valor neto** "
+            "(`Total Factura − Total NC`).\n\n"
+            "El sistema busca primero la Factura en tu carpeta local. "
+            "Si no la encuentra, abre el portal del SRI con las "
+            "credenciales que ingreses aquí y consulta la tabla de "
+            "comprobantes Emitidos Autorizados."
+        )
+
+        st.warning(
+            "⚠️ Las credenciales deben corresponder al **mismo RUC** que "
+            "emitió las Notas de Crédito. No reutilizamos las del tab "
+            "'Descarga de Comprobantes' para evitar incongruencias entre "
+            "el RUC consultado y el RUC de las NCs."
+        )
+
+        col_nc_ruc, col_nc_clave = st.columns([1, 1])
+        with col_nc_ruc:
+            nc_ruc = st.text_input(
+                "RUC del emisor de las Notas de Crédito",
+                placeholder="Ejemplo: 0999999001",
+                key="nc_vs_fact_ruc",
+            )
+        with col_nc_clave:
+            nc_clave = st.text_input(
+                "Clave del SRI",
+                type="password",
+                placeholder="********",
+                key="nc_vs_fact_clave",
+            )
+
+        # Carpeta NC con default = misma carpeta de descargas activa.
+        if "nc_vs_fact_carpeta" not in st.session_state:
+            st.session_state["nc_vs_fact_carpeta"] = st.session_state.get(
+                "download_base_dir", str(DESC_DIR)
+            )
+        if "_nc_vs_fact_carpeta_pending" in st.session_state:
+            pending_dir = st.session_state.pop("_nc_vs_fact_carpeta_pending")
+            st.session_state["nc_vs_fact_carpeta"] = pending_dir
+            st.session_state["nc_vs_fact_carpeta_input"] = pending_dir
+        if "nc_vs_fact_carpeta_input" not in st.session_state:
+            st.session_state["nc_vs_fact_carpeta_input"] = st.session_state.get(
+                "nc_vs_fact_carpeta", str(DESC_DIR)
+            )
+        st.text_input(
+            "Carpeta con Notas de Crédito ya descargadas",
+            key="nc_vs_fact_carpeta_input",
+            help=(
+                "Carpeta de Notas de Crédito previamente descargadas por la "
+                "app. Puede ser el mes específico o cualquier nivel superior; "
+                "el sistema explora recursivamente."
+            ),
+        )
+        if st.button(
+            "Seleccionar carpeta de Notas de Crédito",
+            key="btn_nc_vs_fact_select_dir",
+        ):
+            seleccionada, error = _select_directory_dialog(
+                st.session_state.get("nc_vs_fact_carpeta_input")
+            )
+            if seleccionada:
+                st.session_state["_nc_vs_fact_carpeta_pending"] = str(
+                    Path(seleccionada).expanduser()
+                )
+                st.rerun()
+            if error:
+                st.warning(error)
+
+        if st.button(
+            "📊 Generar reporte Valor Neto Facturacion Electronica",
+            key="btn_nc_vs_fact_generar",
+            use_container_width=True,
+            type="primary",
+        ):
+            _ruc_clean = (nc_ruc or "").strip()
+            _clave_clean = (nc_clave or "").strip()
+            _carpeta_clean = (
+                st.session_state.get("nc_vs_fact_carpeta_input") or ""
+            ).strip()
+            if not _ruc_clean or not _clave_clean:
+                st.error(
+                    "Debes ingresar RUC y clave del SRI para que el sistema "
+                    "pueda consultar facturas no encontradas localmente."
+                )
+            elif not _carpeta_clean or not Path(_carpeta_clean).expanduser().is_dir():
+                st.error(
+                    "La carpeta indicada no existe. Selecciona una ruta "
+                    "válida con Notas de Crédito descargadas."
+                )
+            else:
+                _output_dir = Path(_carpeta_clean).expanduser()
+                _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                _output_excel = _output_dir / f"NC_vs_Facturas_{_ts}.xlsx"
+
+                # Importacion perezosa para no inflar el tiempo de carga del
+                # tab si el modulo nunca se usa.
+                from robot.nc_vs_factura import generar_reporte_valor_neto
+
+                _status_msgs: list[str] = []
+
+                def _on_progress(msg: str) -> None:
+                    _status_msgs.append(msg)
+
+                with st.status(
+                    "Procesando Notas de Crédito vs Facturas...",
+                    expanded=True,
+                ) as _status:
+                    try:
+                        resultado = generar_reporte_valor_neto(
+                            carpeta_nc=_carpeta_clean,
+                            ruc=_ruc_clean,
+                            clave=_clave_clean,
+                            salida_excel=_output_excel,
+                            progress=lambda m: (_on_progress(m), _status.update(label=m)),
+                        )
+                        for msg in _status_msgs:
+                            st.write(msg)
+                        if resultado.get("ok"):
+                            _status.update(
+                                label=resultado.get("message", "Reporte generado."),
+                                state="complete",
+                            )
+                            st.session_state["nc_vs_fact_result"] = resultado
+                        else:
+                            _status.update(
+                                label=resultado.get("message", "No se pudo generar."),
+                                state="error",
+                            )
+                            st.session_state["nc_vs_fact_result"] = resultado
+                    except Exception as exc:
+                        _status.update(
+                            label=f"Error inesperado: {exc}", state="error"
+                        )
+                        st.session_state["nc_vs_fact_result"] = {
+                            "ok": False,
+                            "message": str(exc),
+                            "excel_path": "",
+                        }
+
+        _nc_result = st.session_state.get("nc_vs_fact_result")
+        if isinstance(_nc_result, dict) and _nc_result.get("ok"):
+            st.success(
+                f"✅ Reporte generado: {_nc_result.get('total_nc', 0)} NC procesada(s) — "
+                f"local: {_nc_result.get('encontradas_local', 0)}, "
+                f"remoto SRI: {_nc_result.get('encontradas_remoto', 0)}, "
+                f"no encontradas: {_nc_result.get('no_encontradas', 0)}, "
+                f"errores: {_nc_result.get('errores', 0)}."
+            )
+            _excel_path = Path(_nc_result.get("excel_path", ""))
+            if _excel_path.is_file():
+                with open(_excel_path, "rb") as _f:
+                    st.download_button(
+                        "⬇️ Descargar reporte Valor Neto (Excel)",
+                        data=_f.read(),
+                        file_name=_excel_path.name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_download_nc_vs_fact",
+                        use_container_width=True,
+                    )
+        elif isinstance(_nc_result, dict) and not _nc_result.get("ok"):
+            st.error(_nc_result.get("message", "No se pudo generar el reporte."))
+
     st.markdown('<h3 class="historial-title">Historial de ejecuciones recientes</h3>', unsafe_allow_html=True)
     historial = obtener_historial(DEVICE_FINGERPRINT)
     historial_raw = historial.copy()

@@ -1,0 +1,896 @@
+"""Cruce de Notas de Credito Emitidas vs Facturas modificadas.
+
+Modulo aislado del flujo normal de descarga: lee NC desde una carpeta ya
+descargada por la app, busca la Factura modificada (primero localmente,
+luego en el portal del SRI si no esta), calcula el valor neto y exporta
+todo a un Excel con columnas estandar + Estado + Observacion.
+
+Diseño:
+- Solo procesa NC Emitidas (cod=04) que modifican Facturas (codDocModificado=01).
+- Reutiliza completamente las funciones de extraccion XML/PDF existentes
+  (xml_extraction, pdf_extraction) — no reimplementa nada.
+- La busqueda remota Playwright se hace en una sesion INDEPENDIENTE del
+  flujo de Descarga: distintos cookies, distinto contexto. No interfiere
+  con descargas en paralelo.
+- Si una NC no puede procesarse (falta de campos, error de IO, etc.) NO
+  rompe el reporte: queda como fila con Estado="Error" y Observacion
+  explicando el motivo.
+
+Punto de entrada principal: `generar_reporte_valor_neto(params, ...)`.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import threading
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+
+from robot.file_utils import _mes_a_texto
+
+logger = logging.getLogger("robot.nc_vs_factura")
+
+
+# =============================================================================
+# Constantes de columnas del reporte final
+# =============================================================================
+
+COLUMNAS_REPORTE = [
+    "RUC",
+    "Fecha nota de credito",
+    "Serie nota de credito",
+    "Clave acceso nota de credito",
+    "Valor total nota de credito",
+    "Factura modificada",
+    "Fecha factura modificada",
+    "Clave acceso factura",
+    "Valor total factura",
+    "Valor neto",
+    "Estado",
+    "Observacion",
+]
+
+# Columnas forzadas a texto en Excel (claves de acceso largas + secuenciales
+# que Excel interpretaria como numeros y perderia ceros a la izquierda).
+COLUMNAS_TEXT_FORCE = {
+    "RUC",
+    "Serie nota de credito",
+    "Clave acceso nota de credito",
+    "Factura modificada",
+    "Clave acceso factura",
+}
+
+# Columnas numericas (con formato monetario en el Excel).
+COLUMNAS_NUMERICAS = {
+    "Valor total nota de credito",
+    "Valor total factura",
+    "Valor neto",
+}
+
+
+# =============================================================================
+# Utilidades de parseo y normalizacion
+# =============================================================================
+
+
+def _parse_fecha_es(valor: str) -> Optional[datetime]:
+    """Parsea fechas en formato del SRI: DD/MM/YYYY o YYYY-MM-DD.
+
+    Devuelve None si no matchea.
+    """
+    if not valor:
+        return None
+    valor = str(valor).strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(valor, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _safe_float(valor: Any) -> Optional[float]:
+    """Convierte un valor a float aceptando coma decimal del SRI. None si no se puede."""
+    if valor is None or valor == "":
+        return None
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    txt = str(valor).strip().replace(",", ".")
+    txt = re.sub(r"[^0-9.\-]", "", txt)
+    try:
+        return float(txt)
+    except (ValueError, TypeError):
+        return None
+
+
+def _normalizar_secuencial(num_doc: str) -> str:
+    """Normaliza un secuencial del SRI a 'NNN-NNN-NNNNNNNNN'.
+
+    Acepta variantes: '002-002-000110921', '002002000110921',
+    '2-2-110921' (sin padding). Devuelve string vacio si no parsea.
+    """
+    if not num_doc:
+        return ""
+    txt = str(num_doc).strip()
+    # Quitar separadores y dejar solo digitos
+    partes = re.split(r"[-_\s]+", txt)
+    if len(partes) == 3:
+        try:
+            est = int(partes[0])
+            pto = int(partes[1])
+            sec = int(partes[2])
+            return f"{est:03d}-{pto:03d}-{sec:09d}"
+        except ValueError:
+            pass
+    # Sin separadores: 15 digitos = 3+3+9
+    solo_dig = re.sub(r"\D", "", txt)
+    if len(solo_dig) == 15:
+        return f"{solo_dig[:3]}-{solo_dig[3:6]}-{solo_dig[6:]}"
+    return txt  # devolver como vino si no se puede normalizar
+
+
+# =============================================================================
+# Localizacion de archivos en la carpeta del sistema
+# =============================================================================
+
+
+def _es_xml_de_nc(path: Path) -> bool:
+    """Heuristica rapida: nombre del archivo empieza con 'Nota' o el tipo
+    'NotaCredito' (el sistema usa _nombre_documento_mes con prefijo del tipo).
+    """
+    if path.suffix.lower() != ".xml":
+        return False
+    name = path.name.lower()
+    return (
+        name.startswith("nota")
+        or "credito" in name
+        or "nc_" in name
+        or "_nc_" in name
+    )
+
+
+def _es_pdf_de_nc(path: Path) -> bool:
+    if path.suffix.lower() != ".pdf":
+        return False
+    name = path.name.lower()
+    return (
+        name.startswith("nota")
+        or "credito" in name
+        or "nc_" in name
+        or "_nc_" in name
+    )
+
+
+def _listar_notas_credito_en_carpeta(carpeta: Path) -> list[tuple[Path, str]]:
+    """Devuelve una lista de tuplas (path, source) donde source es 'xml' o 'pdf'.
+
+    Recorre recursivamente carpeta/ y se queda solo con archivos que parecen
+    Notas de Credito. Si una NC tiene XML y PDF, se queda solo con el XML
+    (preferimos XML por confiabilidad).
+    """
+    xml_files: dict[str, Path] = {}
+    pdf_files: dict[str, Path] = {}
+    for p in carpeta.rglob("*"):
+        if not p.is_file():
+            continue
+        if _es_xml_de_nc(p):
+            xml_files[p.stem] = p
+        elif _es_pdf_de_nc(p):
+            pdf_files[p.stem] = p
+
+    resultado: list[tuple[Path, str]] = []
+    for stem, xml_path in xml_files.items():
+        resultado.append((xml_path, "xml"))
+    for stem, pdf_path in pdf_files.items():
+        if stem not in xml_files:
+            resultado.append((pdf_path, "pdf"))
+    return sorted(resultado, key=lambda t: t[0].name.lower())
+
+
+def _inferir_base_descargas(nc_path: Path) -> Optional[Path]:
+    """Dada la ruta de una NC dentro de la estructura del sistema, devuelve
+    la carpeta [base]/[RUC] desde donde nace el arbol Emitidos/Recibidos.
+
+    Estructura esperada:
+        [base]/[RUC]/Emitidos/Autorizados/Notas de Credito/[Anio]/[Mes]/XML/file.xml
+                              ^ buscamos este nivel y devolvemos su parent
+
+    Devuelve None si no encuentra 'Emitidos' en el path.
+    """
+    for ancestro in nc_path.parents:
+        if ancestro.name == "Emitidos":
+            return ancestro.parent  # parent de Emitidos = carpeta [RUC] (o equivalente)
+    return None
+
+
+def _construir_ruta_factura_mes(
+    base_ruc: Path, fecha_factura: datetime, formato: str = "XML"
+) -> Path:
+    """Construye la ruta esperada para Facturas Emitidas Autorizadas de un mes.
+
+    [base_ruc]/Emitidos/Autorizados/Facturas/[YYYY]/[Mes_texto]/[formato]/
+    """
+    return (
+        base_ruc
+        / "Emitidos"
+        / "Autorizados"
+        / "Facturas"
+        / f"{fecha_factura.year:04d}"
+        / _mes_a_texto(fecha_factura.month)
+        / formato
+    )
+
+
+def _buscar_factura_local(
+    base_ruc: Path, secuencial: str, fecha_factura: datetime
+) -> Optional[tuple[Path, str]]:
+    """Busca la Factura emitida en la estructura local.
+
+    Estrategia:
+    1. Construir la ruta del mes correspondiente
+    2. Hacer glob por secuencial (los archivos llevan el secuencial en el nombre,
+       patron de _nombre_documento_mes: 'Factura__YYYYMMDD__...secuencial...').
+    3. Preferir XML; fallback PDF.
+
+    Devuelve (path, 'xml'|'pdf') o None.
+    """
+    if not secuencial:
+        return None
+    # El secuencial puede aparecer en el nombre con o sin guiones segun
+    # el patron de _construir_nombre_xml_emitido. Probamos ambas formas.
+    sec_normalizado = _normalizar_secuencial(secuencial)
+    sec_sin_guiones = sec_normalizado.replace("-", "")
+    patrones = [f"*{sec_normalizado}*", f"*{sec_sin_guiones}*"]
+
+    # Si tenemos fecha, buscar solo en el mes correspondiente (mas rapido).
+    # Si no, hacer un walk completo bajo Emitidos/Autorizados/Facturas.
+    carpetas_busqueda: list[Path] = []
+    if fecha_factura is not None:
+        carpetas_busqueda.append(_construir_ruta_factura_mes(base_ruc, fecha_factura, "XML"))
+        carpetas_busqueda.append(_construir_ruta_factura_mes(base_ruc, fecha_factura, "PDF"))
+    else:
+        raiz = base_ruc / "Emitidos" / "Autorizados" / "Facturas"
+        if raiz.is_dir():
+            carpetas_busqueda.extend([d for d in raiz.rglob("XML") if d.is_dir()])
+            carpetas_busqueda.extend([d for d in raiz.rglob("PDF") if d.is_dir()])
+
+    # Buscar XML primero
+    for carpeta in carpetas_busqueda:
+        if not carpeta.is_dir() or carpeta.name != "XML":
+            continue
+        for patron in patrones:
+            for archivo in carpeta.glob(patron):
+                if archivo.is_file() and archivo.suffix.lower() == ".xml":
+                    return (archivo, "xml")
+    # Fallback PDF
+    for carpeta in carpetas_busqueda:
+        if not carpeta.is_dir() or carpeta.name != "PDF":
+            continue
+        for patron in patrones:
+            for archivo in carpeta.glob(patron):
+                if archivo.is_file() and archivo.suffix.lower() == ".pdf":
+                    return (archivo, "pdf")
+    return None
+
+
+# =============================================================================
+# Extraccion de datos (delegada a las funciones existentes del robot)
+# =============================================================================
+
+
+def _extraer_datos_nc(nc_path: Path, source: str) -> dict:
+    """Extrae los campos relevantes de una NC. Reutiliza extractors existentes.
+
+    Devuelve dict con: ruc, fecha_emision, secuencial, clave_acceso,
+    importe_total, num_doc_modificado, fecha_emision_doc_sustento,
+    cod_doc_modificado, _err (mensaje de error si fallo).
+    """
+    out = {
+        "ruc": "",
+        "fecha_emision": "",
+        "secuencial": "",
+        "clave_acceso": "",
+        "importe_total": None,
+        "num_doc_modificado": "",
+        "fecha_emision_doc_sustento": "",
+        "cod_doc_modificado": "",
+        "_err": "",
+    }
+    try:
+        if source == "xml":
+            from robot.xml_extraction import _extraer_datos_xml_nota_credito_emitido
+            datos = _extraer_datos_xml_nota_credito_emitido(nc_path)
+        else:
+            from robot.pdf_extraction import (
+                _extraer_datos_pdf_nota_credito_emitido,
+            )
+            datos = _extraer_datos_pdf_nota_credito_emitido(nc_path)
+    except Exception as exc:
+        out["_err"] = f"No se pudo leer la NC ({source.upper()}): {exc}"
+        return out
+
+    if not isinstance(datos, dict):
+        out["_err"] = "Datos invalidos en la NC."
+        return out
+
+    out["ruc"] = str(datos.get("RUC Emisor") or "").strip()
+    out["fecha_emision"] = str(datos.get("Fecha de Emisión") or "").strip()
+    out["secuencial"] = str(datos.get("Secuencial") or "").strip()
+    out["clave_acceso"] = str(datos.get("Clave de Acceso") or "").strip()
+    out["importe_total"] = _safe_float(datos.get("Importe Total"))
+    out["num_doc_modificado"] = str(datos.get("Número Documento Modificado") or "").strip()
+    out["fecha_emision_doc_sustento"] = str(
+        datos.get("Fecha Emisión Doc. Sustento") or ""
+    ).strip()
+    out["cod_doc_modificado"] = str(datos.get("Código Documento Modificado") or "").strip()
+    return out
+
+
+def _extraer_datos_factura(factura_path: Path, source: str) -> dict:
+    """Extrae los campos relevantes de una Factura emitida.
+
+    Devuelve dict con: ruc, fecha_emision, secuencial, clave_acceso,
+    importe_total, _err.
+    """
+    out = {
+        "ruc": "",
+        "fecha_emision": "",
+        "secuencial": "",
+        "clave_acceso": "",
+        "importe_total": None,
+        "_err": "",
+    }
+    try:
+        if source == "xml":
+            from robot.xml_extraction import _extraer_datos_xml_factura_emitido
+            datos = _extraer_datos_xml_factura_emitido(factura_path)
+        else:
+            from robot.pdf_extraction import _extraer_datos_pdf_factura_emitido
+            datos = _extraer_datos_pdf_factura_emitido(factura_path)
+    except Exception as exc:
+        out["_err"] = f"No se pudo leer la Factura ({source.upper()}): {exc}"
+        return out
+
+    if not isinstance(datos, dict):
+        out["_err"] = "Datos invalidos en la Factura."
+        return out
+
+    out["ruc"] = str(datos.get("RUC Emisor") or "").strip()
+    out["fecha_emision"] = str(datos.get("Fecha de Emisión") or "").strip()
+    out["secuencial"] = str(datos.get("Secuencial") or "").strip()
+    out["clave_acceso"] = str(datos.get("Clave de Acceso") or "").strip()
+    out["importe_total"] = _safe_float(datos.get("Importe Total"))
+    return out
+
+
+# =============================================================================
+# Busqueda REMOTA en el portal SRI (Playwright)
+# =============================================================================
+
+
+def _normalizar_serie_para_match(texto: str) -> str:
+    """Quita guiones, espacios y leading zeros para comparacion robusta."""
+    if not texto:
+        return ""
+    return re.sub(r"[\s\-_]", "", str(texto)).lstrip("0")
+
+
+def _buscar_facturas_remoto(
+    ruc: str,
+    clave: str,
+    pendientes: list[dict],
+    *,
+    cancel_event: Optional[threading.Event] = None,
+    progress: Optional[Callable[[str], None]] = None,
+) -> dict[str, dict]:
+    """Busca en el portal SRI las facturas que no se encontraron localmente.
+
+    `pendientes` es una lista de dicts con minimo: secuencial, fecha (datetime).
+    Devuelve dict { secuencial_normalizado: {importe_total, clave_acceso, fecha,
+    razon_social, _err} } con lo que SI encontro. Las que no encuentre quedan
+    fuera del dict (el caller las marca como "Factura no encontrada en SRI").
+
+    Estrategia:
+    - Agrupa pendientes por fecha (1 consulta SRI por fecha unica)
+    - Para cada fecha:
+      - filtra fecha + tipo=Factura + estado=Autorizados
+      - lee la tabla
+      - para cada secuencial pendiente de esa fecha busca su fila
+    - Maneja cancelacion via cancel_event en cada iteracion
+    """
+    encontradas: dict[str, dict] = {}
+    if not pendientes:
+        return encontradas
+
+    def _emit(msg: str) -> None:
+        if progress:
+            try:
+                progress(msg)
+            except Exception:
+                pass
+        logger.info(msg)
+
+    # Agrupar por fecha (YYYY-MM-DD) para minimizar consultas al portal.
+    por_fecha: dict[str, list[dict]] = {}
+    for item in pendientes:
+        fecha_dt: Optional[datetime] = item.get("fecha")
+        if fecha_dt is None:
+            continue
+        key = fecha_dt.strftime("%Y-%m-%d")
+        por_fecha.setdefault(key, []).append(item)
+
+    if not por_fecha:
+        _emit("No hay fechas validas en las NC pendientes — se omite busqueda remota.")
+        return encontradas
+
+    _emit(
+        f"Iniciando busqueda remota en SRI: {len(por_fecha)} fecha(s) distinta(s) "
+        f"para resolver {len(pendientes)} Factura(s) faltante(s)."
+    )
+
+    from playwright.sync_api import sync_playwright  # import perezoso
+
+    # Cookies aisladas para esta busqueda — NO mezclar con las de descarga.
+    cookies_path = Path(f"cookies_nc_lookup_{ruc}.json")
+
+    # Reusamos las funciones internas del robot existente.
+    from robot.downloader import _login, _abrir_navegador
+    from robot.browser import _abrir_modulo_consultas, _seleccionar_en_select
+    from robot.config import RECUPERAR_COMPROBANTES_URL
+
+    with sync_playwright() as p:
+        context, browser, _persistent = _abrir_navegador(p)
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            _emit("Autenticando en el portal del SRI...")
+            _login(
+                context, page, ruc, clave, cookies_path, RECUPERAR_COMPROBANTES_URL
+            )
+            _emit("Sesion del SRI lista.")
+
+            for fecha_str, items in por_fecha.items():
+                if cancel_event is not None and cancel_event.is_set():
+                    _emit("Busqueda remota cancelada por el usuario.")
+                    break
+
+                fecha_dt = datetime.strptime(fecha_str, "%Y-%m-%d")
+                fecha_display = fecha_dt.strftime("%d/%m/%Y")
+                _emit(
+                    f"Buscando {len(items)} Factura(s) emitidas el {fecha_display}..."
+                )
+
+                # Navegar al modulo Emitidos
+                try:
+                    _abrir_modulo_consultas(page, "Emitidos")
+                except Exception as exc:
+                    _emit(f"No se pudo abrir el modulo de Emitidos: {exc}")
+                    continue
+
+                # Aplicar filtros: fecha + Tipo=Factura + Estado=Autorizados
+                try:
+                    fecha_loc = page.locator(
+                        "input#frmPrincipal\\:calendarFechaDesde_input"
+                    )
+                    if fecha_loc.count():
+                        fecha_loc.first.fill("")
+                        fecha_loc.first.fill(fecha_display)
+                    _seleccionar_en_select(
+                        page,
+                        "select#frmPrincipal\\:cmbTipoComprobante",
+                        "Factura",
+                    )
+                    _seleccionar_en_select(
+                        page,
+                        "select#frmPrincipal\\:cmbEstadoAutorizacion",
+                        "Autorizados",
+                    )
+                    # Click en "Consultar" para ejecutar el filtro
+                    consultar_btn = page.locator(
+                        "input[type='submit'][value='Consultar'], "
+                        "button:has-text('Consultar')"
+                    )
+                    if consultar_btn.count():
+                        consultar_btn.first.click()
+                        page.wait_for_load_state("networkidle", timeout=15000)
+                except Exception as exc:
+                    _emit(f"Error aplicando filtros para {fecha_display}: {exc}")
+                    continue
+
+                # Leer la tabla de resultados
+                try:
+                    tabla = page.locator(
+                        "#frmPrincipal\\:tablaCompEmitidos_data"
+                    )
+                    filas = tabla.locator("tr")
+                    n_filas = filas.count()
+                except Exception as exc:
+                    _emit(f"No se pudo leer la tabla en {fecha_display}: {exc}")
+                    continue
+
+                # Pre-calcular las series normalizadas que estamos buscando
+                buscados_por_serie: dict[str, dict] = {}
+                for item in items:
+                    sec_norm = _normalizar_serie_para_match(item.get("secuencial", ""))
+                    if sec_norm:
+                        buscados_por_serie[sec_norm] = item
+
+                # Recorrer filas
+                hits = 0
+                for idx in range(n_filas):
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
+                    fila = filas.nth(idx)
+                    celdas = fila.locator("td")
+                    if celdas.count() < 8:
+                        continue
+                    try:
+                        tipo_serie_text = celdas.nth(1).inner_text().strip()
+                        clave_text = celdas.nth(2).inner_text().strip()
+                        importe_text = celdas.nth(7).inner_text().strip()
+                    except Exception:
+                        continue
+
+                    # Match exacto por serie normalizada
+                    serie_norm = _normalizar_serie_para_match(
+                        tipo_serie_text.replace("Factura", "")
+                    )
+                    if serie_norm in buscados_por_serie:
+                        item = buscados_por_serie[serie_norm]
+                        key = _normalizar_secuencial(item.get("secuencial", ""))
+                        encontradas[key] = {
+                            "importe_total": _safe_float(importe_text),
+                            "clave_acceso": clave_text,
+                            "tipo_serie_raw": tipo_serie_text,
+                        }
+                        hits += 1
+
+                _emit(
+                    f"Fecha {fecha_display}: {hits}/{len(items)} Factura(s) "
+                    f"encontradas en la tabla del SRI."
+                )
+
+            # Guardar cookies para futuras consultas
+            try:
+                cookies_path.write_text(
+                    json.dumps(context.cookies()), encoding="utf-8"
+                )
+            except Exception:
+                pass
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+            try:
+                if browser is not None:
+                    browser.close()
+            except Exception:
+                pass
+
+    return encontradas
+
+
+# =============================================================================
+# Orquestador principal
+# =============================================================================
+
+
+def _construir_fila(
+    nc_data: dict,
+    factura_data: Optional[dict],
+    estado: str,
+    observacion: str,
+) -> dict:
+    """Construye una fila del Excel a partir de los datos de NC + Factura (opcional)."""
+    valor_nc = nc_data.get("importe_total")
+    valor_factura = factura_data.get("importe_total") if factura_data else None
+    valor_neto = None
+    if valor_factura is not None and valor_nc is not None:
+        valor_neto = round(valor_factura - valor_nc, 2)
+
+    return {
+        "RUC": nc_data.get("ruc", ""),
+        "Fecha nota de credito": nc_data.get("fecha_emision", ""),
+        "Serie nota de credito": nc_data.get("secuencial", ""),
+        "Clave acceso nota de credito": nc_data.get("clave_acceso", ""),
+        "Valor total nota de credito": valor_nc if valor_nc is not None else "",
+        "Factura modificada": _normalizar_secuencial(
+            nc_data.get("num_doc_modificado", "")
+        ),
+        "Fecha factura modificada": nc_data.get("fecha_emision_doc_sustento", ""),
+        "Clave acceso factura": factura_data.get("clave_acceso", "") if factura_data else "",
+        "Valor total factura": valor_factura if valor_factura is not None else "",
+        "Valor neto": valor_neto if valor_neto is not None else "",
+        "Estado": estado,
+        "Observacion": observacion,
+    }
+
+
+def generar_reporte_valor_neto(
+    *,
+    carpeta_nc: str | Path,
+    ruc: str,
+    clave: str,
+    salida_excel: str | Path,
+    cancel_event: Optional[threading.Event] = None,
+    progress: Optional[Callable[[str], None]] = None,
+) -> dict:
+    """Punto de entrada unico del modulo. Lee NC de `carpeta_nc`, cruza contra
+    Facturas (local + remoto si hace falta), genera Excel en `salida_excel`.
+
+    Retorna resumen: {
+        ok: bool,
+        total_nc: int,
+        encontradas_local: int,
+        encontradas_remoto: int,
+        no_encontradas: int,
+        errores: int,
+        excel_path: str,
+        message: str,
+    }
+    """
+    def _emit(msg: str) -> None:
+        if progress:
+            try:
+                progress(msg)
+            except Exception:
+                pass
+        logger.info(msg)
+
+    carpeta_nc_path = Path(carpeta_nc).expanduser()
+    if not carpeta_nc_path.is_dir():
+        return {
+            "ok": False,
+            "total_nc": 0,
+            "encontradas_local": 0,
+            "encontradas_remoto": 0,
+            "no_encontradas": 0,
+            "errores": 0,
+            "excel_path": "",
+            "message": f"La carpeta no existe: {carpeta_nc_path}",
+        }
+
+    _emit(f"Explorando carpeta de Notas de Credito: {carpeta_nc_path}")
+    notas = _listar_notas_credito_en_carpeta(carpeta_nc_path)
+    if not notas:
+        return {
+            "ok": False,
+            "total_nc": 0,
+            "encontradas_local": 0,
+            "encontradas_remoto": 0,
+            "no_encontradas": 0,
+            "errores": 0,
+            "excel_path": "",
+            "message": "No se encontraron Notas de Credito en la carpeta indicada.",
+        }
+    _emit(f"Notas de Credito detectadas: {len(notas)}")
+
+    # Inferir base [RUC] del arbol de descargas (usa la primera NC como pista).
+    base_descargas = _inferir_base_descargas(notas[0][0])
+    if base_descargas is None:
+        # Fallback: la propia carpeta seleccionada es la base.
+        base_descargas = carpeta_nc_path
+    _emit(f"Base de descargas inferida: {base_descargas}")
+
+    rows: list[dict] = []
+    pendientes_remoto: list[dict] = []
+    errores = 0
+    encontradas_local = 0
+
+    for nc_path, source in notas:
+        if cancel_event is not None and cancel_event.is_set():
+            _emit("Proceso cancelado por el usuario.")
+            break
+
+        nc_data = _extraer_datos_nc(nc_path, source)
+        if nc_data["_err"]:
+            errores += 1
+            rows.append(
+                _construir_fila(
+                    nc_data, None, "Error", f"{nc_data['_err']} (archivo: {nc_path.name})"
+                )
+            )
+            continue
+
+        # Filtrar solo NC que modifican Facturas (cod_doc_modificado == "01")
+        cod = (nc_data.get("cod_doc_modificado") or "").strip().lstrip("0") or "0"
+        if cod != "1":
+            rows.append(
+                _construir_fila(
+                    nc_data,
+                    None,
+                    "Omitido",
+                    f"Esta NC modifica un comprobante tipo '{cod}', no una Factura (01).",
+                )
+            )
+            continue
+
+        secuencial_factura = _normalizar_secuencial(nc_data.get("num_doc_modificado", ""))
+        fecha_factura = _parse_fecha_es(nc_data.get("fecha_emision_doc_sustento", ""))
+
+        if not secuencial_factura:
+            rows.append(
+                _construir_fila(
+                    nc_data,
+                    None,
+                    "Error",
+                    "La NC no contiene 'Numero Documento Modificado' valido.",
+                )
+            )
+            errores += 1
+            continue
+
+        # Busqueda LOCAL
+        encontrado_local = _buscar_factura_local(
+            base_descargas, secuencial_factura, fecha_factura
+        )
+        if encontrado_local is not None:
+            factura_path, factura_source = encontrado_local
+            factura_data = _extraer_datos_factura(factura_path, factura_source)
+            if factura_data["_err"]:
+                rows.append(
+                    _construir_fila(
+                        nc_data,
+                        None,
+                        "Error",
+                        f"Factura encontrada localmente pero no se pudo leer: "
+                        f"{factura_data['_err']}",
+                    )
+                )
+                errores += 1
+                continue
+            rows.append(
+                _construir_fila(
+                    nc_data,
+                    factura_data,
+                    "OK (local)",
+                    f"Factura encontrada localmente en {factura_path.name}.",
+                )
+            )
+            encontradas_local += 1
+        else:
+            # Marcar para busqueda remota
+            pendientes_remoto.append(
+                {
+                    "secuencial": secuencial_factura,
+                    "fecha": fecha_factura,
+                    "nc_data": nc_data,
+                }
+            )
+
+    # === Busqueda REMOTA para las que no se encontraron localmente ===
+    encontradas_remoto = 0
+    no_encontradas = 0
+    encontradas_dict: dict[str, dict] = {}
+
+    if pendientes_remoto and (cancel_event is None or not cancel_event.is_set()):
+        if not ruc or not clave:
+            # Sin credenciales no podemos consultar el SRI: marcar todas como
+            # "no encontradas localmente — falta credencial para consulta remota".
+            _emit(
+                "No se proporcionaron credenciales — se omite busqueda remota. "
+                "Las Facturas faltantes quedaran marcadas como 'no encontradas'."
+            )
+        else:
+            try:
+                encontradas_dict = _buscar_facturas_remoto(
+                    ruc,
+                    clave,
+                    pendientes_remoto,
+                    cancel_event=cancel_event,
+                    progress=progress,
+                )
+            except Exception as exc:
+                _emit(f"Busqueda remota fallo: {exc}")
+                encontradas_dict = {}
+
+    # Construir filas de las pendientes
+    for item in pendientes_remoto:
+        nc_data = item["nc_data"]
+        key = _normalizar_secuencial(item["secuencial"])
+        info_remoto = encontradas_dict.get(key)
+        if info_remoto:
+            factura_data = {
+                "importe_total": info_remoto.get("importe_total"),
+                "clave_acceso": info_remoto.get("clave_acceso", ""),
+            }
+            rows.append(
+                _construir_fila(
+                    nc_data,
+                    factura_data,
+                    "OK (remoto)",
+                    f"Factura encontrada en el portal del SRI "
+                    f"(tabla emitidos, columna tipo y serie).",
+                )
+            )
+            encontradas_remoto += 1
+        else:
+            rows.append(
+                _construir_fila(
+                    nc_data,
+                    None,
+                    "Factura no encontrada",
+                    f"No se encontro la Factura {item['secuencial']} ni localmente "
+                    f"ni en el portal del SRI.",
+                )
+            )
+            no_encontradas += 1
+
+    # === Generar Excel ===
+    salida_path = Path(salida_excel).expanduser()
+    salida_path.parent.mkdir(parents=True, exist_ok=True)
+    _escribir_excel(rows, salida_path)
+    _emit(f"Excel generado: {salida_path}")
+
+    return {
+        "ok": True,
+        "total_nc": len(rows),
+        "encontradas_local": encontradas_local,
+        "encontradas_remoto": encontradas_remoto,
+        "no_encontradas": no_encontradas,
+        "errores": errores,
+        "excel_path": str(salida_path),
+        "message": (
+            f"Reporte generado con {len(rows)} fila(s). "
+            f"Local: {encontradas_local}, Remoto: {encontradas_remoto}, "
+            f"No encontradas: {no_encontradas}, Errores: {errores}."
+        ),
+    }
+
+
+def _escribir_excel(rows: list[dict], path: Path) -> None:
+    """Genera el Excel con formato basico (header + monetario + text-force)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Valor Neto NC vs Facturas"
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    # Header
+    for col_idx, nombre in enumerate(COLUMNAS_REPORTE, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=nombre)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+
+    # Anchos sugeridos
+    anchos = {
+        "RUC": 15,
+        "Fecha nota de credito": 14,
+        "Serie nota de credito": 18,
+        "Clave acceso nota de credito": 52,
+        "Valor total nota de credito": 16,
+        "Factura modificada": 18,
+        "Fecha factura modificada": 14,
+        "Clave acceso factura": 52,
+        "Valor total factura": 16,
+        "Valor neto": 14,
+        "Estado": 22,
+        "Observacion": 60,
+    }
+    for col_idx, nombre in enumerate(COLUMNAS_REPORTE, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = anchos.get(nombre, 16)
+
+    # Filas de datos
+    for row_idx, fila in enumerate(rows, start=2):
+        for col_idx, nombre in enumerate(COLUMNAS_REPORTE, start=1):
+            valor = fila.get(nombre, "")
+            cell = ws.cell(row=row_idx, column=col_idx, value=valor)
+            if nombre in COLUMNAS_TEXT_FORCE and valor != "":
+                cell.number_format = "@"
+            if nombre in COLUMNAS_NUMERICAS and valor != "":
+                cell.number_format = "#,##0.00"
+            cell.alignment = Alignment(vertical="center", wrap_text=(nombre == "Observacion"))
+
+    # Congelar header
+    ws.freeze_panes = "A2"
+    wb.save(str(path))
