@@ -333,3 +333,51 @@ DOC_LABELS = {
     "06": "GuiaRemision",
     "07": "Retencion",
 }
+
+
+# =============================================================================
+# Feature flags — optimizaciones experimentales
+# =============================================================================
+#
+# CADA flag debe seguir el mismo patron:
+#   - Boolean controlado por env var (default OFF)
+#   - El codigo nuevo CONVIVE con el viejo (no se borra)
+#   - Si el flag esta OFF, la app se comporta EXACTAMENTE igual que antes
+#
+# Para activar en dev:
+#   PowerShell:  $env:PDF_PARALLEL = "true"; streamlit run aplicacion.py
+#   CMD:         set PDF_PARALLEL=true && streamlit run aplicacion.py
+#
+# Para activar en el .exe (cliente):
+#   Agregar a desktop_config.json:
+#     { "PDF_PARALLEL": true }
+#   (el launcher pasa esos valores al env de Streamlit antes de arrancar)
+# =============================================================================
+
+# Descarga paralela de PDFs de Emitidos (sprint "AMU velocidad").
+# Cuando esta en True, en lugar de descargar PDFs una fila a la vez con
+# Playwright clicks, abre N requests HTTP concurrentes usando las cookies
+# de sesion ya validadas. Esto es lo que AMU 2.1.64 parece estar haciendo
+# para descargar ~14 facturas en pocos segundos vs nuestros ~3s/fila.
+#
+# Default: False (comportamiento clasico). Activar con PDF_PARALLEL=true.
+USE_PARALLEL_PDF_DOWNLOAD = os.getenv("PDF_PARALLEL", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+
+# Cantidad maxima de descargas simultaneas cuando el flag de arriba esta ON.
+# 10 es conservador (SRI suele aceptar hasta ~20-30 sin rate limit visible).
+# Subirlo si vemos que los servidores aguantan; bajarlo si vemos 429/503.
+PDF_PARALLEL_MAX_WORKERS = int(os.getenv("PDF_PARALLEL_WORKERS", "10") or "10")
+
+# Si esta en True, ademas de la descarga paralela del PDF, EVITA re-parsear
+# el PDF para obtener RUC, serie, totales, etc. — usa directo lo que viene
+# en la tabla del SRI (8 columnas: tipo+serie, clave acceso, fechas,
+# valor sin imp, IVA, importe total). Esto es el speedup grande #2 (la
+# extraccion regex/pdfplumber toma 200-500ms por PDF).
+#
+# Default: False. Activar SOLO junto con PDF_PARALLEL para evitar mezclar
+# comportamientos en el reporte Excel.
+SKIP_PDF_REPARSE = os.getenv("PDF_SKIP_REPARSE", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
