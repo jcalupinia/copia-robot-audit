@@ -843,11 +843,31 @@ def _abrir_navegador(p):
             # "Un software de prueba automatizado está controlando Chrome",
             # que reCAPTCHA Enterprise usa como señal fuerte de bot.
             "--disable-blink-features=AutomationControlled",
+            # Maximizar la ventana de Chrome para igualar el comportamiento
+            # de AMU (que pasa el captcha al primer intento). Una ventana
+            # tipica de 1280x854 con `screen.width=1280` huele a viewport
+            # de Playwright/automatizacion — un usuario real usa monitor
+            # 1920x1080 maximizado. Confirmado con DevTools snapshot del
+            # 2026-06-18: AMU tiene window 1920x1032 (maximizado en monitor
+            # FHD), nuestro bot tenia 1296x854 (default Chrome unmaxed) +
+            # screen 1280x720 (default viewport Playwright). Combinado con
+            # `no_viewport=True` abajo, screen.* reporta el monitor real.
+            "--start-maximized",
         ],
         # Suprime el switch `--enable-automation` que Playwright añade por
         # defecto. Es el que pinta el infobar y setea webdriver=true en
         # Chrome ≥ 89.
         ignore_default_args=["--enable-automation"],
+        # CRITICO para el captcha de Recibidos: NO emular un viewport fijo.
+        # Por defecto Playwright fija viewport=1280x720 Y mente sobre
+        # `screen.width/height` reportandolos como 1280x720 — algo que un
+        # usuario real con monitor desktop NUNCA tiene. reCAPTCHA Enterprise
+        # detecta esa inconsistencia (UA de Chrome desktop + pantalla 1280x720)
+        # como señal fuerte de automatizacion → score bajo → captcha rechazado.
+        # Con `no_viewport=True`, Chrome reporta el monitor fisico real y la
+        # ventana ocupa lo que le diga `--start-maximized` arriba. AMU funciona
+        # exactamente asi (verificado 2026-06-18).
+        no_viewport=True,
     )
     if SLOW_MO > 0:
         base_kwargs["slow_mo"] = SLOW_MO
