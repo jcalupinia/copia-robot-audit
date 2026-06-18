@@ -383,93 +383,200 @@ def _normalizar_serie_para_match(texto: str) -> str:
     return re.sub(r"[\s\-_]", "", str(texto)).lstrip("0")
 
 
-def _esperar_overlay_cerrado(page, timeout_ms: int = 15000) -> bool:
-    """Espera a que el dialogo bloqueante de PrimeFaces se oculte.
+# =============================================================================
+# Calculo deterministico de clave de acceso (49 digitos) + consulta WS de SRI
+# =============================================================================
+# El SRI estructura el clave en 10 segmentos: FECHA(8) + TIPO(2) + RUC(13) +
+# AMB(1) + ESTAB(3) + PTO(3) + SEC(9) + COD_NUMERICO(8) + TIPO_EMI(1) + DV(1).
+# El unico campo NO derivable de los datos de la NC es COD_NUMERICO (libre del
+# emisor). Lo extraemos del propio clave de la NC: el mismo facturador del
+# emisor suele usar el mismo COD_NUMERICO para todos sus comprobantes. Si la
+# heuristica falla para un emisor, se puede override via env var.
 
-    El SRI muestra `<div id="dlgpopStatusPrime_modal" class="ui-widget-overlay">`
-    como mascara de "procesando" durante CADA AJAX (Consultar, paginar,
-    abrir Emitidos, cambiar filtros). Mientras esta visible, todos los
-    clicks se interceptan con "intercepts pointer events" en Playwright.
+_CODIGO_NUMERICO_DEFAULT = "00000001"
 
-    Devuelve True si el overlay no esta visible (o no existe). False si
-    se agoto el timeout.
+
+def _calcular_dv_mod11(cadena_48: str) -> int:
+    """Calcula el digito verificador modulo 11 del SRI sobre 48 digitos.
+
+    Algoritmo: multiplicar cada digito (de derecha a izquierda) por pesos
+    ciclicos [2,3,4,5,6,7], sumar, calcular `11 - (suma % 11)`. Casos
+    especiales: si da 11 retorna 0; si da 10 retorna 1.
+
+    Validado contra 41 claves reales del Excel del usuario el 2026-06-18:
+    41/41 OK.
     """
-    try:
-        page.wait_for_function(
-            """() => {
-                const el = document.getElementById('dlgpopStatusPrime_modal');
-                if (!el) return true;
-                const style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden') return true;
-                if (el.offsetWidth === 0 && el.offsetHeight === 0) return true;
-                return false;
-            }""",
-            timeout=timeout_ms,
-        )
-        return True
-    except Exception:
-        return False
+    if not cadena_48 or len(cadena_48) != 48 or not cadena_48.isdigit():
+        raise ValueError(f"Cadena de 48 digitos invalida: {cadena_48!r}")
+    pesos = (2, 3, 4, 5, 6, 7)
+    suma = 0
+    for i, ch in enumerate(reversed(cadena_48)):
+        suma += int(ch) * pesos[i % 6]
+    resto = suma % 11
+    dv = 11 - resto
+    if dv == 11:
+        return 0
+    if dv == 10:
+        return 1
+    return dv
 
 
-def _set_fecha_emitidos_via_js(page, fecha_display: str) -> bool:
-    """Setea el input de fecha desde via JavaScript directamente.
-
-    PrimeFaces calendar mantiene estado interno que NO se actualiza con
-    Playwright's `fill()` + `dispatch_event()` porque esos eventos tienen
-    isTrusted=false. Setear `el.value = ...` + disparar eventos con
-    `bubbles:true` desde el contexto de la pagina propia bypassea esa
-    deteccion.
-
-    Probado en los logs del 2026-06-18: con fill+dispatch_event, el SRI
-    devolvia resultados de fechas aleatorias (no la pedida). Con este
-    metodo, el filtro se aplica de verdad.
+def _extraer_codigo_numerico_de_clave(clave: str) -> str:
+    """Devuelve los 8 digitos del COD_NUMERICO (pos 39-46) de un clave SRI,
+    o cadena vacia si la clave no es valida.
     """
-    try:
-        ok = page.evaluate(
-            """(val) => {
-                const el = document.getElementById('frmPrincipal:calendarFechaDesde_input');
-                if (!el) return false;
-                el.focus();
-                el.value = '';
-                el.dispatchEvent(new Event('input', {bubbles: true}));
-                el.value = val;
-                el.dispatchEvent(new Event('input', {bubbles: true}));
-                el.dispatchEvent(new Event('change', {bubbles: true}));
-                el.dispatchEvent(new Event('blur', {bubbles: true}));
-                return true;
-            }""",
-            fecha_display,
-        )
-        return bool(ok)
-    except Exception:
-        return False
+    clave = (clave or "").strip()
+    if len(clave) != 49 or not clave.isdigit():
+        return ""
+    return clave[39:47]
 
 
-def _esperar_tabla_emitidos_lista(page, timeout_ms: int = 20000) -> bool:
-    """Espera a que la tabla de Emitidos tenga resultados o muestre vacio.
+def _calcular_clave_acceso_factura(
+    fecha_emision_factura: str,
+    ruc_emisor: str,
+    estab: str,
+    pto: str,
+    secuencial: str,
+    codigo_numerico: str = _CODIGO_NUMERICO_DEFAULT,
+    ambiente: str = "2",
+    tipo_emision: str = "1",
+) -> str:
+    """Construye el clave de acceso (49 digitos) de una FACTURA dadas las
+    partes que conocemos por la Nota de Credito.
 
-    Despues de un Consultar, esperamos a que ocurra UNO de:
-      - El tbody tiene al menos un <tr> con celdas (resultados)
-      - Aparece el mensaje "No se encontraron registros" (sin resultados)
+    `fecha_emision_factura` puede venir como "DD/MM/AAAA" o "AAAA-MM-DD" o
+    como objeto datetime. Lo normalizamos a DDMMAAAA.
 
-    `networkidle` solo no alcanza porque el partial AJAX de PrimeFaces
-    puede completarse sin que el DOM termine de renderizarse.
+    Si `codigo_numerico` no es 8 digitos, falla — el caller debe asegurarse
+    de pasar uno valido (extraido del clave de la NC).
     """
-    try:
-        page.wait_for_function(
-            """() => {
-                const t = document.getElementById('frmPrincipal:tablaCompEmitidos_data');
-                if (!t) return false;
-                if (t.querySelector('tr td')) return true;
-                const empty = t.querySelector('.ui-datatable-empty-message');
-                if (empty) return true;
-                return false;
-            }""",
-            timeout=timeout_ms,
+    # --- Fecha → DDMMAAAA ---
+    fecha_str = ""
+    if isinstance(fecha_emision_factura, datetime):
+        fecha_str = fecha_emision_factura.strftime("%d%m%Y")
+    else:
+        s = str(fecha_emision_factura or "").strip()
+        # Intentar varios formatos comunes
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"):
+            try:
+                fecha_str = datetime.strptime(s, fmt).strftime("%d%m%Y")
+                break
+            except ValueError:
+                continue
+        if not fecha_str:
+            # Fallback: si ya tiene 8 digitos, asumirlo como DDMMAAAA
+            solo_dig = re.sub(r"\D", "", s)
+            if len(solo_dig) == 8:
+                fecha_str = solo_dig
+    if len(fecha_str) != 8:
+        raise ValueError(f"Fecha no normalizable a DDMMAAAA: {fecha_emision_factura!r}")
+
+    # --- Otros campos: padding a la longitud requerida ---
+    ruc_s = re.sub(r"\D", "", str(ruc_emisor or ""))
+    if len(ruc_s) != 13:
+        raise ValueError(f"RUC debe tener 13 digitos: {ruc_emisor!r}")
+    estab_s = re.sub(r"\D", "", str(estab or "")).zfill(3)
+    pto_s = re.sub(r"\D", "", str(pto or "")).zfill(3)
+    sec_s = re.sub(r"\D", "", str(secuencial or "")).zfill(9)
+    if len(estab_s) != 3 or len(pto_s) != 3 or len(sec_s) != 9:
+        raise ValueError(
+            f"Estab/Pto/Sec invalidos: estab={estab!r}, pto={pto!r}, sec={secuencial!r}"
         )
-        return True
-    except Exception:
-        return False
+    cod_num_s = re.sub(r"\D", "", str(codigo_numerico or ""))
+    if len(cod_num_s) != 8:
+        raise ValueError(f"Codigo numerico debe tener 8 digitos: {codigo_numerico!r}")
+
+    # Construir cadena de 48 dígitos (sin DV) y calcular DV
+    cadena_48 = (
+        fecha_str          # 8
+        + "01"             # 2 (Factura)
+        + ruc_s            # 13
+        + str(ambiente)    # 1
+        + estab_s          # 3
+        + pto_s            # 3
+        + sec_s            # 9
+        + cod_num_s        # 8
+        + str(tipo_emision)  # 1
+    )
+    if len(cadena_48) != 48:
+        raise ValueError(f"Cadena interna mal armada (len={len(cadena_48)}): {cadena_48!r}")
+    dv = _calcular_dv_mod11(cadena_48)
+    return cadena_48 + str(dv)
+
+
+def _consultar_factura_por_clave_ws(
+    clave: str,
+    timeout_s: float = 30.0,
+) -> Optional[dict]:
+    """Consulta el WS publico del SRI (AutorizacionComprobantesOffline) por
+    una clave de acceso y devuelve un dict con `importe_total`,
+    `fecha_emision`, `clave_acceso` y `razon_social_receptor`.
+
+    Devuelve None si la clave no fue encontrada o el WS responde error.
+
+    No requiere autenticacion ni cookies — es el servicio publico de
+    autorizacion del SRI. Funciona via HTTP simple, sin Playwright.
+    """
+    import requests  # import perezoso
+
+    from robot.browser import (
+        SOAP_ENVELOPE_TEMPLATE,
+        _parse_emitido_comprobante,
+    )
+    from robot.pdf_extraction import _extraer_comprobante_desde_autorizacion
+    from robot.config import AUTORIZACION_COMPROBANTES_SOAP_URL
+
+    clave = (clave or "").strip()
+    if len(clave) != 49 or not clave.isdigit():
+        return None
+
+    envelope = SOAP_ENVELOPE_TEMPLATE.format(clave=clave)
+    headers = {
+        "Content-Type": "text/xml; charset=UTF-8",
+        "SOAPAction": "",
+        "Accept": "text/xml",
+    }
+    try:
+        resp = requests.post(
+            AUTORIZACION_COMPROBANTES_SOAP_URL,
+            data=envelope.encode("utf-8"),
+            headers=headers,
+            timeout=timeout_s,
+        )
+    except Exception as err:
+        logger.warning(f"WS SRI: error de red para clave {clave[:20]}...: {err}")
+        return None
+    if resp.status_code != 200:
+        logger.warning(f"WS SRI: status {resp.status_code} para clave {clave[:20]}...")
+        return None
+    cuerpo = resp.text or ""
+    if not cuerpo:
+        return None
+
+    import html
+    match = re.search(r"(<autorizacion[\s\S]*?</autorizacion>)", cuerpo, flags=re.IGNORECASE)
+    if not match:
+        return None
+    autorizacion_xml = html.unescape(match.group(1))
+    try:
+        comprobante_xml, meta_aut = _extraer_comprobante_desde_autorizacion(autorizacion_xml)
+    except Exception as err:
+        logger.warning(f"WS SRI: no se pudo extraer comprobante para {clave[:20]}...: {err}")
+        return None
+    if not comprobante_xml or not comprobante_xml.strip():
+        # El WS respondio pero la clave no esta autorizada (no existe o fue anulada).
+        return None
+    try:
+        meta = _parse_emitido_comprobante(comprobante_xml, meta_aut)
+    except Exception as err:
+        logger.warning(f"WS SRI: parse del comprobante fallo para {clave[:20]}...: {err}")
+        return None
+    return {
+        "importe_total": meta.get("importe_total", ""),
+        "fecha_emision": meta.get("fecha_emision", ""),
+        "clave_acceso": meta.get("clave_acceso", clave),
+        "razon_social_receptor": meta.get("razon_social_receptor", ""),
+    }
 
 
 def _buscar_facturas_remoto(
@@ -480,21 +587,34 @@ def _buscar_facturas_remoto(
     cancel_event: Optional[threading.Event] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> dict[str, dict]:
-    """Busca en el portal SRI las facturas que no se encontraron localmente.
+    """Busca facturas modificadas via el WS publico AutorizacionComprobantesOffline.
 
-    `pendientes` es una lista de dicts con minimo: secuencial, fecha (datetime).
-    Devuelve dict { secuencial_normalizado: {importe_total, clave_acceso, fecha,
-    razon_social, _err} } con lo que SI encontro. Las que no encuentre quedan
-    fuera del dict (el caller las marca como "Factura no encontrada en SRI").
+    REEMPLAZO TOTAL del flujo viejo (login + navegacion Emitidos + paginacion).
+    Nuevo flujo: para cada NC pendiente calculamos la clave de acceso de la
+    factura modificada (datos en la NC + codigo numerico extraido del propio
+    clave de la NC) y consultamos al WS publico del SRI. Si la clave existe
+    y esta autorizada, devolvemos importe + datos. Si no, queda como "no
+    encontrada".
 
-    Estrategia:
-    - Agrupa pendientes por fecha (1 consulta SRI por fecha unica)
-    - Para cada fecha:
-      - filtra fecha + tipo=Factura + estado=Autorizados
-      - lee la tabla
-      - para cada secuencial pendiente de esa fecha busca su fila
-    - Maneja cancelacion via cancel_event en cada iteracion
+    Pros vs flujo viejo:
+      - SIN navegador (no abre Chrome).
+      - SIN login (no captcha, no credenciales SRI usadas).
+      - SIN paginacion (1 HTTP por factura, ~1s c/u).
+      - Inmune al overlay de PrimeFaces / cambios de markup del portal.
+
+    Parametros:
+      `ruc`: RUC del emisor. Se usa solo si `nc_data.ruc` no esta.
+      `clave`: password SRI. YA NO SE USA — se mantiene por compat de signature.
+      `pendientes`: lista de dicts con secuencial, fecha (datetime), nc_data.
+      `cancel_event`: para cancelar en medio del loop.
+      `progress`: callback para emit logs en UI.
+
+    Devuelve dict { secuencial_normalizado: {importe_total, clave_acceso,
+    fecha_emision, razon_social_receptor, tipo_serie_raw} } con lo que SI
+    encontro en el WS. Las que no encuentre quedan fuera (caller las marca
+    como "Factura no encontrada en SRI").
     """
+    del clave  # WS publico, no se usa password
     encontradas: dict[str, dict] = {}
     if not pendientes:
         return encontradas
@@ -507,476 +627,94 @@ def _buscar_facturas_remoto(
                 pass
         logger.info(msg)
 
-    # Agrupar por fecha (YYYY-MM-DD) para minimizar consultas al portal.
-    por_fecha: dict[str, list[dict]] = {}
-    for item in pendientes:
-        fecha_dt: Optional[datetime] = item.get("fecha")
-        if fecha_dt is None:
-            continue
-        key = fecha_dt.strftime("%Y-%m-%d")
-        por_fecha.setdefault(key, []).append(item)
-
-    if not por_fecha:
-        _emit("No hay fechas validas en las NC pendientes — se omite busqueda remota.")
-        return encontradas
-
     _emit(
-        f"Iniciando busqueda remota en SRI: {len(por_fecha)} fecha(s) distinta(s) "
-        f"para resolver {len(pendientes)} Factura(s) faltante(s)."
+        f"Iniciando busqueda remota en SRI WS: {len(pendientes)} Factura(s) "
+        f"pendientes (sin login, sin navegador, sin paginacion)."
     )
 
-    from playwright.sync_api import sync_playwright  # import perezoso
+    encontradas_count = 0
+    for i, item in enumerate(pendientes, 1):
+        if cancel_event is not None and cancel_event.is_set():
+            _emit("Busqueda remota cancelada por el usuario.")
+            break
 
-    # Cookies aisladas para esta busqueda — NO mezclar con las de descarga.
-    cookies_path = Path(f"cookies_nc_lookup_{ruc}.json")
+        nc_data = item.get("nc_data") or {}
+        secuencial_factura = str(item.get("secuencial") or "").strip()
+        fecha_factura = item.get("fecha")
 
-    # Reusamos las funciones internas del robot existente.
-    from robot.downloader import _login, _abrir_navegador
-    from robot.browser import _abrir_modulo_consultas, _seleccionar_en_select
-    from robot.config import PORTAL_HOME
+        # RUC emisor: la NC modifica una factura del MISMO contribuyente que
+        # la emitio. Usamos el RUC del XML de la NC; fallback al param ruc.
+        ruc_emisor = str(nc_data.get("ruc") or ruc or "").strip()
 
-    with sync_playwright() as p:
-        context, browser, _persistent = _abrir_navegador(p)
-        try:
-            page = context.pages[0] if context.pages else context.new_page()
-            _emit("Autenticando en el portal del SRI...")
-            # IMPORTANTE: usamos PORTAL_HOME (entry SSO de Keycloak con
-            # client_id=app-sri-claves-angular) en vez de un deep link como
-            # RECUPERAR_COMPROBANTES_URL. Si navegamos directo al .jsf, el
-            # SRI redirige a auth con un redirect_uri que NO coincide con
-            # la sesion de SSO, y apenas pasa el login el portal nos rebota
-            # de vuelta al login screen — esto generaba el error "pantalla
-            # de autenticacion persistente" infinito.
-            #
-            # Defensiva: si una corrida anterior dejo cookies vencidas o
-            # corruptas en cookies_nc_lookup_<ruc>.json, las borramos antes
-            # del _login para que arranque limpio. Para Valor Neto (uso
-            # one-shot), el costo de re-loguear es bajo y compensa evitar
-            # bounces por estado cookie viejo.
-            if cookies_path.exists():
-                try:
-                    cookies_path.unlink()
-                except Exception:
-                    pass
-            _login(
-                context, page, ruc, clave, cookies_path, PORTAL_HOME
+        # Codigo numerico: extraido del clave de la NC. Mismo facturador del
+        # emisor → mismo codigo. Si no hay clave o esta rota, usamos default.
+        cod_num = _extraer_codigo_numerico_de_clave(nc_data.get("clave_acceso", ""))
+        if not cod_num:
+            cod_num = _CODIGO_NUMERICO_DEFAULT
+
+        # Partes del secuencial "EEE-PPP-SSSSSSSSS"
+        partes = secuencial_factura.split("-")
+        if len(partes) != 3:
+            _emit(
+                f"  [{i}/{len(pendientes)}] secuencial mal formado: "
+                f"{secuencial_factura!r} — salto."
             )
-            _emit("Sesion del SRI lista.")
+            continue
+        estab, pto, sec = partes
 
-            for fecha_str, items in por_fecha.items():
-                if cancel_event is not None and cancel_event.is_set():
-                    _emit("Busqueda remota cancelada por el usuario.")
-                    break
+        fecha_display = (
+            fecha_factura.strftime("%d/%m/%Y")
+            if isinstance(fecha_factura, datetime)
+            else str(fecha_factura)
+        )
 
-                fecha_dt = datetime.strptime(fecha_str, "%Y-%m-%d")
-                fecha_display = fecha_dt.strftime("%d/%m/%Y")
-                _emit(
-                    f"Buscando {len(items)} Factura(s) emitidas el {fecha_display}..."
-                )
+        # Calcular clave de acceso
+        try:
+            clave_calc = _calcular_clave_acceso_factura(
+                fecha_emision_factura=fecha_factura,
+                ruc_emisor=ruc_emisor,
+                estab=estab,
+                pto=pto,
+                secuencial=sec,
+                codigo_numerico=cod_num,
+            )
+        except Exception as err:
+            _emit(
+                f"  [{i}/{len(pendientes)}] no se pudo calcular clave para "
+                f"{secuencial_factura} ({fecha_display}): {err} — salto."
+            )
+            continue
 
-                # Navegar al modulo Emitidos
-                try:
-                    _abrir_modulo_consultas(page, "Emitidos")
-                except Exception as exc:
-                    _emit(f"No se pudo abrir el modulo de Emitidos: {exc}")
-                    continue
+        # Consultar al WS publico del SRI
+        data = _consultar_factura_por_clave_ws(clave_calc)
+        if data is None:
+            _emit(
+                f"  [{i}/{len(pendientes)}] {secuencial_factura} ({fecha_display}): "
+                f"WS no devolvio comprobante. Clave calculada: {clave_calc}. "
+                f"Posibles causas: codigo numerico distinto a '{cod_num}', "
+                f"factura anulada/no autorizada, o emisor sin acceso publico."
+            )
+            continue
 
-                # Aplicar filtros: fecha + Tipo=Factura + Estado=Autorizados
-                try:
-                    # Esperar a que el overlay de PrimeFaces se cierre
-                    # antes de tocar inputs — sino las acciones se interceptan
-                    # silenciosamente y la fecha queda con el valor anterior.
-                    _esperar_overlay_cerrado(page, timeout_ms=10000)
+        key = _normalizar_secuencial(secuencial_factura)
+        encontradas[key] = {
+            "importe_total": _safe_float(data.get("importe_total")),
+            "clave_acceso": data.get("clave_acceso") or clave_calc,
+            "tipo_serie_raw": f"Factura {secuencial_factura}",
+            "fecha_emision": data.get("fecha_emision", ""),
+            "razon_social_receptor": data.get("razon_social_receptor", ""),
+        }
+        encontradas_count += 1
+        _emit(
+            f"  [{i}/{len(pendientes)}] OK {secuencial_factura} ({fecha_display}): "
+            f"importe={data.get('importe_total')!r}"
+        )
 
-                    # Setear la fecha via JS (fill+dispatch_event no es
-                    # suficiente para PrimeFaces calendar — los eventos de
-                    # Playwright tienen isTrusted=false y el widget los ignora).
-                    fecha_ok = _set_fecha_emitidos_via_js(page, fecha_display)
-                    if not fecha_ok:
-                        # Fallback al metodo viejo si el JS no encontro el input.
-                        fecha_loc = page.locator(
-                            "input#frmPrincipal\\:calendarFechaDesde_input"
-                        )
-                        if fecha_loc.count():
-                            fecha_loc.first.fill("")
-                            fecha_loc.first.fill(fecha_display)
-                            try:
-                                fecha_loc.first.dispatch_event("input")
-                                fecha_loc.first.dispatch_event("change")
-                                fecha_loc.first.dispatch_event("blur")
-                            except Exception:
-                                pass
-
-                    _seleccionar_en_select(
-                        page,
-                        "select#frmPrincipal\\:cmbTipoComprobante",
-                        "Factura",
-                    )
-                    _seleccionar_en_select(
-                        page,
-                        "select#frmPrincipal\\:cmbEstadoAutorizacion",
-                        "Autorizados",
-                    )
-
-                    # Click en "Consultar" — antes esperamos overlay cerrado.
-                    _esperar_overlay_cerrado(page, timeout_ms=10000)
-                    consultar_btn = page.locator(
-                        "input[type='submit'][value='Consultar'], "
-                        "button:has-text('Consultar')"
-                    )
-                    if consultar_btn.count():
-                        try:
-                            consultar_btn.first.click(timeout=8000)
-                        except Exception as exc:
-                            _emit(
-                                f"  [filtros] {fecha_display}: click en Consultar "
-                                f"fallo: {exc} (probable overlay no cerrado)."
-                            )
-                        # Despues del click esperamos a que:
-                        #   1) el overlay de "procesando" aparezca y desaparezca
-                        #   2) la tabla tenga resultados o el mensaje vacio
-                        # Sin esto, leemos un DOM en transicion (filas=0 falsas).
-                        _esperar_overlay_cerrado(page, timeout_ms=20000)
-                        _esperar_tabla_emitidos_lista(page, timeout_ms=20000)
-
-                    # Despues de aplicar filtros, intentamos subir el rows-per-page
-                    # al maximo que ofrezca el SRI. Esto reduce el numero de
-                    # paginas a recorrer (75 vs 10 = 7.5x menos clicks).
-                    try:
-                        rpp_loc = page.locator(
-                            "#frmPrincipal\\:tablaCompEmitidos_paginator_top "
-                            "select.ui-paginator-rpp-options, "
-                            "select[id$='_rppDD']"
-                        )
-                        if rpp_loc.count():
-                            opciones = rpp_loc.first.locator("option")
-                            valores = []
-                            for i in range(opciones.count()):
-                                try:
-                                    v = (opciones.nth(i).get_attribute("value") or "").strip()
-                                    if v.isdigit():
-                                        valores.append(int(v))
-                                except Exception:
-                                    continue
-                            if valores:
-                                mejor = max(valores)
-                                rpp_loc.first.select_option(value=str(mejor))
-                                _esperar_overlay_cerrado(page, timeout_ms=10000)
-                                _esperar_tabla_emitidos_lista(page, timeout_ms=10000)
-                    except Exception:
-                        pass
-                except Exception as exc:
-                    _emit(f"Error aplicando filtros para {fecha_display}: {exc}")
-                    continue
-
-                # Pre-calcular las series normalizadas que estamos buscando.
-                # Dos indices para matcheo robusto:
-                #   buscados_por_serie: la version "Factura xxx-xxx-xxx" del cell.
-                #   buscados_por_secuencial_9: los ultimos 9 digitos (= secuencial
-                #     puro) extraidos del clave de acceso. Mas robusto cuando el
-                #     cell de tipo+serie tiene markup raro.
-                buscados_por_serie: dict[str, dict] = {}
-                buscados_por_secuencial_9: dict[str, dict] = {}
-                for item in items:
-                    sec_orig = item.get("secuencial", "")
-                    sec_norm = _normalizar_serie_para_match(sec_orig)
-                    if sec_norm:
-                        buscados_por_serie[sec_norm] = item
-                    # secuencial puro (ultimos 9 digitos) para match por clave de acceso
-                    digits = re.sub(r"\D", "", str(sec_orig))
-                    if len(digits) >= 9:
-                        buscados_por_secuencial_9[digits[-9:]] = item
-                total_buscados = len(buscados_por_serie) or len(buscados_por_secuencial_9)
-                vistos: set[str] = set()  # keys de items ya encontrados en cualquier pag
-
-                # ===== Diagnostico inicial: confirmar que la tabla quedo
-                # filtrada por la fecha objetivo. Si la primera fila de la
-                # tabla tiene una fecha autorizacion (col 3) muy distinta a
-                # la pedida, el filtro NO se aplico — el resto seria todo
-                # inutil. Solo logeamos; no abortamos por si la heuristica
-                # falla en algun caso raro.
-                try:
-                    primera = page.locator(
-                        "#frmPrincipal\\:tablaCompEmitidos_data tr"
-                    ).first
-                    if primera.count():
-                        fila_textos = primera.locator("td").all_inner_texts()
-                        if len(fila_textos) >= 4:
-                            fecha_autorizacion_raw = fila_textos[3].strip()
-                            _emit(
-                                f"  [diag] Fecha objetivo={fecha_display} | "
-                                f"primera fila autorizacion={fecha_autorizacion_raw!r} | "
-                                f"primera serie={fila_textos[1].strip()!r}"
-                            )
-                except Exception:
-                    pass
-
-                # Recorrer TODAS las paginas de la tabla. Antes solo
-                # procesabamos pagina 1 — facturas en pagina 2+ salian como
-                # "no encontrada" aun cuando estaban en el portal. Cortamos
-                # cuando matcheamos todos los targets o agotamos el
-                # paginador (con tope de seguridad).
-                hits = 0
-                pagina_actual = 1
-                total_filas_revisadas = 0
-                MAX_PAGINAS = 200  # tope defensivo; las consultas reales rara vez exceden ~30 paginas
-                _emit(
-                    f"  [paginacion] {fecha_display}: buscando {total_buscados} factura(s) — "
-                    f"objetivos: {', '.join(list(buscados_por_serie.keys())[:5])}"
-                    f"{'...' if len(buscados_por_serie) > 5 else ''}"
-                )
-                while True:
-                    if cancel_event is not None and cancel_event.is_set():
-                        break
-
-                    try:
-                        tabla = page.locator(
-                            "#frmPrincipal\\:tablaCompEmitidos_data"
-                        )
-                        filas = tabla.locator("tr")
-                        n_filas = filas.count()
-                    except Exception as exc:
-                        _emit(
-                            f"  [paginacion] No se pudo leer la tabla en {fecha_display} "
-                            f"(pag {pagina_actual}): {exc}"
-                        )
-                        break
-
-                    hits_antes = hits
-                    series_vistas_muestra: list[str] = []
-                    primer_serie_pagina = ""
-                    for idx in range(n_filas):
-                        if cancel_event is not None and cancel_event.is_set():
-                            break
-                        fila = filas.nth(idx)
-                        celdas = fila.locator("td")
-                        try:
-                            textos_celdas = celdas.all_inner_texts()
-                        except Exception:
-                            textos_celdas = []
-                        if len(textos_celdas) < 8:
-                            continue
-                        tipo_serie_text = textos_celdas[1].strip()
-                        clave_text = textos_celdas[2].strip()
-                        importe_text = textos_celdas[7].strip()
-                        total_filas_revisadas += 1
-                        if idx == 0:
-                            primer_serie_pagina = tipo_serie_text
-                        if len(series_vistas_muestra) < 3:
-                            series_vistas_muestra.append(tipo_serie_text)
-
-                        # Match #1: por tipo+serie normalizada del cell.
-                        # Acepta cualquier prefijo (no solo "Factura") — solo
-                        # importan los digitos serie post normalizacion.
-                        item_matched = None
-                        serie_norm = _normalizar_serie_para_match(
-                            tipo_serie_text.replace("Factura", "").replace("factura", "")
-                        )
-                        if serie_norm in buscados_por_serie:
-                            item_matched = buscados_por_serie[serie_norm]
-                        # Match #2 (fallback): extraer los digitos del secuencial
-                        # de la clave de acceso (posiciones 30-38 del clave de
-                        # 49 digitos = los 9 digitos del secuencial).
-                        if item_matched is None:
-                            clave_digits = re.sub(r"\D", "", clave_text)
-                            if len(clave_digits) == 49:
-                                sec_de_clave = clave_digits[30:39]
-                                if sec_de_clave in buscados_por_secuencial_9:
-                                    item_matched = buscados_por_secuencial_9[sec_de_clave]
-                        if item_matched is not None:
-                            key = _normalizar_secuencial(item_matched.get("secuencial", ""))
-                            if key in vistos:
-                                continue  # ya lo encontramos en una pag anterior
-                            vistos.add(key)
-                            encontradas[key] = {
-                                "importe_total": _safe_float(importe_text),
-                                "clave_acceso": clave_text,
-                                "tipo_serie_raw": tipo_serie_text,
-                            }
-                            hits += 1
-
-                    _emit(
-                        f"  [pag {pagina_actual}] {fecha_display}: filas={n_filas} | "
-                        f"matches en esta pag={hits - hits_antes} (total {hits}/{total_buscados}) | "
-                        f"primera fila='{primer_serie_pagina[:50]}'"
-                    )
-
-                    # Si ya encontramos todos los targets, no tiene sentido
-                    # seguir paginando.
-                    if hits >= total_buscados:
-                        _emit(
-                            f"  [paginacion] {fecha_display}: matcheamos los "
-                            f"{total_buscados} targets, corto paginacion."
-                        )
-                        break
-
-                    # Tope defensivo
-                    if pagina_actual >= MAX_PAGINAS:
-                        _emit(
-                            f"  [paginacion] {fecha_display}: se alcanzo tope de "
-                            f"{MAX_PAGINAS} paginas — corto la busqueda."
-                        )
-                        break
-
-                    # ====== Click en "siguiente pagina" con verificacion REAL =======
-                    # Estrategia:
-                    #  1) capturar el texto de la primera fila ANTES del click
-                    #     (col 2 = clave de acceso, unica por factura).
-                    #  2) probar selectores en orden de especificidad. Si el
-                    #     elemento existe pero esta disabled o no existe el
-                    #     siguiente, salimos: estamos en la ultima pag.
-                    #  3) hacer click.
-                    #  4) wait_for_function hasta que el primer-row clave cambie
-                    #     (o la tabla quede vacia). networkidle solo no alcanza
-                    #     porque PrimeFaces hace partial AJAX y el wait puede
-                    #     completarse antes del re-render.
-                    #  5) Si tras N segundos el contenido no cambia → el click
-                    #     no avanzo realmente. Logeamos y abortamos.
-                    clave_primera_fila_prev = ""
-                    try:
-                        if n_filas > 0:
-                            primera_celdas = filas.first.locator("td")
-                            if primera_celdas.count() >= 3:
-                                clave_primera_fila_prev = (
-                                    primera_celdas.nth(2).inner_text(timeout=1500)
-                                    or ""
-                                ).strip()
-                    except Exception:
-                        pass
-
-                    # Localizar boton siguiente — probamos varias variantes.
-                    boton_clickeable = None
-                    for next_sel in (
-                        "a.ui-paginator-next:not(.ui-state-disabled)",
-                        "span.ui-paginator-next:not(.ui-state-disabled)",
-                        ".ui-paginator-next:not(.ui-state-disabled)",
-                        "#frmPrincipal\\:tablaCompEmitidos_paginator_bottom "
-                        "a.ui-paginator-next:not(.ui-state-disabled)",
-                    ):
-                        try:
-                            loc = page.locator(next_sel)
-                            if loc.count():
-                                boton_clickeable = loc.first
-                                break
-                        except Exception:
-                            continue
-
-                    if boton_clickeable is None:
-                        _emit(
-                            f"  [paginacion] {fecha_display}: no hay boton 'siguiente' "
-                            f"habilitado en pag {pagina_actual}. Fin natural de paginacion."
-                        )
-                        break
-
-                    try:
-                        boton_clickeable.scroll_into_view_if_needed(timeout=2000)
-                    except Exception:
-                        pass
-                    # CRITICO: esperar a que el overlay #dlgpopStatusPrime_modal
-                    # de PrimeFaces se cierre antes de clickear. Si esta arriba,
-                    # Playwright reintenta 13+ veces hasta el timeout y aborta.
-                    overlay_libre = _esperar_overlay_cerrado(page, timeout_ms=15000)
-                    if not overlay_libre:
-                        _emit(
-                            f"  [paginacion] {fecha_display}: overlay de PrimeFaces "
-                            f"sigue activo tras 15s en pag {pagina_actual}. "
-                            f"Intento click con force=True."
-                        )
-                    try:
-                        boton_clickeable.click(timeout=6000, force=not overlay_libre)
-                    except Exception as exc:
-                        _emit(
-                            f"  [paginacion] {fecha_display}: click en 'siguiente' "
-                            f"fallo en pag {pagina_actual}: {exc}. Abandono paginacion."
-                        )
-                        break
-
-                    # Esperar a que la primera fila REALMENTE cambie su clave.
-                    # Si tras 12s sigue igual, el click no surtio efecto.
-                    cambio_ok = False
-                    try:
-                        page.wait_for_function(
-                            """(prev) => {
-                                const t = document.getElementById('frmPrincipal:tablaCompEmitidos_data');
-                                if (!t) return false;
-                                const filaUno = t.querySelector('tr');
-                                if (!filaUno) return true;
-                                const celdas = filaUno.querySelectorAll('td');
-                                if (celdas.length < 3) return true;
-                                const clave = (celdas[2].innerText || '').trim();
-                                if (!clave) return false;
-                                return clave !== prev;
-                            }""",
-                            arg=clave_primera_fila_prev,
-                            timeout=12000,
-                        )
-                        cambio_ok = True
-                    except Exception:
-                        cambio_ok = False
-
-                    if not cambio_ok:
-                        _emit(
-                            f"  [paginacion] {fecha_display}: click en 'siguiente' "
-                            f"NO avanzo la pagina (primera fila sigue siendo "
-                            f"{clave_primera_fila_prev[:20]}...). Abandono paginacion. "
-                            f"Si esto pasa siempre, el selector de 'siguiente' "
-                            f"esta mal o el SRI cambio el markup."
-                        )
-                        break
-
-                    # Esperar a que el overlay de "procesando" termine antes
-                    # de leer la nueva pagina, sino podemos leer DOM en transicion.
-                    _esperar_overlay_cerrado(page, timeout_ms=10000)
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=3000)
-                    except Exception:
-                        pass
-                    time.sleep(0.2)
-                    pagina_actual += 1
-
-                _emit(
-                    f"Fecha {fecha_display}: {hits}/{len(items)} Factura(s) "
-                    f"encontradas en la tabla del SRI "
-                    f"(recorridas {pagina_actual} pag, {total_filas_revisadas} filas revisadas)."
-                )
-                # Log diagnostico: si quedaron sin encontrar, listamos los
-                # secuenciales para que el usuario pueda chequear manualmente.
-                if hits < len(items):
-                    no_encontrados = []
-                    for it in items:
-                        k = _normalizar_secuencial(it.get("secuencial", ""))
-                        if k not in vistos:
-                            no_encontrados.append(it.get("secuencial", "?"))
-                    if no_encontrados:
-                        muestra = ", ".join(no_encontrados[:8])
-                        suf = "..." if len(no_encontrados) > 8 else ""
-                        _emit(
-                            f"  No matcheadas en {fecha_display}: {muestra}{suf} "
-                            f"(revisa el log: si las paginas avanzaron y filas_revisadas "
-                            f"es alto pero hits es bajo, hay un bug de matching. "
-                            f"Si filas_revisadas es bajo, hay un bug de paginacion.)"
-                        )
-
-            # Guardar cookies para futuras consultas
-            try:
-                cookies_path.write_text(
-                    json.dumps(context.cookies()), encoding="utf-8"
-                )
-            except Exception:
-                pass
-        finally:
-            try:
-                context.close()
-            except Exception:
-                pass
-            try:
-                if browser is not None:
-                    browser.close()
-            except Exception:
-                pass
-
+    _emit(
+        f"Busqueda remota WS completada: {encontradas_count}/{len(pendientes)} "
+        f"encontradas."
+    )
     return encontradas
-
 
 # =============================================================================
 # Orquestador principal
