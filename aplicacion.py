@@ -375,6 +375,35 @@ def _render_download_finished_modal() -> None:
         st.rerun()
 
 
+def _render_credenciales_incorrectas_modal() -> None:
+    """Modal que aparece cuando el SRI rechaza las credenciales del usuario.
+
+    El navegador ya fue cerrado por `sync_playwright` al salir del `with`
+    en `descargar_sri`, asi que aqui solo damos feedback claro al usuario
+    y reseteamos el estado de descarga para que pueda volver a intentar
+    sin que la auto-reanudacion se dispare (ya esta inhibida desde
+    `_download_worker` para errores `[CREDENCIALES]`).
+    """
+    if not st.session_state.get("credenciales_modal_open"):
+        return
+    mensaje = str(st.session_state.get("credenciales_modal_msg") or "").strip()
+    if not mensaje:
+        mensaje = (
+            "La contraseña ingresada para el SRI es incorrecta. "
+            "Verifica los datos e intenta nuevamente."
+        )
+    st.markdown(f"### 🔒 Contraseña incorrecta")
+    st.write(mensaje)
+    st.caption(
+        "El navegador se cerro automaticamente. Vuelve a ingresar tus credenciales "
+        "y presiona 'Iniciar proceso' nuevamente."
+    )
+    if st.button("Aceptar", key="close_credenciales_modal", use_container_width=True):
+        st.session_state["credenciales_modal_open"] = False
+        st.session_state["credenciales_modal_msg"] = ""
+        st.rerun()
+
+
 def _schedule_desktop_app_exit(delay_sec: float = 0.9) -> None:
     if st.session_state.get("_desktop_exit_scheduled"):
         return
@@ -976,6 +1005,10 @@ def _init_download_state():
         st.session_state.manual_consultar_hint_ts = None
     if "download_finished_modal_open" not in st.session_state:
         st.session_state.download_finished_modal_open = False
+    if "credenciales_modal_open" not in st.session_state:
+        st.session_state.credenciales_modal_open = False
+    if "credenciales_modal_msg" not in st.session_state:
+        st.session_state.credenciales_modal_msg = ""
 
 def _drain_download_queue():
     q = st.session_state.download_queue
@@ -1029,17 +1062,31 @@ def _download_worker(params: dict, q: "queue.Queue"):
         q.put(("done", resultado))
     except Exception as err:
         err_str = str(err)
-        # Detectar si la excepcion vino de que el usuario presiono
-        # "Detener proceso" — la frase "proceso cancelado por el usuario"
-        # se genera explicitamente en el robot cuando se respeta el
-        # cancel_event (ver robot/downloader.request_cancel()).
-        # Si es del usuario => cancel_reason="user" (NO auto-reanudar).
-        # Cualquier otro error tecnico => cancel_reason="error" (auto-reanudar).
-        cancel_reason = (
-            "user"
-            if "proceso cancelado por el usuario" in err_str.lower()
-            else "error"
+        err_low = err_str.lower()
+        # Detectar el origen de la excepcion para decidir si auto-reanudar:
+        #   - "proceso cancelado por el usuario" => cancel_reason="user" (NO reanuda).
+        #   - "[CREDENCIALES] ..." (login con clave/usuario incorrectos) =>
+        #     cancel_reason="user" tambien — auto-reanudar nunca va a resolver
+        #     una clave incorrecta y solo abriria el navegador 3 veces seguidas.
+        #     La UI muestra un modal especifico para este caso.
+        #   - Cualquier otro fallo de login del SRI ("login del sri", "credenciales o
+        #     captcha", "pantalla de autenticacion persistente") => NO reanudar.
+        #     Reabrir el navegador 3 veces sobre un login que ya fallo no resuelve
+        #     nada y confunde al usuario. Que vea el error y decida.
+        #   - Cualquier otro error tecnico (red, timeout durante la descarga,
+        #     captcha de consulta, etc.) => cancel_reason="error" (auto-reanuda).
+        es_error_login = (
+            "[credenciales]" in err_low
+            or "login del sri" in err_low
+            or "no fue posible completar el login" in err_low
         )
+        if (
+            "proceso cancelado por el usuario" in err_low
+            or es_error_login
+        ):
+            cancel_reason = "user"
+        else:
+            cancel_reason = "error"
         if checkpoint_path:
             mark_download_checkpoint_failed(
                 checkpoint_path, err_str, cancel_reason=cancel_reason
@@ -1056,6 +1103,16 @@ def _friendly_download_error_message(raw_error: str, origen: str | None = None) 
 
     if "proceso cancelado por el usuario" in low:
         return "warning", "Proceso cancelado por el usuario."
+
+    # Credenciales invalidas: el robot levanta RuntimeError("[CREDENCIALES] ...").
+    # La UI tambien renderiza un modal especifico para este caso (ver
+    # _render_credenciales_incorrectas_modal); aqui devolvemos una etiqueta
+    # interna que el caller puede usar para disparar ese modal.
+    if "[credenciales]" in low:
+        return (
+            "credenciales_invalidas",
+            "La contraseña ingresada para el SRI es incorrecta. Verifica los datos e intenta nuevamente.",
+        )
 
     if (
         "[navegador]" in low
@@ -4144,6 +4201,10 @@ if hasattr(st, "dialog"):
     @st.dialog("Cerrar aplicacion")
     def _close_app_dialog():
         _render_close_app_modal()
+
+    @st.dialog("Credenciales incorrectas")
+    def _credenciales_invalidas_dialog():
+        _render_credenciales_incorrectas_modal()
 else:
     def _tour_dialog():
         _render_first_use_tour()
@@ -4156,6 +4217,9 @@ else:
 
     def _close_app_dialog():
         _render_close_app_modal()
+
+    def _credenciales_invalidas_dialog():
+        _render_credenciales_incorrectas_modal()
 
 if st.session_state.pop("open_close_app_dialog", False):
     _close_app_dialog()
@@ -4174,6 +4238,9 @@ if st.session_state.get("first_use_tour_active", False):
 
 if st.session_state.get("download_finished_modal_open", False):
     _download_finished_dialog()
+
+if st.session_state.get("credenciales_modal_open", False):
+    _credenciales_invalidas_dialog()
 
 tab1, tab2, tab3, tab4 = st.tabs(
     [" Descarga de Comprobantes", " Reportes e Historial", " Consolidacion de documentos", " Ayuda"]
@@ -4752,12 +4819,24 @@ with tab1:
         if st.session_state.download_error:
             raw_error = str(st.session_state.download_error)
             level, user_msg = _friendly_download_error_message(raw_error, params.get("origen"))
-            if level == "warning":
+            if level == "credenciales_invalidas":
+                # Disparar modal especifico para clave incorrecta. El navegador
+                # ya se cerro (sync_playwright sale del with al levantar la
+                # excepcion); aqui solo activamos la bandera de UI para que
+                # _render_credenciales_incorrectas_modal lo muestre.
+                st.session_state.credenciales_modal_open = True
+                st.session_state.credenciales_modal_msg = user_msg
+                # Limpiar el error para que no se vuelva a disparar en cada
+                # rerun mientras el modal este abierto.
+                st.session_state.download_error = None
+            elif level == "warning":
                 st.warning(user_msg)
+                if user_msg.strip() != raw_error.strip():
+                    st.caption(f"Detalle tecnico: {raw_error}")
             else:
                 st.error(user_msg)
-            if user_msg.strip() != raw_error.strip():
-                st.caption(f"Detalle tecnico: {raw_error}")
+                if user_msg.strip() != raw_error.strip():
+                    st.caption(f"Detalle tecnico: {raw_error}")
         if resultado and not st.session_state.download_registered:
             dia_registro = params.get("dia")
             registrar_descarga(

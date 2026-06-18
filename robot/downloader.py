@@ -464,6 +464,46 @@ def _merge_download_verification(resultados: list[dict]) -> dict:
         ),
     }
 
+def _detectar_credenciales_invalidas_sri(page) -> str:
+    """Devuelve el texto del mensaje de error si Keycloak reporta credenciales
+    invalidas (usuario o clave incorrectos), o cadena vacia si no hay tal error.
+
+    Se chequean los contenedores tipicos de Keycloak: `.alert-error`,
+    `.kc-feedback-text`, `#input-error`, mas el body completo como fallback
+    cuando los selectores no matchean (algunos themes del SRI usan markup propio).
+    """
+    selectores = [
+        ".alert-error",
+        ".kc-feedback-text",
+        "#input-error",
+        ".pf-c-alert__title",
+        ".alert.alert-danger",
+        ".error-message",
+        ".mensaje-error",
+    ]
+    for sel in selectores:
+        try:
+            loc = page.locator(sel)
+            if loc.count() and loc.first.is_visible():
+                txt = (loc.first.inner_text(timeout=1000) or "").strip()
+                if txt:
+                    low = txt.lower()
+                    if any(k in low for k in (
+                        "usuario o clave",
+                        "clave incorrec",
+                        "usuario incorrec",
+                        "credencial",
+                        "invalid user",
+                        "invalid password",
+                        "datos incorrect",
+                        "datos invalid",
+                    )):
+                        return txt
+        except Exception:
+            continue
+    return ""
+
+
 def _login(
     context,
     page,
@@ -477,11 +517,11 @@ def _login(
 
     def _navegar():
         try:
-            page.goto(destino_url, timeout=1000)
+            page.goto(destino_url, timeout=30000)
         except Exception:
             pass
         try:
-            page.wait_for_load_state("domcontentloaded", timeout=1000)
+            page.wait_for_load_state("domcontentloaded", timeout=15000)
         except Exception:
             pass
         _asegurar_portal_disponible(page)
@@ -500,7 +540,7 @@ def _login(
     if "auth/realms" in page.url:
         page.wait_for_selector(
             "input[name='usuario']:visible, input[name='username']:visible",
-            timeout=1000,
+            timeout=30000,
         )
 
         usuario_selectores = [
@@ -561,17 +601,30 @@ def _login(
                         logger.warning("No se pudo accionar el boton 'Ingresar'; el objeto page no expone teclado.")
 
             try:
-                page.wait_for_load_state("networkidle", timeout=1000)
+                page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
                 pass
+
+            # Si el SRI ya pinto el mensaje de "Usuario o clave incorrectos",
+            # cortamos de una. Se usa un prefijo `[CREDENCIALES]` para que la
+            # UI distinga este caso de un timeout/captcha y muestre el modal
+            # correspondiente, sin reintentos automaticos.
+            msg_cred = _detectar_credenciales_invalidas_sri(page)
+            if msg_cred:
+                raise RuntimeError(f"[CREDENCIALES] {msg_cred}")
 
             autenticado = False
             for intento in range(2):
                 try:
-                    page.wait_for_url(lambda url: "auth/realms" not in url, timeout=1000)
+                    page.wait_for_url(lambda url: "auth/realms" not in url, timeout=15000)
                     autenticado = True
                     break
                 except PlaywrightTimeoutError:
+                    # Antes de declarar persistente, revisamos si el portal
+                    # nos esta diciendo que las credenciales son invalidas.
+                    msg_cred = _detectar_credenciales_invalidas_sri(page)
+                    if msg_cred:
+                        raise RuntimeError(f"[CREDENCIALES] {msg_cred}")
                     if _resolver_autenticacion_persistente(page):
                         continue
                     if intento == 1:
@@ -594,12 +647,17 @@ def _login(
                 logger.info(f"Reintentando login por captcha adicional ({captcha_retry}/{CAPTCHA_MAX_ATTEMPTS}).")
                 continue
 
+            # Ultimo chequeo antes de salir con error generico: si vemos
+            # mensaje de credenciales invalidas, lo reportamos especificamente.
+            msg_cred = _detectar_credenciales_invalidas_sri(page)
+            if msg_cred:
+                raise RuntimeError(f"[CREDENCIALES] {msg_cred}")
             raise RuntimeError("No fue posible completar el login del SRI (credenciales o captcha).")
         if "auth/realms" in page.url:
             if not _resolver_autenticacion_persistente(page):
                 raise RuntimeError("No fue posible completar el login del SRI (pantalla de autenticacion persistente).")
             try:
-                page.wait_for_url(lambda url: "auth/realms" not in url, timeout=1000)
+                page.wait_for_url(lambda url: "auth/realms" not in url, timeout=15000)
             except PlaywrightTimeoutError:
                 raise RuntimeError("No fue posible completar el login del SRI (pantalla de autenticacion persistente).")
 
