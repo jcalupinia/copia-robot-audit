@@ -25,6 +25,7 @@ import json
 import logging
 import re
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -521,57 +522,105 @@ def _buscar_facturas_remoto(
                     _emit(f"Error aplicando filtros para {fecha_display}: {exc}")
                     continue
 
-                # Leer la tabla de resultados
-                try:
-                    tabla = page.locator(
-                        "#frmPrincipal\\:tablaCompEmitidos_data"
-                    )
-                    filas = tabla.locator("tr")
-                    n_filas = filas.count()
-                except Exception as exc:
-                    _emit(f"No se pudo leer la tabla en {fecha_display}: {exc}")
-                    continue
-
                 # Pre-calcular las series normalizadas que estamos buscando
                 buscados_por_serie: dict[str, dict] = {}
                 for item in items:
                     sec_norm = _normalizar_serie_para_match(item.get("secuencial", ""))
                     if sec_norm:
                         buscados_por_serie[sec_norm] = item
+                total_buscados = len(buscados_por_serie)
 
-                # Recorrer filas
+                # Recorrer TODAS las paginas de la tabla. Antes solo
+                # procesabamos pagina 1 — facturas en pagina 2+ salian como
+                # "no encontrada" aun cuando estaban en el portal. Cortamos
+                # cuando matcheamos todos los targets o agotamos el
+                # paginador (con tope de seguridad).
                 hits = 0
-                for idx in range(n_filas):
+                pagina_actual = 1
+                MAX_PAGINAS = 100  # tope defensivo; las consultas reales rara vez exceden ~20-30 paginas
+                while True:
                     if cancel_event is not None and cancel_event.is_set():
                         break
-                    fila = filas.nth(idx)
-                    celdas = fila.locator("td")
-                    if celdas.count() < 8:
-                        continue
-                    try:
-                        tipo_serie_text = celdas.nth(1).inner_text().strip()
-                        clave_text = celdas.nth(2).inner_text().strip()
-                        importe_text = celdas.nth(7).inner_text().strip()
-                    except Exception:
-                        continue
 
-                    # Match exacto por serie normalizada
-                    serie_norm = _normalizar_serie_para_match(
-                        tipo_serie_text.replace("Factura", "")
-                    )
-                    if serie_norm in buscados_por_serie:
-                        item = buscados_por_serie[serie_norm]
-                        key = _normalizar_secuencial(item.get("secuencial", ""))
-                        encontradas[key] = {
-                            "importe_total": _safe_float(importe_text),
-                            "clave_acceso": clave_text,
-                            "tipo_serie_raw": tipo_serie_text,
-                        }
-                        hits += 1
+                    try:
+                        tabla = page.locator(
+                            "#frmPrincipal\\:tablaCompEmitidos_data"
+                        )
+                        filas = tabla.locator("tr")
+                        n_filas = filas.count()
+                    except Exception as exc:
+                        _emit(
+                            f"No se pudo leer la tabla en {fecha_display} "
+                            f"(pag {pagina_actual}): {exc}"
+                        )
+                        break
+
+                    for idx in range(n_filas):
+                        if cancel_event is not None and cancel_event.is_set():
+                            break
+                        fila = filas.nth(idx)
+                        celdas = fila.locator("td")
+                        try:
+                            textos_celdas = celdas.all_inner_texts()
+                        except Exception:
+                            textos_celdas = []
+                        if len(textos_celdas) < 8:
+                            continue
+                        tipo_serie_text = textos_celdas[1].strip()
+                        clave_text = textos_celdas[2].strip()
+                        importe_text = textos_celdas[7].strip()
+
+                        # Match exacto por serie normalizada
+                        serie_norm = _normalizar_serie_para_match(
+                            tipo_serie_text.replace("Factura", "")
+                        )
+                        if serie_norm in buscados_por_serie:
+                            item = buscados_por_serie[serie_norm]
+                            key = _normalizar_secuencial(item.get("secuencial", ""))
+                            encontradas[key] = {
+                                "importe_total": _safe_float(importe_text),
+                                "clave_acceso": clave_text,
+                                "tipo_serie_raw": tipo_serie_text,
+                            }
+                            hits += 1
+
+                    # Si ya encontramos todos los targets, no tiene sentido
+                    # seguir paginando.
+                    if hits >= total_buscados:
+                        break
+
+                    # Click en "siguiente pagina" si esta habilitado.
+                    if pagina_actual >= MAX_PAGINAS:
+                        _emit(
+                            f"Fecha {fecha_display}: se alcanzo tope de {MAX_PAGINAS} "
+                            f"paginas — corto la busqueda aqui."
+                        )
+                        break
+                    try:
+                        boton_siguiente = page.locator(
+                            "span.ui-paginator-next:not(.ui-state-disabled), "
+                            "a.ui-paginator-next:not(.ui-state-disabled)"
+                        )
+                        if not boton_siguiente.count():
+                            break
+                        boton_siguiente.first.click()
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=10000)
+                        except Exception:
+                            pass
+                        time.sleep(0.3)
+                        pagina_actual += 1
+                    except Exception as exc:
+                        _emit(
+                            f"No se pudo avanzar a pag {pagina_actual + 1} "
+                            f"en {fecha_display}: {exc}"
+                        )
+                        break
 
                 _emit(
                     f"Fecha {fecha_display}: {hits}/{len(items)} Factura(s) "
-                    f"encontradas en la tabla del SRI."
+                    f"encontradas en la tabla del SRI "
+                    f"(recorridas {pagina_actual} pag)."
                 )
 
             # Guardar cookies para futuras consultas
