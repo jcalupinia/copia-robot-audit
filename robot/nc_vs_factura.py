@@ -500,6 +500,15 @@ def _buscar_facturas_remoto(
                     if fecha_loc.count():
                         fecha_loc.first.fill("")
                         fecha_loc.first.fill(fecha_display)
+                        # IMPORTANTE: PrimeFaces necesita estos eventos para
+                        # que el calendario tome el valor. Sin esto, el SRI
+                        # ignora la fecha y consulta con el default (hoy) —
+                        # razon principal de "facturas no encontradas".
+                        try:
+                            fecha_loc.first.dispatch_event("input")
+                            fecha_loc.first.dispatch_event("change")
+                        except Exception:
+                            pass
                     _seleccionar_en_select(
                         page,
                         "select#frmPrincipal\\:cmbTipoComprobante",
@@ -518,17 +527,57 @@ def _buscar_facturas_remoto(
                     if consultar_btn.count():
                         consultar_btn.first.click()
                         page.wait_for_load_state("networkidle", timeout=15000)
+                    # Despues de aplicar filtros, intentamos subir el rows-per-page
+                    # al maximo que ofrezca el SRI. Esto reduce el numero de
+                    # paginas a recorrer (75 vs 10 = 7.5x menos clicks).
+                    try:
+                        rpp_loc = page.locator(
+                            "#frmPrincipal\\:tablaCompEmitidos_paginator_top "
+                            "select.ui-paginator-rpp-options, "
+                            "select[id$='_rppDD']"
+                        )
+                        if rpp_loc.count():
+                            opciones = rpp_loc.first.locator("option")
+                            valores = []
+                            for i in range(opciones.count()):
+                                try:
+                                    v = (opciones.nth(i).get_attribute("value") or "").strip()
+                                    if v.isdigit():
+                                        valores.append(int(v))
+                                except Exception:
+                                    continue
+                            if valores:
+                                mejor = max(valores)
+                                rpp_loc.first.select_option(value=str(mejor))
+                                try:
+                                    page.wait_for_load_state("networkidle", timeout=8000)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
                 except Exception as exc:
                     _emit(f"Error aplicando filtros para {fecha_display}: {exc}")
                     continue
 
-                # Pre-calcular las series normalizadas que estamos buscando
+                # Pre-calcular las series normalizadas que estamos buscando.
+                # Dos indices para matcheo robusto:
+                #   buscados_por_serie: la version "Factura xxx-xxx-xxx" del cell.
+                #   buscados_por_secuencial_9: los ultimos 9 digitos (= secuencial
+                #     puro) extraidos del clave de acceso. Mas robusto cuando el
+                #     cell de tipo+serie tiene markup raro.
                 buscados_por_serie: dict[str, dict] = {}
+                buscados_por_secuencial_9: dict[str, dict] = {}
                 for item in items:
-                    sec_norm = _normalizar_serie_para_match(item.get("secuencial", ""))
+                    sec_orig = item.get("secuencial", "")
+                    sec_norm = _normalizar_serie_para_match(sec_orig)
                     if sec_norm:
                         buscados_por_serie[sec_norm] = item
-                total_buscados = len(buscados_por_serie)
+                    # secuencial puro (ultimos 9 digitos) para match por clave de acceso
+                    digits = re.sub(r"\D", "", str(sec_orig))
+                    if len(digits) >= 9:
+                        buscados_por_secuencial_9[digits[-9:]] = item
+                total_buscados = len(buscados_por_serie) or len(buscados_por_secuencial_9)
+                vistos: set[str] = set()  # keys de items ya encontrados en cualquier pag
 
                 # Recorrer TODAS las paginas de la tabla. Antes solo
                 # procesabamos pagina 1 — facturas en pagina 2+ salian como
@@ -570,13 +619,28 @@ def _buscar_facturas_remoto(
                         clave_text = textos_celdas[2].strip()
                         importe_text = textos_celdas[7].strip()
 
-                        # Match exacto por serie normalizada
+                        # Match #1: por tipo+serie normalizada del cell.
+                        item_matched = None
                         serie_norm = _normalizar_serie_para_match(
                             tipo_serie_text.replace("Factura", "")
                         )
                         if serie_norm in buscados_por_serie:
-                            item = buscados_por_serie[serie_norm]
-                            key = _normalizar_secuencial(item.get("secuencial", ""))
+                            item_matched = buscados_por_serie[serie_norm]
+                        # Match #2 (fallback): extraer los digitos del secuencial
+                        # de la clave de acceso (posiciones 30-38 del clave de
+                        # 49 digitos = los 9 digitos del secuencial). Util cuando
+                        # el cell de tipo+serie tiene markup roto/whitespace.
+                        if item_matched is None:
+                            clave_digits = re.sub(r"\D", "", clave_text)
+                            if len(clave_digits) == 49:
+                                sec_de_clave = clave_digits[30:39]
+                                if sec_de_clave in buscados_por_secuencial_9:
+                                    item_matched = buscados_por_secuencial_9[sec_de_clave]
+                        if item_matched is not None:
+                            key = _normalizar_secuencial(item_matched.get("secuencial", ""))
+                            if key in vistos:
+                                continue  # ya lo encontramos en una pag anterior
+                            vistos.add(key)
                             encontradas[key] = {
                                 "importe_total": _safe_float(importe_text),
                                 "clave_acceso": clave_text,
@@ -622,6 +686,21 @@ def _buscar_facturas_remoto(
                     f"encontradas en la tabla del SRI "
                     f"(recorridas {pagina_actual} pag)."
                 )
+                # Log diagnostico: si quedaron sin encontrar, listamos los
+                # secuenciales para que el usuario pueda chequear manualmente.
+                if hits < len(items):
+                    no_encontrados = []
+                    for it in items:
+                        k = _normalizar_secuencial(it.get("secuencial", ""))
+                        if k not in vistos:
+                            no_encontrados.append(it.get("secuencial", "?"))
+                    if no_encontrados:
+                        muestra = ", ".join(no_encontrados[:8])
+                        suf = "..." if len(no_encontrados) > 8 else ""
+                        _emit(
+                            f"  No matcheadas en {fecha_display}: {muestra}{suf} "
+                            f"(verifica que existan como 'Factura Autorizada' en esa fecha)."
+                        )
 
             # Guardar cookies para futuras consultas
             try:
