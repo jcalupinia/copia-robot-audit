@@ -339,6 +339,7 @@ from robot.config import (
     RECIBIDOS_RECAPTCHA_TOKEN_TIMEOUT_MS,
     RECIBIDOS_REHIDRATAR_DESDE_INTENTO,
     RECIBIDOS_REHIDRATAR_ON_CAPTCHA,
+    RECIBIDOS_CLEAN_GOOGLE_COOKIES,
     PLAYWRIGHT_USE_TEMP_PROFILE,
     PREFER_SYSTEM_CHROME,
     RECUPERAR_COMPROBANTES_URL,
@@ -693,6 +694,102 @@ def _limpiar_locks_perfil(profile_dir: Path) -> None:
             pass
 
 
+def _limpiar_cookies_google_perfil(profile_dir: Path) -> int:
+    """Borra cookies de Google/reCAPTCHA del perfil persistente.
+
+    Resetea el "score base" que reCAPTCHA Enterprise mantiene asociado a
+    las cookies del perfil, SIN tocar las cookies del SRI ni de ningun otro
+    sitio. Util cuando el perfil acumula mala reputacion tras muchas
+    sesiones automatizadas y el captcha vuelve a fallar.
+
+    Solo borra cookies cuyos `host_key` pertenecen a:
+      - `*.google.com`, `accounts.google.com`, `apis.google.com`
+      - `*.recaptcha.net`
+      - `*.gstatic.com`
+      - `*.googleapis.com`
+      - `*.googleusercontent.com`
+
+    Devuelve la cantidad de cookies borradas. Si el archivo no existe
+    o esta bloqueado (Chrome corriendo), devuelve 0 sin error.
+
+    IMPORTANTE: debe llamarse ANTES de lanzar el navegador. Si Chrome
+    esta abierto, el archivo Cookies esta bloqueado y la operacion falla
+    silenciosamente.
+    """
+    import sqlite3
+
+    # Chrome guarda cookies en distintas rutas segun la version:
+    #   - Chrome <= 120: <profile>/Default/Cookies o <profile>/Cookies
+    #   - Chrome >= 121: <profile>/Default/Network/Cookies (movido a Network/)
+    # Probamos todas las ubicaciones posibles.
+    candidatos = [
+        profile_dir / "Default" / "Network" / "Cookies",
+        profile_dir / "Default" / "Cookies",
+        profile_dir / "Network" / "Cookies",
+        profile_dir / "Cookies",
+    ]
+
+    # Patrones de dominio (LIKE de SQL). Usamos % al inicio para capturar
+    # tanto el dominio base como subdominios (e.g., `accounts.google.com`).
+    patrones = [
+        "%google.com",
+        "%recaptcha.net",
+        "%gstatic.com",
+        "%googleapis.com",
+        "%googleusercontent.com",
+        "%ggpht.com",
+    ]
+
+    total_borradas = 0
+    for db_path in candidatos:
+        if not db_path.exists():
+            continue
+        try:
+            # Timeout corto: si la base esta bloqueada (Chrome corriendo)
+            # no queremos colgar el arranque por ella.
+            conn = sqlite3.connect(str(db_path), timeout=1.5)
+            try:
+                cur = conn.cursor()
+                # Verificar que existe la tabla cookies (Chrome la mantiene
+                # estable pero por seguridad).
+                cur.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name='cookies'"
+                )
+                if not cur.fetchone():
+                    continue
+                borradas_en_db = 0
+                for patron in patrones:
+                    cur.execute(
+                        "DELETE FROM cookies WHERE host_key LIKE ?",
+                        (patron,),
+                    )
+                    borradas_en_db += cur.rowcount
+                conn.commit()
+                total_borradas += borradas_en_db
+                if borradas_en_db > 0:
+                    logger.info(
+                        f"Cookies de Google/reCAPTCHA borradas en {db_path.name}: "
+                        f"{borradas_en_db}"
+                    )
+            finally:
+                conn.close()
+        except sqlite3.OperationalError as err:
+            # "database is locked" — Chrome esta abierto. No es fatal.
+            logger.warning(
+                f"No se pudieron borrar cookies en {db_path.name} "
+                f"(probable Chrome abierto): {err}"
+            )
+            continue
+        except Exception as err:
+            logger.warning(
+                f"Error inesperado limpiando cookies en {db_path.name}: "
+                f"{type(err).__name__}: {err}"
+            )
+            continue
+    return total_borradas
+
+
 def _navegador_responde(context, timeout_ms: int = 8000) -> bool:
     """Confirma que el navegador está realmente vivo y responde.
 
@@ -828,6 +925,26 @@ def _abrir_navegador(p):
             try:
                 perfil_fijo.mkdir(parents=True, exist_ok=True)
                 _limpiar_locks_perfil(perfil_fijo)
+                # Borrar cookies de Google/reCAPTCHA del perfil persistente
+                # antes de lanzar Chrome. Resetea el "score base" que reCAPTCHA
+                # Enterprise mantiene en esas cookies, evitando que el captcha
+                # vuelva a fallar tras muchas sesiones en la misma maquina.
+                # NO toca cookies del SRI ni de otros sitios.
+                if RECIBIDOS_CLEAN_GOOGLE_COOKIES:
+                    try:
+                        n_borradas = _limpiar_cookies_google_perfil(perfil_fijo)
+                        if n_borradas > 0:
+                            logger.info(
+                                f"Auto-limpieza captcha: borradas {n_borradas} "
+                                f"cookies de Google/reCAPTCHA del perfil persistente "
+                                f"(reset de score reCAPTCHA Enterprise sin afectar "
+                                f"login SRI)."
+                            )
+                    except Exception as err:
+                        logger.warning(
+                            f"Falló la auto-limpieza de cookies de Google: "
+                            f"{type(err).__name__}: {err}. Continuamos sin abortar."
+                        )
                 rutas.append(("perfil fijo", perfil_fijo))
             except Exception as err:
                 errores.append(f"perfil fijo no accesible: {type(err).__name__}: {err}")

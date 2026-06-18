@@ -202,19 +202,48 @@ except ValueError:
     RECIBIDOS_PERFIL_WARMUP_MS = 0
 
 # Perfil temporal por sesión, en lugar de persistente. La app de referencia
-# usa `user-data-dir=...\Temp\scoped_dir_XXXX` (perfil nuevo cada vez) y
-# pasa el captcha al primer intento. Nuestro perfil persistente podría
-# acumular cookies de Google con "mala reputación" de intentos anteriores
-# con flags de automatización activos.
+# (AMU) usa `user-data-dir=...\Temp\scoped_dir_XXXX` (perfil nuevo cada vez)
+# y pasa el captcha al primer intento. Nuestro perfil persistente acumula
+# cookies de Google con "mala reputación" tras muchas sesiones automatizadas
+# y el captcha vuelve a fallar.
 #
-# Si =1, en cada arranque del bot se crea un perfil temporal con
-# `tempfile.mkdtemp("sri_bot_temp_")` y se usa como user-data-dir. El
-# usuario tiene que loguearse al SRI cada vez que arranca el bot (fricción
-# mayor), pero arranca con cookies vacías sin "mala reputación".
+# Si =1 (DEFAULT desde 2026-06-18), en cada arranque del bot se crea un
+# perfil temporal con `tempfile.mkdtemp("sri_bot_temp_")` como user-data-dir.
+# El usuario tiene que loguearse al SRI cada vez que arranca el bot
+# (fricción de ~30s), pero arranca SIEMPRE con cookies vacías → score
+# reCAPTCHA limpio → captcha pasa al primer intento como AMU.
 #
-# Si =0 (default), usa el perfil persistente normal (browser_profile/).
+# Si =0, usa el perfil persistente fijo (browser_profile/). En este modo
+# se recomienda activar tambien RECIBIDOS_CLEAN_GOOGLE_COOKIES=1 (default)
+# para limpiar cookies de Google al arranque y mitigar la degradacion del
+# score reCAPTCHA, manteniendo el login SRI persistente.
 PLAYWRIGHT_USE_TEMP_PROFILE = (
-    os.getenv("PLAYWRIGHT_USE_TEMP_PROFILE", "0").strip().lower()
+    os.getenv("PLAYWRIGHT_USE_TEMP_PROFILE", "1").strip().lower()
+    in {"1", "true", "yes", "on", "si"}
+)
+
+
+# Auto-limpieza de cookies de Google/reCAPTCHA en el perfil persistente al
+# arrancar. Resuelve el problema de "el captcha vuelve a fallar despues de
+# muchas sesiones en la misma maquina" — observado 2026-06-18 por el usuario.
+#
+# Causa: el perfil persistente acumula cookies de Google (`recaptcha.net`,
+# `google.com`, `gstatic.com`) que mantienen estado del score reCAPTCHA
+# Enterprise. Despues de muchas sesiones automatizadas, Google asocia ese
+# perfil con actividad bot y baja el score base de toda futura solicitud
+# desde esas cookies — independientemente de los flags stealth.
+#
+# Solucion: antes de cada arranque del bot, abrimos la base SQLite de cookies
+# del perfil persistente y borramos SOLO las filas cuyos host_key apuntan a
+# dominios de Google/reCAPTCHA. NO tocamos cookies del SRI (login, sesion,
+# preferencias) ni de ningun otro sitio. El usuario no se entera; el unico
+# costo es que Google emite un nuevo desafio reCAPTCHA en el primer Consultar
+# (resuelto en segundos, con score fresco).
+#
+# Si =0, desactiva el comportamiento — usar solo si por algun motivo borrar
+# las cookies de Google cause un problema (no conocemos ninguno).
+RECIBIDOS_CLEAN_GOOGLE_COOKIES = (
+    os.getenv("RECIBIDOS_CLEAN_GOOGLE_COOKIES", "1").strip().lower()
     in {"1", "true", "yes", "on", "si"}
 )
 
