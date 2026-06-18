@@ -443,15 +443,33 @@ def _buscar_facturas_remoto(
     # Reusamos las funciones internas del robot existente.
     from robot.downloader import _login, _abrir_navegador
     from robot.browser import _abrir_modulo_consultas, _seleccionar_en_select
-    from robot.config import RECUPERAR_COMPROBANTES_URL
+    from robot.config import PORTAL_HOME
 
     with sync_playwright() as p:
         context, browser, _persistent = _abrir_navegador(p)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             _emit("Autenticando en el portal del SRI...")
+            # IMPORTANTE: usamos PORTAL_HOME (entry SSO de Keycloak con
+            # client_id=app-sri-claves-angular) en vez de un deep link como
+            # RECUPERAR_COMPROBANTES_URL. Si navegamos directo al .jsf, el
+            # SRI redirige a auth con un redirect_uri que NO coincide con
+            # la sesion de SSO, y apenas pasa el login el portal nos rebota
+            # de vuelta al login screen — esto generaba el error "pantalla
+            # de autenticacion persistente" infinito.
+            #
+            # Defensiva: si una corrida anterior dejo cookies vencidas o
+            # corruptas en cookies_nc_lookup_<ruc>.json, las borramos antes
+            # del _login para que arranque limpio. Para Valor Neto (uso
+            # one-shot), el costo de re-loguear es bajo y compensa evitar
+            # bounces por estado cookie viejo.
+            if cookies_path.exists():
+                try:
+                    cookies_path.unlink()
+                except Exception:
+                    pass
             _login(
-                context, page, ruc, clave, cookies_path, RECUPERAR_COMPROBANTES_URL
+                context, page, ruc, clave, cookies_path, PORTAL_HOME
             )
             _emit("Sesion del SRI lista.")
 
