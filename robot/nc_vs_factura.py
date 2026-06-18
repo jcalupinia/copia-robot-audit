@@ -579,6 +579,28 @@ def _buscar_facturas_remoto(
                 total_buscados = len(buscados_por_serie) or len(buscados_por_secuencial_9)
                 vistos: set[str] = set()  # keys de items ya encontrados en cualquier pag
 
+                # ===== Diagnostico inicial: confirmar que la tabla quedo
+                # filtrada por la fecha objetivo. Si la primera fila de la
+                # tabla tiene una fecha autorizacion (col 3) muy distinta a
+                # la pedida, el filtro NO se aplico — el resto seria todo
+                # inutil. Solo logeamos; no abortamos por si la heuristica
+                # falla en algun caso raro.
+                try:
+                    primera = page.locator(
+                        "#frmPrincipal\\:tablaCompEmitidos_data tr"
+                    ).first
+                    if primera.count():
+                        fila_textos = primera.locator("td").all_inner_texts()
+                        if len(fila_textos) >= 4:
+                            fecha_autorizacion_raw = fila_textos[3].strip()
+                            _emit(
+                                f"  [diag] Fecha objetivo={fecha_display} | "
+                                f"primera fila autorizacion={fecha_autorizacion_raw!r} | "
+                                f"primera serie={fila_textos[1].strip()!r}"
+                            )
+                except Exception:
+                    pass
+
                 # Recorrer TODAS las paginas de la tabla. Antes solo
                 # procesabamos pagina 1 — facturas en pagina 2+ salian como
                 # "no encontrada" aun cuando estaban en el portal. Cortamos
@@ -586,7 +608,13 @@ def _buscar_facturas_remoto(
                 # paginador (con tope de seguridad).
                 hits = 0
                 pagina_actual = 1
-                MAX_PAGINAS = 100  # tope defensivo; las consultas reales rara vez exceden ~20-30 paginas
+                total_filas_revisadas = 0
+                MAX_PAGINAS = 200  # tope defensivo; las consultas reales rara vez exceden ~30 paginas
+                _emit(
+                    f"  [paginacion] {fecha_display}: buscando {total_buscados} factura(s) — "
+                    f"objetivos: {', '.join(list(buscados_por_serie.keys())[:5])}"
+                    f"{'...' if len(buscados_por_serie) > 5 else ''}"
+                )
                 while True:
                     if cancel_event is not None and cancel_event.is_set():
                         break
@@ -599,11 +627,14 @@ def _buscar_facturas_remoto(
                         n_filas = filas.count()
                     except Exception as exc:
                         _emit(
-                            f"No se pudo leer la tabla en {fecha_display} "
+                            f"  [paginacion] No se pudo leer la tabla en {fecha_display} "
                             f"(pag {pagina_actual}): {exc}"
                         )
                         break
 
+                    hits_antes = hits
+                    series_vistas_muestra: list[str] = []
+                    primer_serie_pagina = ""
                     for idx in range(n_filas):
                         if cancel_event is not None and cancel_event.is_set():
                             break
@@ -618,18 +649,24 @@ def _buscar_facturas_remoto(
                         tipo_serie_text = textos_celdas[1].strip()
                         clave_text = textos_celdas[2].strip()
                         importe_text = textos_celdas[7].strip()
+                        total_filas_revisadas += 1
+                        if idx == 0:
+                            primer_serie_pagina = tipo_serie_text
+                        if len(series_vistas_muestra) < 3:
+                            series_vistas_muestra.append(tipo_serie_text)
 
                         # Match #1: por tipo+serie normalizada del cell.
+                        # Acepta cualquier prefijo (no solo "Factura") — solo
+                        # importan los digitos serie post normalizacion.
                         item_matched = None
                         serie_norm = _normalizar_serie_para_match(
-                            tipo_serie_text.replace("Factura", "")
+                            tipo_serie_text.replace("Factura", "").replace("factura", "")
                         )
                         if serie_norm in buscados_por_serie:
                             item_matched = buscados_por_serie[serie_norm]
                         # Match #2 (fallback): extraer los digitos del secuencial
                         # de la clave de acceso (posiciones 30-38 del clave de
-                        # 49 digitos = los 9 digitos del secuencial). Util cuando
-                        # el cell de tipo+serie tiene markup roto/whitespace.
+                        # 49 digitos = los 9 digitos del secuencial).
                         if item_matched is None:
                             clave_digits = re.sub(r"\D", "", clave_text)
                             if len(clave_digits) == 49:
@@ -648,43 +685,136 @@ def _buscar_facturas_remoto(
                             }
                             hits += 1
 
+                    _emit(
+                        f"  [pag {pagina_actual}] {fecha_display}: filas={n_filas} | "
+                        f"matches en esta pag={hits - hits_antes} (total {hits}/{total_buscados}) | "
+                        f"primera fila='{primer_serie_pagina[:50]}'"
+                    )
+
                     # Si ya encontramos todos los targets, no tiene sentido
                     # seguir paginando.
                     if hits >= total_buscados:
+                        _emit(
+                            f"  [paginacion] {fecha_display}: matcheamos los "
+                            f"{total_buscados} targets, corto paginacion."
+                        )
                         break
 
-                    # Click en "siguiente pagina" si esta habilitado.
+                    # Tope defensivo
                     if pagina_actual >= MAX_PAGINAS:
                         _emit(
-                            f"Fecha {fecha_display}: se alcanzo tope de {MAX_PAGINAS} "
-                            f"paginas — corto la busqueda aqui."
+                            f"  [paginacion] {fecha_display}: se alcanzo tope de "
+                            f"{MAX_PAGINAS} paginas — corto la busqueda."
                         )
                         break
+
+                    # ====== Click en "siguiente pagina" con verificacion REAL =======
+                    # Estrategia:
+                    #  1) capturar el texto de la primera fila ANTES del click
+                    #     (col 2 = clave de acceso, unica por factura).
+                    #  2) probar selectores en orden de especificidad. Si el
+                    #     elemento existe pero esta disabled o no existe el
+                    #     siguiente, salimos: estamos en la ultima pag.
+                    #  3) hacer click.
+                    #  4) wait_for_function hasta que el primer-row clave cambie
+                    #     (o la tabla quede vacia). networkidle solo no alcanza
+                    #     porque PrimeFaces hace partial AJAX y el wait puede
+                    #     completarse antes del re-render.
+                    #  5) Si tras N segundos el contenido no cambia → el click
+                    #     no avanzo realmente. Logeamos y abortamos.
+                    clave_primera_fila_prev = ""
                     try:
-                        boton_siguiente = page.locator(
-                            "span.ui-paginator-next:not(.ui-state-disabled), "
-                            "a.ui-paginator-next:not(.ui-state-disabled)"
-                        )
-                        if not boton_siguiente.count():
-                            break
-                        boton_siguiente.first.click()
+                        if n_filas > 0:
+                            primera_celdas = filas.first.locator("td")
+                            if primera_celdas.count() >= 3:
+                                clave_primera_fila_prev = (
+                                    primera_celdas.nth(2).inner_text(timeout=1500)
+                                    or ""
+                                ).strip()
+                    except Exception:
+                        pass
+
+                    # Localizar boton siguiente — probamos varias variantes.
+                    boton_clickeable = None
+                    for next_sel in (
+                        "a.ui-paginator-next:not(.ui-state-disabled)",
+                        "span.ui-paginator-next:not(.ui-state-disabled)",
+                        ".ui-paginator-next:not(.ui-state-disabled)",
+                        "#frmPrincipal\\:tablaCompEmitidos_paginator_bottom "
+                        "a.ui-paginator-next:not(.ui-state-disabled)",
+                    ):
                         try:
-                            page.wait_for_load_state("networkidle", timeout=10000)
+                            loc = page.locator(next_sel)
+                            if loc.count():
+                                boton_clickeable = loc.first
+                                break
                         except Exception:
-                            pass
-                        time.sleep(0.3)
-                        pagina_actual += 1
+                            continue
+
+                    if boton_clickeable is None:
+                        _emit(
+                            f"  [paginacion] {fecha_display}: no hay boton 'siguiente' "
+                            f"habilitado en pag {pagina_actual}. Fin natural de paginacion."
+                        )
+                        break
+
+                    try:
+                        boton_clickeable.scroll_into_view_if_needed(timeout=2000)
+                    except Exception:
+                        pass
+                    try:
+                        boton_clickeable.click(timeout=5000)
                     except Exception as exc:
                         _emit(
-                            f"No se pudo avanzar a pag {pagina_actual + 1} "
-                            f"en {fecha_display}: {exc}"
+                            f"  [paginacion] {fecha_display}: click en 'siguiente' "
+                            f"fallo en pag {pagina_actual}: {exc}. Abandono paginacion."
                         )
                         break
+
+                    # Esperar a que la primera fila REALMENTE cambie su clave.
+                    # Si tras 12s sigue igual, el click no surtio efecto.
+                    cambio_ok = False
+                    try:
+                        page.wait_for_function(
+                            """(prev) => {
+                                const t = document.getElementById('frmPrincipal:tablaCompEmitidos_data');
+                                if (!t) return false;
+                                const filaUno = t.querySelector('tr');
+                                if (!filaUno) return true;
+                                const celdas = filaUno.querySelectorAll('td');
+                                if (celdas.length < 3) return true;
+                                const clave = (celdas[2].innerText || '').trim();
+                                if (!clave) return false;
+                                return clave !== prev;
+                            }""",
+                            arg=clave_primera_fila_prev,
+                            timeout=12000,
+                        )
+                        cambio_ok = True
+                    except Exception:
+                        cambio_ok = False
+
+                    if not cambio_ok:
+                        _emit(
+                            f"  [paginacion] {fecha_display}: click en 'siguiente' "
+                            f"NO avanzo la pagina (primera fila sigue siendo "
+                            f"{clave_primera_fila_prev[:20]}...). Abandono paginacion. "
+                            f"Si esto pasa siempre, el selector de 'siguiente' "
+                            f"esta mal o el SRI cambio el markup."
+                        )
+                        break
+
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=3000)
+                    except Exception:
+                        pass
+                    time.sleep(0.2)
+                    pagina_actual += 1
 
                 _emit(
                     f"Fecha {fecha_display}: {hits}/{len(items)} Factura(s) "
                     f"encontradas en la tabla del SRI "
-                    f"(recorridas {pagina_actual} pag)."
+                    f"(recorridas {pagina_actual} pag, {total_filas_revisadas} filas revisadas)."
                 )
                 # Log diagnostico: si quedaron sin encontrar, listamos los
                 # secuenciales para que el usuario pueda chequear manualmente.
@@ -699,7 +829,9 @@ def _buscar_facturas_remoto(
                         suf = "..." if len(no_encontrados) > 8 else ""
                         _emit(
                             f"  No matcheadas en {fecha_display}: {muestra}{suf} "
-                            f"(verifica que existan como 'Factura Autorizada' en esa fecha)."
+                            f"(revisa el log: si las paginas avanzaron y filas_revisadas "
+                            f"es alto pero hits es bajo, hay un bug de matching. "
+                            f"Si filas_revisadas es bajo, hay un bug de paginacion.)"
                         )
 
             # Guardar cookies para futuras consultas
