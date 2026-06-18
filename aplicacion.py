@@ -4265,12 +4265,15 @@ with tab1:
         # AUTO-REANUDACION cuando el motivo NO fue cancelacion del
         # usuario y aun no se agotaron los intentos automaticos.
         # Si el usuario presiono "Detener proceso" => cancel_reason="user"
-        # => NO auto-reanuda, muestra los botones manuales como siempre.
-        # Si hubo error tecnico (timeout, navegador, red) => auto-reanuda
-        # hasta MAX_AUTO_RESUME_ATTEMPTS veces consecutivas; despues
-        # de ese limite muestra los botones manuales para evitar loops
-        # infinitos cuando el problema es persistente.
-        MAX_AUTO_RESUME_ATTEMPTS = 3
+        # => NO auto-reanuda, muestra los botones manuales.
+        # Si hubo error tecnico (timeout, navegador cerrado, red) => permite
+        # UN UNICO reintento automatico para cubrir parpadeos transitorios
+        # de red/portal SRI. Si ese reintento tambien falla, mostramos el
+        # boton manual "Reanudar descarga" y dejamos que el usuario decida.
+        # Antes eran 3 reintentos pero generaba "loops infernales" cuando
+        # el problema persistia (e.g., navegador no abre, ruta de Chrome
+        # mal configurada). Reducido a 1 el 2026-06-18 por feedback.
+        MAX_AUTO_RESUME_ATTEMPTS = 1
         resume_cancel_reason = str(
             pending_download_checkpoint.get("cancel_reason") or ""
         ).strip().lower()
@@ -4316,10 +4319,11 @@ with tab1:
                 "Motivo: cancelacion manual del usuario. Reanuda cuando estes listo."
             )
         elif resume_attempts >= MAX_AUTO_RESUME_ATTEMPTS:
+            _plural = "" if MAX_AUTO_RESUME_ATTEMPTS == 1 else "es"
             st.caption(
-                f"Se alcanzo el limite de {MAX_AUTO_RESUME_ATTEMPTS} reanudaciones "
-                f"automaticas consecutivas. Revisa el error y reanuda manualmente "
-                f"cuando este resuelto."
+                f"Se alcanzo el limite de {MAX_AUTO_RESUME_ATTEMPTS} "
+                f"reanudacion{_plural} automatica{_plural} consecutiva{_plural}. "
+                f"Revisa el error y reanuda manualmente cuando este resuelto."
             )
         col_resume_1, col_resume_2 = st.columns([1, 1])
         with col_resume_1:
