@@ -579,6 +579,223 @@ def _consultar_factura_por_clave_ws(
     }
 
 
+# =============================================================================
+# Busqueda en el portal SRI Emitidos via opcion "Clave de acceso"
+# =============================================================================
+# El WS publico solo devuelve comprobantes del ultimo mes. Para facturas mas
+# viejas (caso comun: NCs que modifican facturas de meses anteriores) hay que
+# entrar al portal con login y usar la pantalla Emitidos con la opcion radio
+# "Clave de acceso / Nro. autorizacion". Como ya tenemos la clave calculada,
+# cada lookup es UNA sola Consultar — sin filtros de fecha, sin paginacion.
+
+
+def _esperar_overlay_cerrado(page, timeout_ms: int = 15000) -> bool:
+    """Espera a que el dialogo bloqueante de PrimeFaces se oculte.
+
+    El SRI muestra `<div id="dlgpopStatusPrime_modal" class="ui-widget-overlay">`
+    como mascara de "procesando" durante CADA AJAX. Mientras esta visible,
+    todos los clicks se interceptan.
+    """
+    try:
+        page.wait_for_function(
+            """() => {
+                const el = document.getElementById('dlgpopStatusPrime_modal');
+                if (!el) return true;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') return true;
+                if (el.offsetWidth === 0 && el.offsetHeight === 0) return true;
+                return false;
+            }""",
+            timeout=timeout_ms,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _esperar_tabla_emitidos_lista(page, timeout_ms: int = 20000) -> bool:
+    """Espera a que la tabla de Emitidos termine de renderizarse despues de
+    un Consultar (tenga datos o muestre vacio).
+    """
+    try:
+        page.wait_for_function(
+            """() => {
+                const t = document.getElementById('frmPrincipal:tablaCompEmitidos_data');
+                if (!t) return false;
+                if (t.querySelector('tr td')) return true;
+                const empty = t.querySelector('.ui-datatable-empty-message');
+                if (empty) return true;
+                return false;
+            }""",
+            timeout=timeout_ms,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _seleccionar_radio_clave_acceso(page) -> bool:
+    """Selecciona el radio 'Clave de acceso / Nro. autorizacion' en Emitidos.
+
+    El form Emitidos tiene dos opciones de busqueda:
+      - "Ruc/Cedula/Pasaporte"
+      - "Clave de acceso / Nro. autorizacion"
+
+    Por defecto suele venir seleccionado el primero. Si ya estaba el segundo,
+    no hacemos nada. Devuelve True si quedo seleccionado el correcto.
+    """
+    try:
+        ok = page.evaluate(
+            """() => {
+                // Estrategia 1: buscar por texto del label adyacente.
+                const labels = document.querySelectorAll('label, span');
+                for (const l of labels) {
+                    const txt = (l.textContent || '').trim();
+                    if (txt.includes('Clave de acceso') || txt.toLowerCase().includes('autorizaci')) {
+                        const td = l.closest('td');
+                        if (td) {
+                            const radio = td.querySelector('input[type="radio"]');
+                            if (radio) {
+                                if (!radio.checked) {
+                                    radio.click();
+                                    radio.dispatchEvent(new Event('change', {bubbles: true}));
+                                }
+                                return true;
+                            }
+                            // Tambien probar el td hermano (algunos themes ponen label
+                            // y radio en celdas separadas).
+                            const tr = td.closest('tr');
+                            if (tr) {
+                                const r2 = tr.querySelector('input[type="radio"]');
+                                if (r2) {
+                                    if (!r2.checked) {
+                                        r2.click();
+                                        r2.dispatchEvent(new Event('change', {bubbles: true}));
+                                    }
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                // Estrategia 2 (fallback): asumir que el segundo radio del
+                // grupo `frmPrincipal:opciones` es el de Clave de acceso.
+                const radios = document.querySelectorAll(
+                    'input[type="radio"][name="frmPrincipal:opciones"]'
+                );
+                if (radios.length >= 2) {
+                    const r = radios[1];
+                    if (!r.checked) {
+                        r.click();
+                        r.dispatchEvent(new Event('change', {bubbles: true}));
+                    }
+                    return true;
+                }
+                return false;
+            }"""
+        )
+        return bool(ok)
+    except Exception:
+        return False
+
+
+def _consultar_factura_por_clave_portal(
+    page,
+    consultar_clic_fn,
+    clave: str,
+    timeout_ms: int = 20000,
+) -> Optional[dict]:
+    """Hace UNA consulta en Emitidos por clave de acceso y devuelve la fila
+    resultante (importe, fecha, razon social).
+
+    Pre-condiciones:
+      - `page` debe estar en la pantalla Emitidos con el radio "Clave de
+        acceso" YA seleccionado (ver `_seleccionar_radio_clave_acceso`).
+      - `consultar_clic_fn(page)` es una funcion que clickea el boton
+        Consultar (tipicamente `_click_consultar_emitidos` de browser.py).
+
+    Devuelve dict con importe_total, clave_acceso, fecha_emision,
+    razon_social_receptor — o None si no hay resultado.
+    """
+    if not clave or len(clave) != 49 or not clave.isdigit():
+        return None
+
+    _esperar_overlay_cerrado(page, timeout_ms=10000)
+
+    # Setear el input txtParametro via JS — fill+dispatch_event de Playwright
+    # no propaga al estado interno de PrimeFaces (eventos isTrusted=false).
+    try:
+        ok = page.evaluate(
+            """(val) => {
+                const el = document.getElementById('frmPrincipal:txtParametro');
+                if (!el) return false;
+                el.focus();
+                el.value = '';
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.value = val;
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+                el.dispatchEvent(new Event('blur', {bubbles: true}));
+                return true;
+            }""",
+            clave,
+        )
+        if not ok:
+            return None
+    except Exception:
+        return None
+
+    _esperar_overlay_cerrado(page, timeout_ms=5000)
+
+    # Click Consultar
+    try:
+        clicked = consultar_clic_fn(page)
+    except Exception:
+        clicked = False
+    if not clicked:
+        return None
+
+    # Esperar a que el AJAX termine (overlay cerrado + tabla con datos o vacio)
+    _esperar_overlay_cerrado(page, timeout_ms=timeout_ms)
+    _esperar_tabla_emitidos_lista(page, timeout_ms=timeout_ms)
+
+    # Leer la fila resultante (deberia ser 1 sola fila)
+    try:
+        tabla = page.locator("#frmPrincipal\\:tablaCompEmitidos_data")
+        filas = tabla.locator("tr")
+        n = filas.count()
+        if n == 0:
+            return None
+        primera = filas.first
+        celdas = primera.locator("td")
+        textos = celdas.all_inner_texts()
+        if len(textos) < 8:
+            return None
+        tipo_serie = textos[1].strip()
+        clave_text = textos[2].strip()
+        fecha_aut = textos[3].strip()
+        fecha_emi = textos[4].strip() if len(textos) > 4 else ""
+        razon = textos[5].strip() if len(textos) > 5 else ""
+        importe = textos[7].strip()
+        # Sanity check: la clave del resultado deberia coincidir con la pedida
+        clave_digits = re.sub(r"\D", "", clave_text)
+        if clave_digits and clave_digits != clave:
+            logger.warning(
+                f"Portal SRI: clave resultado {clave_digits[:20]}... no coincide "
+                f"con la pedida {clave[:20]}..."
+            )
+        return {
+            "importe_total": importe,
+            "clave_acceso": clave_digits or clave,
+            "fecha_emision": fecha_emi or fecha_aut,
+            "razon_social_receptor": razon,
+            "tipo_serie_raw": tipo_serie,
+        }
+    except Exception as err:
+        logger.warning(f"Portal SRI: lectura de fila resultante fallo: {err}")
+        return None
+
+
 def _buscar_facturas_remoto(
     ruc: str,
     clave: str,
@@ -587,34 +804,37 @@ def _buscar_facturas_remoto(
     cancel_event: Optional[threading.Event] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> dict[str, dict]:
-    """Busca facturas modificadas via el WS publico AutorizacionComprobantesOffline.
+    """Busca facturas modificadas en el portal SRI Emitidos via clave de acceso.
 
-    REEMPLAZO TOTAL del flujo viejo (login + navegacion Emitidos + paginacion).
-    Nuevo flujo: para cada NC pendiente calculamos la clave de acceso de la
+    Estrategia: para cada NC pendiente calculamos la clave de acceso de la
     factura modificada (datos en la NC + codigo numerico extraido del propio
-    clave de la NC) y consultamos al WS publico del SRI. Si la clave existe
-    y esta autorizada, devolvemos importe + datos. Si no, queda como "no
-    encontrada".
+    clave de la NC). Despues entramos al portal del SRI con login, abrimos
+    Emitidos, seleccionamos el radio "Clave de acceso / Nro. autorizacion"
+    UNA SOLA VEZ y por cada factura llenamos el input + Consultar.
 
-    Pros vs flujo viejo:
-      - SIN navegador (no abre Chrome).
-      - SIN login (no captcha, no credenciales SRI usadas).
-      - SIN paginacion (1 HTTP por factura, ~1s c/u).
-      - Inmune al overlay de PrimeFaces / cambios de markup del portal.
+    Por que NO usamos el WS publico AutorizacionComprobantesOffline:
+    el WS solo devuelve comprobantes del ultimo mes. Para facturas mas
+    viejas (caso comun: NCs que modifican facturas de meses anteriores)
+    el WS responde sin comprobante. Confirmado en la prueba del 2026-06-18:
+    37/37 facturas (todas de marzo/abril) salieron como "no encontradas" del WS.
+
+    Pros vs el flujo viejo (busqueda por fecha + serie en la tabla):
+      - 1 Consultar por factura (no paginacion).
+      - Match infalible: la clave de 49 digitos es unica.
+      - Inmune a sorts de la tabla y limites de RPP.
 
     Parametros:
-      `ruc`: RUC del emisor. Se usa solo si `nc_data.ruc` no esta.
-      `clave`: password SRI. YA NO SE USA — se mantiene por compat de signature.
+      `ruc`: RUC del emisor (necesario para el login).
+      `clave`: password SRI (necesario para el login).
       `pendientes`: lista de dicts con secuencial, fecha (datetime), nc_data.
       `cancel_event`: para cancelar en medio del loop.
       `progress`: callback para emit logs en UI.
 
     Devuelve dict { secuencial_normalizado: {importe_total, clave_acceso,
     fecha_emision, razon_social_receptor, tipo_serie_raw} } con lo que SI
-    encontro en el WS. Las que no encuentre quedan fuera (caller las marca
-    como "Factura no encontrada en SRI").
+    encontro. Las que no encuentre quedan fuera (caller las marca como
+    "Factura no encontrada en SRI").
     """
-    del clave  # WS publico, no se usa password
     encontradas: dict[str, dict] = {}
     if not pendientes:
         return encontradas
@@ -627,93 +847,150 @@ def _buscar_facturas_remoto(
                 pass
         logger.info(msg)
 
+    from playwright.sync_api import sync_playwright  # import perezoso
+    from robot.downloader import _login, _abrir_navegador
+    from robot.browser import _abrir_modulo_consultas, _click_consultar_emitidos
+    from robot.config import PORTAL_HOME
+
+    cookies_path = Path(f"cookies_nc_lookup_{ruc}.json")
+
     _emit(
-        f"Iniciando busqueda remota en SRI WS: {len(pendientes)} Factura(s) "
-        f"pendientes (sin login, sin navegador, sin paginacion)."
+        f"Iniciando busqueda remota en portal SRI: {len(pendientes)} factura(s). "
+        f"Login + 1 Consultar por clave de acceso."
     )
 
-    encontradas_count = 0
-    for i, item in enumerate(pendientes, 1):
-        if cancel_event is not None and cancel_event.is_set():
-            _emit("Busqueda remota cancelada por el usuario.")
-            break
-
-        nc_data = item.get("nc_data") or {}
-        secuencial_factura = str(item.get("secuencial") or "").strip()
-        fecha_factura = item.get("fecha")
-
-        # RUC emisor: la NC modifica una factura del MISMO contribuyente que
-        # la emitio. Usamos el RUC del XML de la NC; fallback al param ruc.
-        ruc_emisor = str(nc_data.get("ruc") or ruc or "").strip()
-
-        # Codigo numerico: extraido del clave de la NC. Mismo facturador del
-        # emisor → mismo codigo. Si no hay clave o esta rota, usamos default.
-        cod_num = _extraer_codigo_numerico_de_clave(nc_data.get("clave_acceso", ""))
-        if not cod_num:
-            cod_num = _CODIGO_NUMERICO_DEFAULT
-
-        # Partes del secuencial "EEE-PPP-SSSSSSSSS"
-        partes = secuencial_factura.split("-")
-        if len(partes) != 3:
-            _emit(
-                f"  [{i}/{len(pendientes)}] secuencial mal formado: "
-                f"{secuencial_factura!r} — salto."
-            )
-            continue
-        estab, pto, sec = partes
-
-        fecha_display = (
-            fecha_factura.strftime("%d/%m/%Y")
-            if isinstance(fecha_factura, datetime)
-            else str(fecha_factura)
-        )
-
-        # Calcular clave de acceso
+    with sync_playwright() as p:
+        context, browser, _persistent = _abrir_navegador(p)
         try:
-            clave_calc = _calcular_clave_acceso_factura(
-                fecha_emision_factura=fecha_factura,
-                ruc_emisor=ruc_emisor,
-                estab=estab,
-                pto=pto,
-                secuencial=sec,
-                codigo_numerico=cod_num,
-            )
-        except Exception as err:
+            page = context.pages[0] if context.pages else context.new_page()
+            _emit("Autenticando en el portal del SRI...")
+            # Cookies cacheadas de corridas anteriores podrian estar vencidas
+            # y causar bounces a login — las borramos pre-emptive.
+            if cookies_path.exists():
+                try:
+                    cookies_path.unlink()
+                except Exception:
+                    pass
+            _login(context, page, ruc, clave, cookies_path, PORTAL_HOME)
+            _emit("Sesion del SRI lista. Abriendo modulo Emitidos...")
+
+            try:
+                _abrir_modulo_consultas(page, "Emitidos")
+            except Exception as exc:
+                _emit(f"No se pudo abrir el modulo de Emitidos: {exc}")
+                return encontradas
+
+            _emit("Modulo Emitidos abierto. Seleccionando opcion 'Clave de acceso'...")
+            _esperar_overlay_cerrado(page, timeout_ms=15000)
+            if not _seleccionar_radio_clave_acceso(page):
+                _emit(
+                    "ERROR: no se pudo seleccionar el radio 'Clave de acceso / "
+                    "Nro. autorizacion'. Abandono busqueda remota."
+                )
+                return encontradas
+            _esperar_overlay_cerrado(page, timeout_ms=10000)
             _emit(
-                f"  [{i}/{len(pendientes)}] no se pudo calcular clave para "
-                f"{secuencial_factura} ({fecha_display}): {err} — salto."
+                "Radio 'Clave de acceso' activo. Buscando factura por factura..."
             )
-            continue
 
-        # Consultar al WS publico del SRI
-        data = _consultar_factura_por_clave_ws(clave_calc)
-        if data is None:
+            encontradas_count = 0
+            for i, item in enumerate(pendientes, 1):
+                if cancel_event is not None and cancel_event.is_set():
+                    _emit("Busqueda remota cancelada por el usuario.")
+                    break
+
+                nc_data = item.get("nc_data") or {}
+                secuencial_factura = str(item.get("secuencial") or "").strip()
+                fecha_factura = item.get("fecha")
+
+                # RUC emisor: la NC modifica una factura del MISMO contribuyente
+                # que la emitio. Usamos el RUC del XML de la NC; fallback al param.
+                ruc_emisor = str(nc_data.get("ruc") or ruc or "").strip()
+
+                # Codigo numerico: extraido del clave de la NC. Mismo facturador
+                # del emisor → mismo codigo. Si no hay clave o esta rota, default.
+                cod_num = _extraer_codigo_numerico_de_clave(
+                    nc_data.get("clave_acceso", "")
+                )
+                if not cod_num:
+                    cod_num = _CODIGO_NUMERICO_DEFAULT
+
+                # Partes del secuencial "EEE-PPP-SSSSSSSSS"
+                partes = secuencial_factura.split("-")
+                if len(partes) != 3:
+                    _emit(
+                        f"  [{i}/{len(pendientes)}] secuencial mal formado: "
+                        f"{secuencial_factura!r} — salto."
+                    )
+                    continue
+                estab, pto, sec = partes
+
+                fecha_display = (
+                    fecha_factura.strftime("%d/%m/%Y")
+                    if isinstance(fecha_factura, datetime)
+                    else str(fecha_factura)
+                )
+
+                # Calcular clave
+                try:
+                    clave_calc = _calcular_clave_acceso_factura(
+                        fecha_emision_factura=fecha_factura,
+                        ruc_emisor=ruc_emisor,
+                        estab=estab,
+                        pto=pto,
+                        secuencial=sec,
+                        codigo_numerico=cod_num,
+                    )
+                except Exception as err:
+                    _emit(
+                        f"  [{i}/{len(pendientes)}] no se pudo calcular clave para "
+                        f"{secuencial_factura} ({fecha_display}): {err} — salto."
+                    )
+                    continue
+
+                # Consultar al portal
+                data = _consultar_factura_por_clave_portal(
+                    page, _click_consultar_emitidos, clave_calc, timeout_ms=20000
+                )
+                if data is None:
+                    _emit(
+                        f"  [{i}/{len(pendientes)}] {secuencial_factura} "
+                        f"({fecha_display}): portal no devolvio resultado. "
+                        f"Clave calculada: {clave_calc}"
+                    )
+                    continue
+
+                key = _normalizar_secuencial(secuencial_factura)
+                encontradas[key] = {
+                    "importe_total": _safe_float(data.get("importe_total")),
+                    "clave_acceso": data.get("clave_acceso") or clave_calc,
+                    "tipo_serie_raw": data.get(
+                        "tipo_serie_raw", f"Factura {secuencial_factura}"
+                    ),
+                    "fecha_emision": data.get("fecha_emision", ""),
+                    "razon_social_receptor": data.get("razon_social_receptor", ""),
+                }
+                encontradas_count += 1
+                _emit(
+                    f"  [{i}/{len(pendientes)}] OK {secuencial_factura} "
+                    f"({fecha_display}): importe={data.get('importe_total')!r}"
+                )
+
             _emit(
-                f"  [{i}/{len(pendientes)}] {secuencial_factura} ({fecha_display}): "
-                f"WS no devolvio comprobante. Clave calculada: {clave_calc}. "
-                f"Posibles causas: codigo numerico distinto a '{cod_num}', "
-                f"factura anulada/no autorizada, o emisor sin acceso publico."
+                f"Busqueda remota portal completada: "
+                f"{encontradas_count}/{len(pendientes)} encontradas."
             )
-            continue
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+            try:
+                if browser is not None:
+                    browser.close()
+            except Exception:
+                pass
 
-        key = _normalizar_secuencial(secuencial_factura)
-        encontradas[key] = {
-            "importe_total": _safe_float(data.get("importe_total")),
-            "clave_acceso": data.get("clave_acceso") or clave_calc,
-            "tipo_serie_raw": f"Factura {secuencial_factura}",
-            "fecha_emision": data.get("fecha_emision", ""),
-            "razon_social_receptor": data.get("razon_social_receptor", ""),
-        }
-        encontradas_count += 1
-        _emit(
-            f"  [{i}/{len(pendientes)}] OK {secuencial_factura} ({fecha_display}): "
-            f"importe={data.get('importe_total')!r}"
-        )
-
-    _emit(
-        f"Busqueda remota WS completada: {encontradas_count}/{len(pendientes)} "
-        f"encontradas."
-    )
     return encontradas
 
 # =============================================================================
