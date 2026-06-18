@@ -383,6 +383,95 @@ def _normalizar_serie_para_match(texto: str) -> str:
     return re.sub(r"[\s\-_]", "", str(texto)).lstrip("0")
 
 
+def _esperar_overlay_cerrado(page, timeout_ms: int = 15000) -> bool:
+    """Espera a que el dialogo bloqueante de PrimeFaces se oculte.
+
+    El SRI muestra `<div id="dlgpopStatusPrime_modal" class="ui-widget-overlay">`
+    como mascara de "procesando" durante CADA AJAX (Consultar, paginar,
+    abrir Emitidos, cambiar filtros). Mientras esta visible, todos los
+    clicks se interceptan con "intercepts pointer events" en Playwright.
+
+    Devuelve True si el overlay no esta visible (o no existe). False si
+    se agoto el timeout.
+    """
+    try:
+        page.wait_for_function(
+            """() => {
+                const el = document.getElementById('dlgpopStatusPrime_modal');
+                if (!el) return true;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') return true;
+                if (el.offsetWidth === 0 && el.offsetHeight === 0) return true;
+                return false;
+            }""",
+            timeout=timeout_ms,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _set_fecha_emitidos_via_js(page, fecha_display: str) -> bool:
+    """Setea el input de fecha desde via JavaScript directamente.
+
+    PrimeFaces calendar mantiene estado interno que NO se actualiza con
+    Playwright's `fill()` + `dispatch_event()` porque esos eventos tienen
+    isTrusted=false. Setear `el.value = ...` + disparar eventos con
+    `bubbles:true` desde el contexto de la pagina propia bypassea esa
+    deteccion.
+
+    Probado en los logs del 2026-06-18: con fill+dispatch_event, el SRI
+    devolvia resultados de fechas aleatorias (no la pedida). Con este
+    metodo, el filtro se aplica de verdad.
+    """
+    try:
+        ok = page.evaluate(
+            """(val) => {
+                const el = document.getElementById('frmPrincipal:calendarFechaDesde_input');
+                if (!el) return false;
+                el.focus();
+                el.value = '';
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.value = val;
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+                el.dispatchEvent(new Event('blur', {bubbles: true}));
+                return true;
+            }""",
+            fecha_display,
+        )
+        return bool(ok)
+    except Exception:
+        return False
+
+
+def _esperar_tabla_emitidos_lista(page, timeout_ms: int = 20000) -> bool:
+    """Espera a que la tabla de Emitidos tenga resultados o muestre vacio.
+
+    Despues de un Consultar, esperamos a que ocurra UNO de:
+      - El tbody tiene al menos un <tr> con celdas (resultados)
+      - Aparece el mensaje "No se encontraron registros" (sin resultados)
+
+    `networkidle` solo no alcanza porque el partial AJAX de PrimeFaces
+    puede completarse sin que el DOM termine de renderizarse.
+    """
+    try:
+        page.wait_for_function(
+            """() => {
+                const t = document.getElementById('frmPrincipal:tablaCompEmitidos_data');
+                if (!t) return false;
+                if (t.querySelector('tr td')) return true;
+                const empty = t.querySelector('.ui-datatable-empty-message');
+                if (empty) return true;
+                return false;
+            }""",
+            timeout=timeout_ms,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def _buscar_facturas_remoto(
     ruc: str,
     clave: str,
@@ -494,21 +583,30 @@ def _buscar_facturas_remoto(
 
                 # Aplicar filtros: fecha + Tipo=Factura + Estado=Autorizados
                 try:
-                    fecha_loc = page.locator(
-                        "input#frmPrincipal\\:calendarFechaDesde_input"
-                    )
-                    if fecha_loc.count():
-                        fecha_loc.first.fill("")
-                        fecha_loc.first.fill(fecha_display)
-                        # IMPORTANTE: PrimeFaces necesita estos eventos para
-                        # que el calendario tome el valor. Sin esto, el SRI
-                        # ignora la fecha y consulta con el default (hoy) —
-                        # razon principal de "facturas no encontradas".
-                        try:
-                            fecha_loc.first.dispatch_event("input")
-                            fecha_loc.first.dispatch_event("change")
-                        except Exception:
-                            pass
+                    # Esperar a que el overlay de PrimeFaces se cierre
+                    # antes de tocar inputs — sino las acciones se interceptan
+                    # silenciosamente y la fecha queda con el valor anterior.
+                    _esperar_overlay_cerrado(page, timeout_ms=10000)
+
+                    # Setear la fecha via JS (fill+dispatch_event no es
+                    # suficiente para PrimeFaces calendar — los eventos de
+                    # Playwright tienen isTrusted=false y el widget los ignora).
+                    fecha_ok = _set_fecha_emitidos_via_js(page, fecha_display)
+                    if not fecha_ok:
+                        # Fallback al metodo viejo si el JS no encontro el input.
+                        fecha_loc = page.locator(
+                            "input#frmPrincipal\\:calendarFechaDesde_input"
+                        )
+                        if fecha_loc.count():
+                            fecha_loc.first.fill("")
+                            fecha_loc.first.fill(fecha_display)
+                            try:
+                                fecha_loc.first.dispatch_event("input")
+                                fecha_loc.first.dispatch_event("change")
+                                fecha_loc.first.dispatch_event("blur")
+                            except Exception:
+                                pass
+
                     _seleccionar_en_select(
                         page,
                         "select#frmPrincipal\\:cmbTipoComprobante",
@@ -519,14 +617,28 @@ def _buscar_facturas_remoto(
                         "select#frmPrincipal\\:cmbEstadoAutorizacion",
                         "Autorizados",
                     )
-                    # Click en "Consultar" para ejecutar el filtro
+
+                    # Click en "Consultar" — antes esperamos overlay cerrado.
+                    _esperar_overlay_cerrado(page, timeout_ms=10000)
                     consultar_btn = page.locator(
                         "input[type='submit'][value='Consultar'], "
                         "button:has-text('Consultar')"
                     )
                     if consultar_btn.count():
-                        consultar_btn.first.click()
-                        page.wait_for_load_state("networkidle", timeout=15000)
+                        try:
+                            consultar_btn.first.click(timeout=8000)
+                        except Exception as exc:
+                            _emit(
+                                f"  [filtros] {fecha_display}: click en Consultar "
+                                f"fallo: {exc} (probable overlay no cerrado)."
+                            )
+                        # Despues del click esperamos a que:
+                        #   1) el overlay de "procesando" aparezca y desaparezca
+                        #   2) la tabla tenga resultados o el mensaje vacio
+                        # Sin esto, leemos un DOM en transicion (filas=0 falsas).
+                        _esperar_overlay_cerrado(page, timeout_ms=20000)
+                        _esperar_tabla_emitidos_lista(page, timeout_ms=20000)
+
                     # Despues de aplicar filtros, intentamos subir el rows-per-page
                     # al maximo que ofrezca el SRI. Esto reduce el numero de
                     # paginas a recorrer (75 vs 10 = 7.5x menos clicks).
@@ -549,10 +661,8 @@ def _buscar_facturas_remoto(
                             if valores:
                                 mejor = max(valores)
                                 rpp_loc.first.select_option(value=str(mejor))
-                                try:
-                                    page.wait_for_load_state("networkidle", timeout=8000)
-                                except Exception:
-                                    pass
+                                _esperar_overlay_cerrado(page, timeout_ms=10000)
+                                _esperar_tabla_emitidos_lista(page, timeout_ms=10000)
                     except Exception:
                         pass
                 except Exception as exc:
@@ -762,8 +872,18 @@ def _buscar_facturas_remoto(
                         boton_clickeable.scroll_into_view_if_needed(timeout=2000)
                     except Exception:
                         pass
+                    # CRITICO: esperar a que el overlay #dlgpopStatusPrime_modal
+                    # de PrimeFaces se cierre antes de clickear. Si esta arriba,
+                    # Playwright reintenta 13+ veces hasta el timeout y aborta.
+                    overlay_libre = _esperar_overlay_cerrado(page, timeout_ms=15000)
+                    if not overlay_libre:
+                        _emit(
+                            f"  [paginacion] {fecha_display}: overlay de PrimeFaces "
+                            f"sigue activo tras 15s en pag {pagina_actual}. "
+                            f"Intento click con force=True."
+                        )
                     try:
-                        boton_clickeable.click(timeout=5000)
+                        boton_clickeable.click(timeout=6000, force=not overlay_libre)
                     except Exception as exc:
                         _emit(
                             f"  [paginacion] {fecha_display}: click en 'siguiente' "
@@ -804,6 +924,9 @@ def _buscar_facturas_remoto(
                         )
                         break
 
+                    # Esperar a que el overlay de "procesando" termine antes
+                    # de leer la nueva pagina, sino podemos leer DOM en transicion.
+                    _esperar_overlay_cerrado(page, timeout_ms=10000)
                     try:
                         page.wait_for_load_state("networkidle", timeout=3000)
                     except Exception:
