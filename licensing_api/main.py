@@ -37,6 +37,8 @@ from licensing_api.security import (
 
 )
 
+from licensing_api.admin import router as admin_router
+
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
@@ -71,6 +73,13 @@ app.add_middleware(
 
 
 Base.metadata.create_all(bind=engine)
+
+
+# Panel administrativo web (HTML) bajo /admin.
+# Permite gestionar usuarios y licencias desde una interfaz HTML simple,
+# sin pasar por el Shell de Render. Protegido por ADMIN_EMAIL/ADMIN_PASSWORD
+# (env vars) + cookie httponly samesite=lax. Ver licensing_api/admin.py.
+app.include_router(admin_router)
 
 
 # === Static mount para los assets del landing nuevo ===
