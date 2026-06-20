@@ -1,0 +1,43 @@
+# =============================================================================
+# Reverse proxy: audit-ia.ec/sri_robot_audit/* -> sri-robot-audit-ik01.onrender.com/*
+# =============================================================================
+#
+# Subir este archivo a:   audit-ia.ec/sri_robot_audit/.htaccess
+#
+# Resultado:
+#   audit-ia.ec/sri_robot_audit/landing            -> Render /
+#   audit-ia.ec/sri_robot_audit/admin              -> Render /admin
+#   audit-ia.ec/sri_robot_audit/admin/login        -> Render /admin/login
+#   audit-ia.ec/sri_robot_audit/updates/download   -> Render /updates/download
+#   audit-ia.ec/sri_robot_audit/auth/login         -> Render /auth/login
+#   audit-ia.ec/sri_robot_audit/landing-assets/*   -> Render /landing-assets/*
+#
+# Requiere que Ecuaweb tenga habilitados:
+#   - mod_rewrite     (casi siempre activado)
+#   - mod_proxy       (a veces NO; en ese caso usar deploy/ecuaweb/proxy.php)
+#   - mod_proxy_http  (idem)
+#
+# Verificar si funciona despues de subirlo:
+#   - https://audit-ia.ec/sri_robot_audit/admin/login -> debe mostrar el form
+#   - Si en cambio sale "500 Internal Server Error" o "403 Forbidden",
+#     mod_proxy esta capado y necesitas el proxy.php (ver README adjunto).
+# =============================================================================
+
+RewriteEngine On
+
+# Caso especial: /landing -> raiz del backend (donde vive la landing en Render).
+RewriteRule ^landing/?$ https://sri-robot-audit-ik01.onrender.com/ [P,L,QSA]
+
+# Resto: pasa tal cual el path al backend en Render.
+# El flag [P] hace proxy interno (no redirect 301/302 visible al cliente).
+# El flag [QSA] preserva el query string.
+RewriteRule ^(.*)$ https://sri-robot-audit-ik01.onrender.com/$1 [P,L,QSA]
+
+# Forward de headers utiles (CloudFlare puede pisar algunos):
+RequestHeader set X-Forwarded-Proto "https" env=HTTPS
+RequestHeader set X-Forwarded-Host "%{HTTP_HOST}e"
+
+# Permitir cookies del backend (la cookie del admin: `admin_session`).
+# Si la cookie tiene Domain=, lo dejamos pasar; sino el browser la asocia
+# automaticamente a audit-ia.ec.
+Header edit Set-Cookie ";\s*Domain=[^;]+" "" env=HAVE_SET_COOKIE

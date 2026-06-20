@@ -559,6 +559,15 @@ def updates_latest(request: Request):
 @app.get("/updates/download")
 def updates_download(request: Request):
     _require_update_token(request)
+    # Prioridad de fuentes:
+    #   1) UPDATE_FILE_URL  → redirect 302 (e.g., GitHub Releases CDN).
+    #      Recomendado: el cliente baja directo del CDN del proveedor sin
+    #      consumir ancho de banda de Render.
+    #   2) UPDATE_FILE_PATH → FileResponse desde el disco persistente.
+    #   3) Cloudflare R2    → StreamingResponse (mantenido por compat).
+    file_url = os.getenv("UPDATE_FILE_URL", "").strip()
+    if file_url:
+        return RedirectResponse(url=file_url, status_code=status.HTTP_302_FOUND)
     file_path = os.getenv("UPDATE_FILE_PATH", "").strip()
     if file_path:
         return FileResponse(
