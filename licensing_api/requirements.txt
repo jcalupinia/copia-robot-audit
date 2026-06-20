@@ -1,0 +1,28 @@
+# =============================================================================
+# Dependencias minimas para correr la licensing API en Render (Dockerfile.api).
+# =============================================================================
+# Este archivo NO incluye dependencias del bot (Streamlit, Playwright,
+# PDFplumber, PyMuPDF, pandas, etc.) — solo lo necesario para FastAPI.
+# Resultado: imagen Docker ~5x mas chica, builds ~5x mas rapidos.
+#
+# Si agregas funcionalidad nueva al licensing_api/, fijate si requiere alguna
+# lib adicional y agrega aqui (no en el requirements.txt principal que es
+# para el bot desktop).
+# =============================================================================
+
+# Web framework + ASGI server
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.12
+
+# DB / ORM
+sqlalchemy==2.0.32
+psycopg2-binary==2.9.9       # PostgreSQL driver (para Render con Postgres)
+
+# Auth / hashing / JWT
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+email-validator==2.2.0
+
+# Storage (legacy R2, mantenido por compat — se puede sacar si no usas R2)
+boto3==1.35.0

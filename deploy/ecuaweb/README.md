@@ -37,7 +37,28 @@ Estado del .exe:
 > Para futuras versiones repetis el proceso con un tag nuevo (`v1.0.1`, etc).
 > GitHub mantiene todas las versiones disponibles para rollback.
 
-### Paso 2 - Configurar variables de entorno en Render
+### Paso 2 - Configurar el servicio Render con `Dockerfile.api`
+
+> Solo necesitas hacer esto si vas a crear el servicio Render por primera vez,
+> o si estas cambiando el repo conectado.
+
+En el dashboard de Render → tu servicio → **Settings → Build & Deploy**:
+
+| Campo | Valor |
+|---|---|
+| **Runtime** | `Docker` |
+| **Dockerfile Path** | `./Dockerfile.api` |
+| **Docker Build Context Directory** | `.` |
+| **Branch** | `main` (o la rama que prefieras) |
+| **Auto-Deploy** | `Yes` |
+
+Esto le dice a Render que use el `Dockerfile.api` (liviano, solo FastAPI)
+en lugar del `Dockerfile` principal (que es para el bot desktop con Chromium).
+
+Despues de cambiar esto, Render disparara un build automaticamente.
+Tiempo esperado: 3-5 minutos.
+
+### Paso 3 - Configurar variables de entorno en Render
 
 En el dashboard de Render → tu servicio → **Settings → Environment**:
 
