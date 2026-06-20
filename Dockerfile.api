@@ -44,10 +44,10 @@ RUN pip install --upgrade pip==24.2 setuptools wheel && \
 # Copiar SOLO la API (no el bot desktop)
 COPY licensing_api/ /app/licensing_api/
 
-# Si existe MANUAL_USUARIO.pdf en la raiz, copiarlo para que el endpoint
-# /manual lo pueda servir. No es obligatorio — si no esta, el endpoint
-# responde 404 y listo.
-COPY --chown=root:root MANUAL_USUARIO.pdf* /app/
+# El endpoint /manual prioriza la env var MANUAL_URL (e.g., GitHub Releases)
+# y solo cae al archivo local como fallback. Por eso NO copiamos
+# MANUAL_USUARIO.pdf al contenedor — el manual vive en GitHub Releases.
+# Esto permite actualizarlo sin redeploy del Render.
 
 # Usuario no-root para seguridad
 RUN groupadd --system --gid 1001 appuser && \

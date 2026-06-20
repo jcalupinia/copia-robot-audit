@@ -606,10 +606,16 @@ def updates_download(request: Request):
 def download_user_manual():
     """Sirve el manual de usuario en PDF.
 
-    El archivo MANUAL_USUARIO.pdf vive en la raiz del proyecto.
-    En producccion (Render) la raiz es el cwd del proceso; en dev
-    apuntamos a la carpeta padre del paquete licensing_api/.
+    Prioridad de fuentes:
+      1) MANUAL_URL (env var) → redirect 302 (RECOMENDADO: GitHub Releases).
+         Permite actualizar el manual sin redeploy del backend.
+      2) MANUAL_USUARIO.pdf en la raiz del proyecto → FileResponse.
+         Fallback legacy: el archivo estaba baked-in en la imagen Docker.
+      3) Ninguno → 404.
     """
+    manual_url = os.getenv("MANUAL_URL", "").strip()
+    if manual_url:
+        return RedirectResponse(url=manual_url, status_code=status.HTTP_302_FOUND)
     candidates = [
         Path("MANUAL_USUARIO.pdf"),
         Path(__file__).resolve().parent.parent / "MANUAL_USUARIO.pdf",
