@@ -606,14 +606,22 @@ def updates_download(request: Request):
 def download_user_manual():
     """Sirve el manual de usuario en PDF.
 
-    Prioridad de fuentes:
-      1) MANUAL_URL (env var) → redirect 302 (RECOMENDADO: GitHub Releases).
-         Permite actualizar el manual sin redeploy del backend.
-      2) MANUAL_USUARIO.pdf en la raiz del proyecto → FileResponse.
-         Fallback legacy: el archivo estaba baked-in en la imagen Docker.
-      3) Ninguno → 404.
+    Prioridad de fuentes (espejo de /updates/download):
+      1) UPDATE_MANUAL_URL (env var) → redirect 302.
+         Nombre consistente con UPDATE_FILE_URL del .exe. RECOMENDADO:
+         apuntar a un asset PDF en GitHub Releases para que el cliente
+         baje del CDN de GitHub sin consumir bandwidth de Render.
+      2) MANUAL_URL (env var legacy) → redirect 302.
+         Soportado por backward compat con deploys que ya tienen
+         configurada esa variable.
+      3) MANUAL_USUARIO.pdf en la raiz del proyecto → FileResponse.
+         Fallback ultimo: el archivo baked-in en la imagen Docker.
+      4) Ninguno → 404.
     """
-    manual_url = os.getenv("MANUAL_URL", "").strip()
+    manual_url = (
+        os.getenv("UPDATE_MANUAL_URL", "").strip()
+        or os.getenv("MANUAL_URL", "").strip()
+    )
     if manual_url:
         return RedirectResponse(url=manual_url, status_code=status.HTTP_302_FOUND)
     candidates = [
