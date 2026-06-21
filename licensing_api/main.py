@@ -653,7 +653,12 @@ def landing_page(request: Request):
             version = ""
     if not version:
         version = "desconocida"
-    download_url = "/updates/download"
+    # URL RELATIVA (sin slash inicial) para que funcione tanto cuando la
+    # landing se sirve desde Render directo (sri-robot-audit-ik01.onrender.com/)
+    # como cuando se sirve via proxy desde audit-ia.ec/sri_robot_audit/landing.
+    # Una URL absoluta al dominio (/updates/download) rompe el segundo caso
+    # porque el browser la resolveria a audit-ia.ec/updates/download (404).
+    download_url = "updates/download"
     token = os.getenv("UPDATE_TOKEN", "").strip()
     if token:
         download_url = f"{download_url}?token={token}"
