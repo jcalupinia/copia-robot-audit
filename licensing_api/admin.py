@@ -3,43 +3,44 @@
 Vive en /admin dentro de la misma FastAPI app y permite administrar
 usuarios y licencias desde una interfaz HTML simple (sin Shell de Render).
 
-Auth:
-  - Login con ADMIN_EMAIL + ADMIN_PASSWORD (env vars).
+Auth (rework 2026-06-21):
+  - Login contra la BD: buscar user por email + verificar password_hash.
+  - Requisitos para entrar: user.is_active=True Y user.role=="admin".
+  - Ya NO se usan ADMIN_EMAIL/ADMIN_PASSWORD del env — el acceso es 100% DB.
   - Sesion en cookie httponly + samesite=lax firmada con el mismo
     JWT_SECRET_KEY que el resto de la API (reusa security.create_access_token).
-  - El "subject" del JWT es `admin:<email>` para no colisionar con tokens
-    de usuarios normales del cliente.
+  - El "subject" del JWT es `admin:<user_id>` (int estable, no email que
+    podria cambiar).
   - TTL: 4 horas.
+  - En cada request se re-valida contra la DB (por si cambio el rol o se
+    desactivo el usuario).
 
 Funcionalidad:
-  - Dashboard con tabla de usuarios + sus licencias (estado, fecha activacion).
-  - Crear usuario nuevo (opcional con licencia asociada en el mismo paso).
-  - Agregar licencia a usuario existente.
-  - Borrar usuario (cascada a licencias y dispositivos).
+  - Dashboard con tabla de usuarios + rol + licencias con estado y expiracion.
+  - Crear usuario nuevo con rol seleccionable (admin/operador/cliente).
+  - Agregar licencia con duracion (1/3/6/12 meses, fecha manual, sin venc.).
+  - Editar fecha de expiracion de una licencia existente.
+  - Renovar licencia (extender expires_at).
+  - Cambiar rol de un usuario.
   - Desactivar / reactivar licencia (sin borrar).
+  - Borrar usuario (cascada a licencias y dispositivos).
   - Resetear contrasena de un usuario.
 
-Diseno:
-  - HTML/CSS inline en strings de Python (no requiere jinja2 ni assets).
-  - Paleta similar a la landing: dark `#070a12` con acentos verde `#10b981`
-    y azul `#60a5fa`.
-  - Responsive simple (form-row con grid auto-fit).
+Reglas de seguridad:
+  - Un admin NO puede cambiar su propio rol (evita bloqueo accidental).
+  - Un admin NO puede borrarse a si mismo.
+  - No se puede degradar/borrar/desactivar al ULTIMO admin activo.
+  - Todas las rutas /admin/* salvo /admin/login chequean sesion + rol='admin'.
 
-Seguridad:
-  - Todas las rutas /admin/* salvo /admin/login chequean cookie -> si no
-    hay sesion valida, redirigen a /admin/login (303).
-  - El login compara contra ADMIN_EMAIL/ADMIN_PASSWORD del env. Las
-    contrasenas de USUARIOS DEL CLIENTE siempre se hashean con
-    get_password_hash() — nunca se guardan en claro.
-  - Cookie con httponly, samesite=lax y secure cuando la request entra
-    por HTTPS (detectado por x-forwarded-proto si esta detras de proxy).
-  - Pagina marcada con `robots: noindex, nofollow`.
+Diseno:
+  - HTML/CSS inline en strings de Python (sin jinja2, sin assets externos).
+  - Paleta similar a la landing: dark `#070a12` con acentos verde y azul.
+  - Responsive simple (form-row con grid auto-fit).
 """
 
 from __future__ import annotations
 
 import html
-import os
 from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import quote
@@ -54,6 +55,7 @@ from licensing_api.security import (
     create_access_token,
     decode_access_token,
     get_password_hash,
+    verify_password,
 )
 
 
@@ -64,38 +66,45 @@ ADMIN_TOKEN_TTL = timedelta(hours=4)
 
 
 # ============================================================
-# AUTH HELPERS
+# AUTH HELPERS (DB-based)
 # ============================================================
 
-def _admin_email_env() -> str:
-    return (os.getenv("ADMIN_EMAIL", "") or "").strip().lower()
+def _get_authenticated_admin(
+    request: Request, db: Session
+) -> Optional[models.User]:
+    """Devuelve el user admin de la sesion si es valida, o None.
 
+    Chequea:
+      1) cookie admin_session presente
+      2) JWT valido con sub="admin:<user_id>"
+      3) user existe en DB
+      4) user.is_active
+      5) user.role == "admin"
 
-def _admin_password_env() -> str:
-    return os.getenv("ADMIN_PASSWORD", "") or ""
-
-
-def _admin_creds_configured() -> bool:
-    return bool(_admin_email_env()) and bool(_admin_password_env())
-
-
-def _is_admin_authenticated(request: Request) -> bool:
-    """True si la cookie de sesion es valida y el sub coincide con el
-    ADMIN_EMAIL actual del env. Si las env vars cambian, las sesiones
-    viejas se invalidan automaticamente.
+    En cada request se re-valida contra la DB (por si el rol cambio o el
+    user fue desactivado desde otro admin).
     """
     token = request.cookies.get(ADMIN_COOKIE_NAME, "") or ""
-    if not token or not _admin_creds_configured():
-        return False
+    if not token:
+        return None
     sub = decode_access_token(token)
-    if not sub:
-        return False
-    expected = f"admin:{_admin_email_env()}"
-    return sub == expected
+    if not sub or not sub.startswith("admin:"):
+        return None
+    try:
+        user_id = int(sub.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return None
+    user = crud.get_user_by_id(db, user_id)
+    if not user or not user.is_active or user.role != "admin":
+        return None
+    return user
 
 
-def _redirect_to_login() -> RedirectResponse:
-    return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+def _redirect_to_login(msg: Optional[str] = None) -> RedirectResponse:
+    url = "/admin/login"
+    if msg:
+        url = f"{url}?error={quote(msg)}"
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _is_secure_request(request: Request) -> bool:
@@ -105,9 +114,11 @@ def _is_secure_request(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
-def _set_admin_cookie(response: Response, request: Request) -> None:
+def _set_admin_cookie(
+    response: Response, request: Request, user_id: int
+) -> None:
     token = create_access_token(
-        f"admin:{_admin_email_env()}",
+        f"admin:{user_id}",
         expires_delta=ADMIN_TOKEN_TTL,
     )
     response.set_cookie(
@@ -172,7 +183,7 @@ body {
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+.container { max-width: 1300px; margin: 0 auto; padding: 24px; }
 .header {
     display: flex; align-items: center; justify-content: space-between;
     border-bottom: 1px solid var(--border); padding: 16px 24px;
@@ -180,7 +191,8 @@ a:hover { text-decoration: underline; }
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 18px; color: var(--text); }
 .brand .accent { color: var(--primary); }
-.nav-actions { display: flex; gap: 4px; }
+.nav-actions { display: flex; gap: 4px; align-items: center; }
+.nav-actions .who { color: var(--text-muted); font-size: 13px; margin-right: 8px; }
 .nav-actions a, .nav-actions button {
     color: var(--text-muted); background: transparent; border: 1px solid transparent;
     text-decoration: none; padding: 8px 14px; border-radius: 8px; font: inherit; cursor: pointer;
@@ -219,12 +231,13 @@ label {
     display: block; font-size: 13px; color: var(--text-muted);
     margin-bottom: 6px; font-weight: 500;
 }
-input[type=text], input[type=email], input[type=password] {
+input[type=text], input[type=email], input[type=password], input[type=date], input[type=number], select {
     width: 100%; padding: 10px 12px; background: rgba(7,10,18,0.7);
     border: 1px solid var(--border); border-radius: 8px;
     color: var(--text); font: inherit;
 }
-input[type=text]:focus, input[type=email]:focus, input[type=password]:focus {
+select { cursor: pointer; }
+input:focus, select:focus {
     outline: none; border-color: var(--primary);
     box-shadow: 0 0 0 3px rgba(16,185,129,0.15);
 }
@@ -251,9 +264,9 @@ input[type=text]:focus, input[type=email]:focus, input[type=password]:focus {
     background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.4); color: #fcd34d;
 }
 .btn-warn:hover { background: rgba(245,158,11,0.25); }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td {
-    padding: 12px 14px; text-align: left;
+    padding: 12px 10px; text-align: left;
     border-bottom: 1px solid var(--border); vertical-align: top;
 }
 th {
@@ -265,19 +278,15 @@ tbody tr:hover { background: rgba(16,185,129,0.03); }
 .pill {
     display: inline-block; padding: 2px 10px; border-radius: 999px;
     font-size: 12px; font-weight: 500; border: 1px solid var(--border);
+    white-space: nowrap;
 }
-.pill.ok {
-    background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.4);
-    color: var(--primary-strong);
-}
-.pill.bad {
-    background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.4);
-    color: #fca5a5;
-}
-.pill.pending {
-    background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.4);
-    color: #fcd34d;
-}
+.pill.ok { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.4); color: var(--primary-strong); }
+.pill.bad { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.4); color: #fca5a5; }
+.pill.warn { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.4); color: #fcd34d; }
+.pill.info { background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.4); color: #93c5fd; }
+.pill.role-admin { background: rgba(96,165,250,0.15); border-color: rgba(96,165,250,0.5); color: #93c5fd; }
+.pill.role-operador { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.4); color: var(--primary-strong); }
+.pill.role-cliente { background: rgba(148,163,189,0.12); border-color: rgba(148,163,189,0.4); color: var(--text-muted); }
 .licencias-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .licencias-list li {
     background: rgba(7,10,18,0.5); border: 1px solid var(--border);
@@ -285,32 +294,40 @@ tbody tr:hover { background: rgba(16,185,129,0.03); }
 }
 .licencias-list .code {
     font-family: "SFMono-Regular", Consolas, Menlo, monospace;
-    font-size: 12px; color: var(--accent); word-break: break-all;
+    font-size: 11px; color: var(--accent); word-break: break-all;
 }
 .inline-form { display: inline-block; margin: 0; }
-.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.actions .btn { padding: 4px 8px; font-size: 11px; }
+.actions select { width: auto; padding: 4px 8px; font-size: 12px; }
+.actions input[type=number], .actions input[type=date] { width: 110px; padding: 4px 8px; font-size: 12px; }
 .center-page { min-height: 80vh; display: grid; place-items: center; }
 .login-card { max-width: 400px; width: 100%; padding: 32px; }
-.empty {
-    padding: 32px; text-align: center; color: var(--text-muted);
-}
+.empty { padding: 32px; text-align: center; color: var(--text-muted); }
+.days-left { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.days-left.warn { color: #fcd34d; }
+.days-left.bad { color: #fca5a5; }
 @media (max-width: 720px) {
     .header { padding: 12px 16px; }
     .container { padding: 16px; }
-    table { font-size: 12px; }
+    table { font-size: 11px; }
     th, td { padding: 8px 6px; }
 }
 """
 
 
-def _layout(title: str, body: str, *, show_header: bool = True) -> str:
+def _layout(title: str, body: str, *, show_header: bool = True, current_admin_email: str = "") -> str:
     title_safe = html.escape(title)
     header_html = ""
     if show_header:
-        header_html = """
+        who = ""
+        if current_admin_email:
+            who = f'<span class="who">👤 {html.escape(current_admin_email)}</span>'
+        header_html = f"""
         <div class="header">
             <div class="brand">ROBOT&nbsp;AUDIT<span class="accent">&nbsp;SRI</span>&nbsp;· Admin</div>
             <div class="nav-actions">
+                {who}
                 <a href="/admin">Dashboard</a>
                 <a href="/admin/logout">Cerrar sesi&oacute;n</a>
             </div>
@@ -339,9 +356,11 @@ def _layout(title: str, body: str, *, show_header: bool = True) -> str:
 @router.get("/login", response_class=HTMLResponse)
 def admin_login_page(
     request: Request,
+    db: Session = Depends(get_db),
     error: Optional[str] = None,
 ):
-    if _is_admin_authenticated(request):
+    # Si ya hay sesion admin valida, ir directo al dashboard.
+    if _get_authenticated_admin(request, db):
         return RedirectResponse(
             url="/admin", status_code=status.HTTP_303_SEE_OTHER,
         )
@@ -350,24 +369,14 @@ def admin_login_page(
     if error:
         error_html = f'<div class="alert error">{html.escape(error)}</div>'
 
-    creds_warn = ""
-    if not _admin_creds_configured():
-        creds_warn = (
-            '<div class="alert info">'
-            'Las variables <code>ADMIN_EMAIL</code> y <code>ADMIN_PASSWORD</code> '
-            'no estan configuradas en el servidor. Sin ellas no se puede iniciar sesi&oacute;n.'
-            '</div>'
-        )
-
     body = f"""
     <div class="container center-page">
         <div class="card login-card">
             <h1 style="font-size:22px; margin-bottom:4px">Panel administrativo</h1>
             <p class="muted" style="margin-bottom:20px">
-                Accedé con tus credenciales de administrador.
+                Solo usuarios con rol de administrador pueden ingresar.
             </p>
             {error_html}
-            {creds_warn}
             <form method="post" action="/admin/login">
                 <div style="margin-bottom:14px">
                     <label for="email">Email</label>
@@ -390,31 +399,25 @@ def admin_login_page(
 @router.post("/login")
 def admin_login(
     request: Request,
+    db: Session = Depends(get_db),
     email: str = Form(...),
     password: str = Form(...),
 ):
-    if not _admin_creds_configured():
-        return RedirectResponse(
-            url=(
-                "/admin/login?error="
-                + quote("No hay credenciales de admin configuradas en el servidor.")
-            ),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-
     email_n = (email or "").strip().lower()
     password_n = password or ""
 
-    if email_n != _admin_email_env() or password_n != _admin_password_env():
-        return RedirectResponse(
-            url="/admin/login?error=" + quote("Credenciales incorrectas."),
-            status_code=status.HTTP_303_SEE_OTHER,
+    user = crud.get_user_by_email(db, email=email_n)
+    if not user or not verify_password(password_n, user.password_hash):
+        return _redirect_to_login("Credenciales incorrectas.")
+    if not user.is_active:
+        return _redirect_to_login("Usuario inactivo.")
+    if user.role != "admin":
+        return _redirect_to_login(
+            "Este usuario no tiene permisos de administrador."
         )
 
-    response = RedirectResponse(
-        url="/admin", status_code=status.HTTP_303_SEE_OTHER,
-    )
-    _set_admin_cookie(response, request)
+    response = RedirectResponse(url="/admin", status_code=status.HTTP_303_SEE_OTHER)
+    _set_admin_cookie(response, request, user.id)
     return response
 
 
@@ -431,6 +434,16 @@ def admin_logout():
 # ROUTES — dashboard
 # ============================================================
 
+_DURACION_PRESETS = {
+    "1m": ("1 mes", 30),
+    "3m": ("3 meses", 90),
+    "6m": ("6 meses", 180),
+    "12m": ("1 año", 365),
+    "none": ("Sin vencimiento", None),
+    "manual": ("Fecha manual", None),
+}
+
+
 @router.get("/", response_class=HTMLResponse)
 def admin_dashboard(
     request: Request,
@@ -438,7 +451,8 @@ def admin_dashboard(
     success: Optional[str] = None,
     error: Optional[str] = None,
 ):
-    if not _is_admin_authenticated(request):
+    current_admin = _get_authenticated_admin(request, db)
+    if not current_admin:
         return _redirect_to_login()
 
     users = (
@@ -457,20 +471,42 @@ def admin_dashboard(
     # === Tabla de usuarios ===
     rows_html_parts: list[str] = []
     for u in users:
+        is_self = (u.id == current_admin.id)
+
         # Licencias del usuario
         lic_items: list[str] = []
         for lic in (u.licenses or []):
-            lic_estado = "activa" if lic.is_active else "inactiva"
-            estado_pill_cls = "ok" if lic.is_active else "bad"
+            estado = crud.get_license_status(lic)
+            if estado == "activa":
+                estado_cls = "ok"
+                estado_txt = "activa"
+            elif estado == "vencida":
+                estado_cls = "bad"
+                estado_txt = "vencida"
+            else:
+                estado_cls = "warn"
+                estado_txt = "inactiva"
+
             act_text = (
                 f"Activada: {lic.activated_at.strftime('%Y-%m-%d %H:%M')}"
                 if lic.activated_at
                 else "<em>Sin activar</em>"
             )
-            exp_text = (
-                f" · Expira: {lic.expires_at.strftime('%Y-%m-%d')}"
-                if lic.expires_at else ""
-            )
+            exp_text = ""
+            days_left_html = ""
+            if lic.expires_at:
+                exp_text = f" · Expira: {lic.expires_at.strftime('%Y-%m-%d')}"
+                dr = crud.days_remaining(lic)
+                if dr is not None:
+                    if dr < 0:
+                        days_left_html = f'<div class="days-left bad">Vencida hace {-dr} d\xEDa(s)</div>'
+                    elif dr <= 15:
+                        days_left_html = f'<div class="days-left warn">Quedan {dr} d\xEDa(s)</div>'
+                    else:
+                        days_left_html = f'<div class="days-left">Quedan {dr} d\xEDa(s)</div>'
+            else:
+                exp_text = " · Sin vencimiento"
+
             toggle_label = "Desactivar" if lic.is_active else "Reactivar"
             toggle_cls = "btn-warn" if lic.is_active else "btn-primary"
 
@@ -478,12 +514,21 @@ def admin_dashboard(
             <li>
                 <div class="code">{html.escape(lic.code or '')}</div>
                 <div style="margin-top:6px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
-                    <span class="pill {estado_pill_cls}">{lic_estado}</span>
+                    <span class="pill {estado_cls}">{estado_txt}</span>
                     <span class="muted">{act_text}{exp_text}</span>
                 </div>
+                {days_left_html}
                 <div class="actions" style="margin-top:8px">
                     <form method="post" action="/admin/licenses/{lic.id}/toggle" class="inline-form">
-                        <button type="submit" class="btn {toggle_cls}" style="padding:4px 10px; font-size:12px">{toggle_label}</button>
+                        <button type="submit" class="btn {toggle_cls}">{toggle_label}</button>
+                    </form>
+                    <form method="post" action="/admin/licenses/{lic.id}/set-expiry" class="inline-form">
+                        <input type="date" name="expires_at" value="{lic.expires_at.strftime('%Y-%m-%d') if lic.expires_at else ''}" title="Nueva fecha de expiración (vacío = sin vencimiento)">
+                        <button type="submit" class="btn btn-ghost">Editar exp.</button>
+                    </form>
+                    <form method="post" action="/admin/licenses/{lic.id}/renew" class="inline-form">
+                        <input type="number" name="additional_days" min="1" max="3650" value="365" title="Días a agregar">
+                        <button type="submit" class="btn btn-primary">Renovar</button>
                     </form>
                 </div>
             </li>
@@ -497,22 +542,47 @@ def admin_dashboard(
 
         estado_user_pill = "ok" if u.is_active else "bad"
         estado_user_txt = "activo" if u.is_active else "inactivo"
+        role_cls = f"role-{u.role}"
         fecha = u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "-"
         email_safe = html.escape(u.email or "")
         email_attr = html.escape(u.email or "", quote=True)
 
+        # Selector de rol (disable si es self)
+        role_options = ""
+        for r in ("admin", "operador", "cliente"):
+            sel = " selected" if u.role == r else ""
+            role_options += f'<option value="{r}"{sel}>{r}</option>'
+        role_form = f"""
+        <form method="post" action="/admin/users/{u.id}/set-role" class="inline-form">
+            <select name="role" {'disabled title="No podés cambiar tu propio rol"' if is_self else ''}>{role_options}</select>
+            <button type="submit" class="btn btn-ghost" {'disabled' if is_self else ''}>Cambiar rol</button>
+        </form>
+        """
+
+        delete_form = ""
+        if not is_self:
+            delete_form = f"""
+            <form method="post" action="/admin/users/{u.id}/delete" class="inline-form"
+                  onsubmit="return confirm('¿Borrar al usuario {email_attr} y todas sus licencias? Esta accion es IRREVERSIBLE.');">
+                <button type="submit" class="btn btn-danger">Borrar</button>
+            </form>
+            """
+
         rows_html_parts.append(f"""
         <tr>
-            <td><strong>{email_safe}</strong><br><span class="muted">ID {u.id}</span></td>
+            <td>
+                <strong>{email_safe}</strong>
+                {' <span class="pill info" style="margin-left:6px">Vos</span>' if is_self else ''}
+                <br><span class="muted">ID {u.id}</span>
+            </td>
+            <td><span class="pill {role_cls}">{html.escape(u.role or 'operador')}</span></td>
             <td><span class="pill {estado_user_pill}">{estado_user_txt}</span></td>
             <td>{fecha}</td>
             <td>{licencias_html}</td>
             <td>
                 <div class="actions">
-                    <form method="post" action="/admin/users/{u.id}/delete" class="inline-form"
-                          onsubmit="return confirm('¿Borrar al usuario {email_attr} y todas sus licencias? Esta accion es IRREVERSIBLE.');">
-                        <button type="submit" class="btn btn-danger" style="padding:4px 10px; font-size:12px">Borrar</button>
-                    </form>
+                    {role_form}
+                    {delete_form}
                 </div>
             </td>
         </tr>
@@ -521,20 +591,26 @@ def admin_dashboard(
     table_body = (
         "".join(rows_html_parts)
         if rows_html_parts
-        else '<tr><td colspan="5" class="empty">No hay usuarios todavía.</td></tr>'
+        else '<tr><td colspan="6" class="empty">No hay usuarios todavía.</td></tr>'
+    )
+
+    # Presets de duracion para el form de crear licencia
+    dur_options = "".join(
+        f'<option value="{k}">{label}</option>'
+        for k, (label, _days) in _DURACION_PRESETS.items()
     )
 
     body = f"""
     <div class="container">
         <h1>Dashboard</h1>
-        <p class="muted">Gestión de usuarios y licencias.</p>
+        <p class="muted">Gestión de usuarios, licencias y roles.</p>
 
         {success_html}
         {error_html}
 
         <div class="card">
             <h2 style="margin-top:0">Crear usuario nuevo</h2>
-            <p class="muted">Opcional: incluí un código de licencia para crearla en el mismo paso.</p>
+            <p class="muted">Opcional: incluí un código de licencia y su duración para crearla en el mismo paso.</p>
             <form method="post" action="/admin/users/create">
                 <div class="form-row">
                     <div>
@@ -546,8 +622,28 @@ def admin_dashboard(
                         <input type="text" name="password" id="new_password" required>
                     </div>
                     <div>
+                        <label for="new_role">Rol</label>
+                        <select name="role" id="new_role">
+                            <option value="cliente" selected>Cliente</option>
+                            <option value="operador">Operador</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div>
                         <label for="new_license">Código de licencia (opcional)</label>
                         <input type="text" name="license_code" id="new_license" placeholder="AUDIT-XXXX-YYYY">
+                    </div>
+                    <div>
+                        <label for="new_license_dur">Duración de la licencia</label>
+                        <select name="license_duration" id="new_license_dur">
+                            {dur_options}
+                        </select>
+                    </div>
+                    <div>
+                        <label for="new_license_manual">Fecha manual (si eligió "Fecha manual")</label>
+                        <input type="date" name="license_manual_date" id="new_license_manual">
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary">Crear usuario</button>
@@ -565,6 +661,16 @@ def admin_dashboard(
                     <div>
                         <label for="lic_code">Código de licencia</label>
                         <input type="text" name="code" id="lic_code" required placeholder="AUDIT-XXXX-YYYY">
+                    </div>
+                    <div>
+                        <label for="lic_dur">Duración</label>
+                        <select name="license_duration" id="lic_dur">
+                            {dur_options}
+                        </select>
+                    </div>
+                    <div>
+                        <label for="lic_manual">Fecha manual (si aplica)</label>
+                        <input type="date" name="license_manual_date" id="lic_manual">
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary">Agregar licencia</button>
@@ -595,6 +701,7 @@ def admin_dashboard(
                 <thead>
                     <tr>
                         <th>Usuario</th>
+                        <th>Rol</th>
                         <th>Estado</th>
                         <th>Creado</th>
                         <th>Licencias</th>
@@ -608,7 +715,46 @@ def admin_dashboard(
         </div>
     </div>
     """
-    return HTMLResponse(content=_layout("Dashboard", body))
+    return HTMLResponse(content=_layout("Dashboard", body, current_admin_email=current_admin.email))
+
+
+# ============================================================
+# HELPER: parseo de duracion desde form
+# ============================================================
+
+def _parse_expiration_from_form(
+    duration_key: str,
+    manual_date_str: str,
+) -> tuple[Optional[datetime], Optional[int]]:
+    """Convierte los campos del form (duration_key + manual_date) en
+    (expires_at, validity_days) para pasarle a crud.create_license.
+
+    Retorna (None, None) si "sin vencimiento".
+    """
+    duration_key = (duration_key or "none").strip()
+    manual_date_str = (manual_date_str or "").strip()
+
+    if duration_key == "manual":
+        if not manual_date_str:
+            raise ValueError("Elegiste 'Fecha manual' pero no ingresaste ninguna fecha.")
+        try:
+            expires_at = datetime.strptime(manual_date_str, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"Fecha manual inválida: {manual_date_str!r} (formato esperado YYYY-MM-DD).")
+        # Setear a fin del dia para que el user tenga hasta las 23:59:59
+        expires_at = expires_at.replace(hour=23, minute=59, second=59)
+        return expires_at, None
+
+    if duration_key == "none":
+        return None, None
+
+    preset = _DURACION_PRESETS.get(duration_key)
+    if not preset:
+        raise ValueError(f"Duración inválida: {duration_key!r}.")
+    _, days = preset
+    if days is None:
+        return None, None
+    return None, int(days)
 
 
 # ============================================================
@@ -621,58 +767,67 @@ def admin_users_create(
     db: Session = Depends(get_db),
     email: str = Form(...),
     password: str = Form(...),
+    role: str = Form("cliente"),
     license_code: str = Form(""),
+    license_duration: str = Form("none"),
+    license_manual_date: str = Form(""),
 ):
-    if not _is_admin_authenticated(request):
+    if not _get_authenticated_admin(request, db):
         return _redirect_to_login()
 
     email_n = (email or "").strip().lower()
     password_n = password or ""
     code_n = (license_code or "").strip()
+    role_n = (role or "cliente").strip().lower()
 
     if not email_n or not password_n:
         return _redirect_dashboard(error="Email y contraseña son obligatorios.")
+    if role_n not in crud.VALID_ROLES:
+        return _redirect_dashboard(error=f"Rol inválido: {role_n!r}.")
 
-    existing = crud.get_user_by_email(db, email=email_n)
-    if existing:
+    if crud.get_user_by_email(db, email=email_n):
         return _redirect_dashboard(error=f"El usuario {email_n} ya existe.")
 
     try:
-        user = crud.create_user(db, email=email_n, password=password_n)
+        user = crud.create_user(db, email=email_n, password=password_n, role=role_n)
     except Exception as exc:
         db.rollback()
         return _redirect_dashboard(error=f"No se pudo crear el usuario: {exc}")
 
     if code_n:
-        existing_lic = (
-            db.query(models.License).filter(models.License.code == code_n).first()
-        )
-        if existing_lic:
-            # No queremos un usuario sin licencia cuando el admin pidio una.
+        if db.query(models.License).filter(models.License.code == code_n).first():
             try:
                 db.delete(user)
                 db.commit()
             except Exception:
                 db.rollback()
             return _redirect_dashboard(
-                error=(
-                    f"El código de licencia '{code_n}' ya está en uso. "
-                    f"Usuario {email_n} NO creado."
-                )
+                error=f"El código '{code_n}' ya está en uso. Usuario NO creado."
             )
         try:
-            crud.create_license(db, user=user, code=code_n)
+            expires_at, validity_days = _parse_expiration_from_form(
+                license_duration, license_manual_date,
+            )
+        except ValueError as exc:
+            db.delete(user)
+            db.commit()
+            return _redirect_dashboard(error=str(exc))
+        try:
+            crud.create_license(
+                db, user=user, code=code_n,
+                expires_at=expires_at, validity_days=validity_days,
+            )
         except Exception as exc:
             db.rollback()
             return _redirect_dashboard(
-                error=(
-                    f"Usuario {email_n} creado pero la licencia falló: {exc}"
-                )
+                error=f"Usuario {email_n} creado pero la licencia falló: {exc}"
             )
         return _redirect_dashboard(
-            success=f"Usuario {email_n} creado y licencia '{code_n}' asignada."
+            success=f"Usuario {email_n} (rol {role_n}) creado y licencia '{code_n}' asignada."
         )
-    return _redirect_dashboard(success=f"Usuario {email_n} creado correctamente.")
+    return _redirect_dashboard(
+        success=f"Usuario {email_n} (rol {role_n}) creado correctamente."
+    )
 
 
 @router.post("/users/{user_id}/delete")
@@ -681,19 +836,25 @@ def admin_users_delete(
     user_id: int,
     db: Session = Depends(get_db),
 ):
-    if not _is_admin_authenticated(request):
+    current_admin = _get_authenticated_admin(request, db)
+    if not current_admin:
         return _redirect_to_login()
 
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if user_id == current_admin.id:
+        return _redirect_dashboard(error="No podés borrarte a vos mismo.")
+
+    user = crud.get_user_by_id(db, user_id)
     if not user:
         return _redirect_dashboard(error="Usuario no encontrado.")
 
+    # No dejar borrar el ultimo admin activo
+    if user.role == "admin" and user.is_active and crud.count_active_admins(db) <= 1:
+        return _redirect_dashboard(
+            error="No podés borrar al último administrador activo del sistema."
+        )
+
     email = user.email
     try:
-        # El cascade="all,delete" del modelo se encarga de licencias,
-        # y a su vez License.devices tiene cascade="all,delete-orphan"
-        # para borrar los dispositivos asociados. PasswordResetToken
-        # tambien tiene cascade="all,delete-orphan".
         db.delete(user)
         db.commit()
         return _redirect_dashboard(
@@ -704,6 +865,48 @@ def admin_users_delete(
         return _redirect_dashboard(error=f"No se pudo borrar el usuario: {exc}")
 
 
+@router.post("/users/{user_id}/set-role")
+def admin_users_set_role(
+    request: Request,
+    user_id: int,
+    role: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    current_admin = _get_authenticated_admin(request, db)
+    if not current_admin:
+        return _redirect_to_login()
+
+    if user_id == current_admin.id:
+        return _redirect_dashboard(error="No podés cambiar tu propio rol.")
+
+    user = crud.get_user_by_id(db, user_id)
+    if not user:
+        return _redirect_dashboard(error="Usuario no encontrado.")
+
+    role_n = (role or "").strip().lower()
+    if role_n not in crud.VALID_ROLES:
+        return _redirect_dashboard(error=f"Rol inválido: {role_n!r}.")
+
+    # No permitir degradar al ultimo admin activo
+    if (
+        user.role == "admin"
+        and role_n != "admin"
+        and crud.count_active_admins(db) <= 1
+    ):
+        return _redirect_dashboard(
+            error="No podés degradar al último administrador activo del sistema."
+        )
+
+    try:
+        crud.set_user_role(db, user, role_n)
+        return _redirect_dashboard(
+            success=f"Rol de {user.email} cambiado a '{role_n}'."
+        )
+    except Exception as exc:
+        db.rollback()
+        return _redirect_dashboard(error=f"No se pudo cambiar el rol: {exc}")
+
+
 @router.post("/users/reset-password")
 def admin_users_reset_password(
     request: Request,
@@ -711,7 +914,7 @@ def admin_users_reset_password(
     email: str = Form(...),
     new_password: str = Form(...),
 ):
-    if not _is_admin_authenticated(request):
+    if not _get_authenticated_admin(request, db):
         return _redirect_to_login()
 
     email_n = (email or "").strip().lower()
@@ -728,8 +931,7 @@ def admin_users_reset_password(
     try:
         user.password_hash = get_password_hash(password_n)
         db.add(user)
-        # Invalidar tokens de reset pendientes — la contrasena ya cambio,
-        # los links viejos no deben servir.
+        # Invalidar tokens de reset pendientes
         db.query(models.PasswordResetToken).filter(
             models.PasswordResetToken.user_id == user.id
         ).delete(synchronize_session=False)
@@ -750,8 +952,10 @@ def admin_licenses_create(
     db: Session = Depends(get_db),
     email: str = Form(...),
     code: str = Form(...),
+    license_duration: str = Form("none"),
+    license_manual_date: str = Form(""),
 ):
-    if not _is_admin_authenticated(request):
+    if not _get_authenticated_admin(request, db):
         return _redirect_to_login()
 
     email_n = (email or "").strip().lower()
@@ -763,14 +967,21 @@ def admin_licenses_create(
     if not user:
         return _redirect_dashboard(error=f"No existe el usuario {email_n}.")
 
-    existing = (
-        db.query(models.License).filter(models.License.code == code_n).first()
-    )
-    if existing:
+    if db.query(models.License).filter(models.License.code == code_n).first():
         return _redirect_dashboard(error=f"El código '{code_n}' ya existe.")
 
     try:
-        crud.create_license(db, user=user, code=code_n)
+        expires_at, validity_days = _parse_expiration_from_form(
+            license_duration, license_manual_date,
+        )
+    except ValueError as exc:
+        return _redirect_dashboard(error=str(exc))
+
+    try:
+        crud.create_license(
+            db, user=user, code=code_n,
+            expires_at=expires_at, validity_days=validity_days,
+        )
         return _redirect_dashboard(
             success=f"Licencia '{code_n}' agregada a {email_n}."
         )
@@ -787,7 +998,7 @@ def admin_licenses_toggle(
     license_id: int,
     db: Session = Depends(get_db),
 ):
-    if not _is_admin_authenticated(request):
+    if not _get_authenticated_admin(request, db):
         return _redirect_to_login()
 
     lic = (
@@ -808,4 +1019,85 @@ def admin_licenses_toggle(
         db.rollback()
         return _redirect_dashboard(
             error=f"No se pudo cambiar el estado de la licencia: {exc}"
+        )
+
+
+@router.post("/licenses/{license_id}/set-expiry")
+def admin_licenses_set_expiry(
+    request: Request,
+    license_id: int,
+    expires_at: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    if not _get_authenticated_admin(request, db):
+        return _redirect_to_login()
+
+    lic = (
+        db.query(models.License).filter(models.License.id == license_id).first()
+    )
+    if not lic:
+        return _redirect_dashboard(error="Licencia no encontrada.")
+
+    expires_str = (expires_at or "").strip()
+    new_exp: Optional[datetime] = None
+    if expires_str:
+        try:
+            new_exp = datetime.strptime(expires_str, "%Y-%m-%d")
+            new_exp = new_exp.replace(hour=23, minute=59, second=59)
+        except ValueError:
+            return _redirect_dashboard(
+                error=f"Fecha inválida: {expires_str!r} (formato YYYY-MM-DD)."
+            )
+
+    try:
+        crud.set_license_expires_at(db, lic, new_exp)
+        msg = (
+            f"Expiración de '{lic.code}' actualizada a {new_exp.strftime('%Y-%m-%d')}."
+            if new_exp else
+            f"Licencia '{lic.code}' quedó sin vencimiento."
+        )
+        return _redirect_dashboard(success=msg)
+    except Exception as exc:
+        db.rollback()
+        return _redirect_dashboard(
+            error=f"No se pudo actualizar la expiración: {exc}"
+        )
+
+
+@router.post("/licenses/{license_id}/renew")
+def admin_licenses_renew(
+    request: Request,
+    license_id: int,
+    additional_days: int = Form(...),
+    db: Session = Depends(get_db),
+):
+    if not _get_authenticated_admin(request, db):
+        return _redirect_to_login()
+
+    lic = (
+        db.query(models.License).filter(models.License.id == license_id).first()
+    )
+    if not lic:
+        return _redirect_dashboard(error="Licencia no encontrada.")
+
+    if additional_days <= 0 or additional_days > 3650:
+        return _redirect_dashboard(
+            error="Los días adicionales deben estar entre 1 y 3650."
+        )
+
+    try:
+        # from_now=True: renueva desde HOY, no desde la fecha vieja.
+        # Esto evita que renovar una licencia vencida hace tiempo la deje
+        # todavia vencida (o cerca).
+        crud.renew_license(db, lic, additional_days, from_now=True)
+        return _redirect_dashboard(
+            success=(
+                f"Licencia '{lic.code}' renovada por {additional_days} día(s). "
+                f"Nueva expiración: {lic.expires_at.strftime('%Y-%m-%d')}."
+            )
+        )
+    except Exception as exc:
+        db.rollback()
+        return _redirect_dashboard(
+            error=f"No se pudo renovar la licencia: {exc}"
         )

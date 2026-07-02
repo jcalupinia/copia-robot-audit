@@ -80,6 +80,9 @@ class LicenseInfo(BaseModel):
 class UserInfo(BaseModel):
     email: EmailStr
     is_active: bool
+    # role: "admin" | "operador" | "cliente". Solo informativo para el cliente;
+    # el chequeo de permisos ocurre server-side (admin.py, /admin/*).
+    role: str = "operador"
     licenses: list[LicenseInfo] = []
 
     class Config:

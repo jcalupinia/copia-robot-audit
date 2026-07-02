@@ -74,6 +74,22 @@ app.add_middleware(
 
 Base.metadata.create_all(bind=engine)
 
+# Migraciones idempotentes de esquema y bootstrap de admins.
+# Se corre DESPUES de create_all para poder hacer ALTER TABLE ADD COLUMN sobre
+# tablas ya creadas. Ver licensing_api/migrations.py.
+from licensing_api.database import SessionLocal as _SessionLocal  # noqa: E402
+from licensing_api.migrations import run_migrations as _run_migrations  # noqa: E402
+
+try:
+    _run_migrations(engine, _SessionLocal)
+except Exception as _mig_err:
+    # No abortamos el arranque si la migracion falla — preferimos que la
+    # API levante y el admin arregle a mano vs quedar caido.
+    import logging as _logging
+    _logging.getLogger(__name__).error(
+        f"Migraciones fallaron: {_mig_err}. La API arranca igual."
+    )
+
 
 # Panel administrativo web (HTML) bajo /admin.
 # Permite gestionar usuarios y licencias desde una interfaz HTML simple,
@@ -423,6 +439,13 @@ def activate_license(
     if not license_obj.is_active:
 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Licencia desactivada.")
+
+    # Bloquear activación si la licencia ya expiró (2026-06-21)
+    if license_obj.expires_at and license_obj.expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Licencia expirada. Contacta al administrador para renovarla.",
+        )
 
     # Bloquear activación en otro equipo si ya fue vinculada
     if license_obj.device_fingerprint and license_obj.device_fingerprint != request.fingerprint:
