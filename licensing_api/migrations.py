@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from typing import Optional
 
 from sqlalchemy import inspect, text
@@ -28,6 +29,25 @@ from licensing_api.security import get_password_hash
 
 
 logger = logging.getLogger(__name__)
+
+
+def _mig_log(msg: str, level: str = "info") -> None:
+    """Log de migraciones que SI o SI aparece en stdout de Render/Docker.
+
+    Usa print(..., flush=True) porque el logger de modulo (logging.getLogger)
+    sin configuracion explicita queda silenciado bajo Uvicorn en Render (solo
+    muestra uvicorn.access y uvicorn.error). Print con flush=True garantiza
+    visibilidad en los logs de Render, cPanel, docker logs, etc.
+    """
+    prefix = "[MIGRATIONS]"
+    print(f"{prefix} {msg}", flush=True, file=sys.stdout)
+    # Tambien lo tirmos al logger por si alguien configuro handlers.
+    if level == "error":
+        logger.error(msg)
+    elif level == "warning":
+        logger.warning(msg)
+    else:
+        logger.info(msg)
 
 
 # Los 3 emails que deben quedar como admin. Fijos en el codigo porque son
@@ -47,7 +67,7 @@ def _column_exists(engine: Engine, table_name: str, column_name: str) -> bool:
         cols = {c["name"] for c in insp.get_columns(table_name)}
         return column_name in cols
     except Exception as err:
-        logger.warning(f"No se pudo inspeccionar {table_name}: {err}")
+        _mig_log(f"No se pudo inspeccionar {table_name}: {err}", level="warning")
         return False
 
 
@@ -56,7 +76,7 @@ def _add_role_column_if_missing(engine: Engine) -> None:
     if _column_exists(engine, "users", "role"):
         return
     dialect = engine.dialect.name
-    logger.info(f"Migrando: agregando columna users.role (dialect={dialect})")
+    _mig_log(f"Migrando: agregando columna users.role (dialect={dialect})")
     # SQLite y Postgres soportan la misma sintaxis basica de ALTER TABLE ADD COLUMN
     # con DEFAULT. Postgres tambien acepta NOT NULL en la misma sentencia si hay
     # default. SQLite lo tolera igual.
@@ -66,7 +86,7 @@ def _add_role_column_if_missing(engine: Engine) -> None:
     )
     with engine.begin() as conn:
         conn.execute(text(ddl))
-    logger.info("Migracion OK: columna users.role agregada con default 'operador'")
+    _mig_log("Migracion OK: columna users.role agregada con default 'operador'")
 
 
 def _promote_admins(db: Session, bootstrap_password: Optional[str]) -> None:
@@ -84,19 +104,19 @@ def _promote_admins(db: Session, bootstrap_password: Optional[str]) -> None:
         )
         if existing:
             if existing.role != "admin":
-                logger.info(
+                _mig_log(
                     f"Bootstrap: cambiando rol de {email_n} de "
                     f"'{existing.role}' a 'admin'"
                 )
                 existing.role = "admin"
                 db.add(existing)
             if not existing.is_active:
-                logger.info(f"Bootstrap: reactivando {email_n}")
+                _mig_log(f"Bootstrap: reactivando {email_n}")
                 existing.is_active = True
                 db.add(existing)
         else:
             if bootstrap_password:
-                logger.info(f"Bootstrap: creando admin {email_n} (nuevo)")
+                _mig_log(f"Bootstrap: creando admin {email_n} (nuevo)")
                 new_user = models.User(
                     email=email_n,
                     password_hash=get_password_hash(bootstrap_password),
@@ -105,10 +125,11 @@ def _promote_admins(db: Session, bootstrap_password: Optional[str]) -> None:
                 )
                 db.add(new_user)
             else:
-                logger.warning(
+                _mig_log(
                     f"Bootstrap: {email_n} no existe en DB y ADMIN_BOOTSTRAP_PASSWORD "
                     f"no esta seteada -> NO se crea. Setea la env var y redeploy, "
-                    f"o crea el usuario manualmente y correra el promote."
+                    f"o crea el usuario manualmente y correra el promote.",
+                    level="warning",
                 )
     db.commit()
 
@@ -128,7 +149,7 @@ def _normalize_other_roles(db: Session) -> None:
         .update({"role": "operador"}, synchronize_session=False)
     )
     if affected:
-        logger.info(f"Normalizacion: {affected} user(s) sin rol -> 'operador'")
+        _mig_log(f"Normalizacion: {affected} user(s) sin rol -> 'operador'")
     db.commit()
 
 
@@ -146,21 +167,22 @@ def run_migrations(engine: Engine, session_factory) -> None:
     Robusto: si algo falla, log y sigue arrancando. Preferimos que el
     servidor levante y el admin arregle a mano, en vez de quedar caido.
     """
-    logger.info("=== Iniciando migraciones ===")
+    _mig_log("=== Iniciando migraciones ===")
     try:
         _add_role_column_if_missing(engine)
     except Exception as err:
-        logger.error(f"Migracion 'add role column' fallo: {err}. Continuando.")
+        _mig_log(f"Migracion 'add role column' fallo: {err}. Continuando.", level="error")
 
     bootstrap_pwd = (os.getenv("ADMIN_BOOTSTRAP_PASSWORD", "") or "").strip()
     if not bootstrap_pwd:
-        logger.warning(
+        _mig_log(
             "ADMIN_BOOTSTRAP_PASSWORD no esta seteada. Los admins que no "
             "existan en DB NO seran creados. Los que existan si seran "
-            "promovidos a role='admin'."
+            "promovidos a role='admin'.",
+            level="warning",
         )
     else:
-        logger.info(
+        _mig_log(
             "ADMIN_BOOTSTRAP_PASSWORD detectada. Se creara/promovera a los "
             f"{len(ADMIN_EMAILS)} admins."
         )
@@ -170,8 +192,8 @@ def run_migrations(engine: Engine, session_factory) -> None:
         _normalize_other_roles(db)
         _promote_admins(db, bootstrap_pwd or None)
     except Exception as err:
-        logger.error(f"Bootstrap admins fallo: {err}")
+        _mig_log(f"Bootstrap admins fallo: {err}", level="error")
         db.rollback()
     finally:
         db.close()
-    logger.info("=== Migraciones completadas ===")
+    _mig_log("=== Migraciones completadas ===")

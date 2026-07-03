@@ -80,15 +80,22 @@ Base.metadata.create_all(bind=engine)
 from licensing_api.database import SessionLocal as _SessionLocal  # noqa: E402
 from licensing_api.migrations import run_migrations as _run_migrations  # noqa: E402
 
+import sys as _sys
+print("[STARTUP] Llamando a run_migrations()...", flush=True, file=_sys.stdout)
 try:
     _run_migrations(engine, _SessionLocal)
+    print("[STARTUP] run_migrations() completado sin excepciones.", flush=True, file=_sys.stdout)
 except Exception as _mig_err:
     # No abortamos el arranque si la migracion falla — preferimos que la
     # API levante y el admin arregle a mano vs quedar caido.
-    import logging as _logging
-    _logging.getLogger(__name__).error(
-        f"Migraciones fallaron: {_mig_err}. La API arranca igual."
+    print(
+        f"[STARTUP] ERROR: run_migrations() lanzo excepcion: {_mig_err!r}. "
+        f"La API arranca igual.",
+        flush=True, file=_sys.stderr,
     )
+    import traceback as _tb
+    _tb.print_exc(file=_sys.stderr)
+    _sys.stderr.flush()
 
 
 # Panel administrativo web (HTML) bajo /admin.
