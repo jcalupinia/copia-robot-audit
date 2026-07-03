@@ -65,13 +65,14 @@ En el dashboard de Render → tu servicio → **Settings → Environment**:
 | Variable | Valor | Por que |
 |---|---|---|
 | `UPDATE_FILE_URL` | URL del `.exe` en GitHub Releases | El endpoint `/updates/download` ahora redirige a esta URL (302). El cliente baja directo del CDN de GitHub. |
+| `UPDATE_MANUAL_URL` | URL del `MANUAL_USUARIO.pdf` en GitHub Releases | Igual que `UPDATE_FILE_URL` pero para el manual. `/manual` hace 302 a esta URL. |
 | `UPDATE_TOKEN` | **(BORRAR)** | Hace publica la descarga. El bot desktop sigue funcionando (manda token pero el servidor lo ignora cuando esta vacio). |
 | `UPDATE_VERSION` | e.g. `1.0.0` | Lo que el `/updates/latest` reporta como version disponible. |
-| `ADMIN_EMAIL` | e.g. `admin@audit-ia.ec` | Para el login del panel admin. |
-| `ADMIN_PASSWORD` | password fuerte 16+ chars | idem |
+| `ADMIN_BOOTSTRAP_PASSWORD` | Password temporal de ~16 chars | **Solo se lee la primera vez que arranca la API en esta DB.** La migracion crea los 3 admins con esta password. Ver Paso 8. |
 | `ALLOWED_ORIGINS` | `https://audit-ia.ec,https://sri-robot-audit-ik01.onrender.com` | CORS para que el frontend de audit-ia.ec pueda hablar con la API si en algun momento se necesita. |
 | `APP_BASE_URL` | `https://audit-ia.ec/sri_robot_audit` | Base URL publica que la API usa para construir links (e.g. en mails de password reset). |
 | (Opcional) podes BORRAR `R2_*` | | Si ya no usas Cloudflare R2. La logica R2 queda como fallback en el codigo pero no se ejecuta si tenes `UPDATE_FILE_URL` set. |
+| **(Obsoletas)** `ADMIN_EMAIL`, `ADMIN_PASSWORD` | **(BORRAR)** | Desde el refactor 2026-06-21 el login del panel admin va contra la BD (usuarios con `role="admin"`). Estas env vars ya no se leen. |
 
 **Redeploy** despues de cambiar las vars.
 
@@ -130,13 +131,61 @@ Si el `.htaccess` no funciona porque Ecuaweb tiene `mod_proxy` capado:
 ### Paso 7 - Probar el panel admin
 
 1. Abrir `https://audit-ia.ec/sri_robot_audit/admin/login`
-2. Ingresar con `ADMIN_EMAIL` y `ADMIN_PASSWORD` que pusiste en Render.
-3. Probar:
-   - Crear usuario nuevo
-   - Agregar licencia
-   - Desactivar licencia
-   - Borrar usuario
+2. Ingresar con uno de los 3 emails admin definidos + la password que
+   creaste con el bootstrap (ver Paso 8):
+   - `adminjcalupinia1@auditconsulting.ec`
+   - `adminkormaza2@auditconsulting.ec`
+   - `adminjvinueza3@auditconsulting.ec`
+3. Probar en el dashboard:
+   - Crear usuario nuevo (con rol admin / operador / cliente)
+   - Agregar licencia con duracion (1m / 3m / 6m / 12m / manual / sin venc)
+   - Editar fecha de expiracion de una licencia
+   - Renovar licencia por N dias
+   - Desactivar / reactivar licencia
+   - Cambiar rol de un usuario
    - Resetear contrasena
+   - Borrar usuario (cascade a licencias y dispositivos)
+
+### Paso 8 - Setup inicial de los 3 admins (solo primera vez)
+
+Desde el refactor 2026-06-21, el login del panel admin va **contra la BD**:
+solo usuarios con `role="admin"` pueden entrar. Los 3 emails admin estan
+fijados en el codigo (`licensing_api/migrations.py: ADMIN_EMAILS`).
+
+Flujo de bootstrap (idempotente, seguro correrlo N veces):
+
+1. En Render → Settings → Environment, setear:
+   ```
+   ADMIN_BOOTSTRAP_PASSWORD = <password temporal fuerte, e.g. Bootstr4p!Adm1n_2026>
+   ```
+2. Save Changes → Render redeploya (~1-2 min).
+3. Ver los Logs de Render, buscar el bloque de la migracion:
+   ```
+   === Iniciando migraciones ===
+   Migrando: agregando columna users.role (dialect=postgresql)
+   Migracion OK: columna users.role agregada con default 'operador'
+   Bootstrap: creando admin adminjcalupinia1@auditconsulting.ec (nuevo)
+   Bootstrap: creando admin adminkormaza2@auditconsulting.ec (nuevo)
+   Bootstrap: creando admin adminjvinueza3@auditconsulting.ec (nuevo)
+   === Migraciones completadas ===
+   ```
+4. Loguearse al panel admin con cualquiera de los 3 emails + esa password.
+5. **Cambiar la password** desde el propio panel (formulario "Resetear
+   contrasena"). Poner una password distinta para cada admin.
+6. **Borrar** `ADMIN_BOOTSTRAP_PASSWORD` de Render Environment. Ya no se
+   necesita. Si mañana hay que hacer bootstrap de nuevo, se vuelve a setear.
+7. **Borrar** tambien `ADMIN_EMAIL` y `ADMIN_PASSWORD` de Render (obsoletas
+   desde el refactor).
+
+Notas:
+- La migracion es idempotente: si los 3 admins ya existen, solo asegura
+  que su `role="admin"` y que estan activos.
+- Si `ADMIN_BOOTSTRAP_PASSWORD` no esta seteada y un admin no existe, la
+  migracion loguea warning pero **no** lo crea. Setea la env var y
+  redeploya.
+- Sesiones admin viejas (con la auth por env vars) se invalidan
+  automaticamente por el nuevo formato del JWT (`sub="admin:<user_id>"`
+  en vez de `sub="admin:<email>"`).
 
 ## Por que Github Releases en vez de Cloudflare R2
 
