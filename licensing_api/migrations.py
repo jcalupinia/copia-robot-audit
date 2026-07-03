@@ -152,7 +152,7 @@ def run_migrations(engine: Engine, session_factory) -> None:
     except Exception as err:
         logger.error(f"Migracion 'add role column' fallo: {err}. Continuando.")
 
-    bootstrap_pwd = (os.getenv("8bdb66f7ce3b736248da1beb836437e6", "") or "").strip()
+    bootstrap_pwd = (os.getenv("ADMIN_BOOTSTRAP_PASSWORD", "") or "").strip()
     if not bootstrap_pwd:
         logger.warning(
             "ADMIN_BOOTSTRAP_PASSWORD no esta seteada. Los admins que no "
