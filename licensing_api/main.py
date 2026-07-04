@@ -220,7 +220,22 @@ def _password_reset_hash(token: str) -> str:
 
 
 def _build_reset_link(request: Request, token: str) -> str:
-    base_url = os.getenv("RESET_LINK_BASE_URL", "").strip() or os.getenv("APP_BASE_URL", "").strip()
+    """Construye el link de recuperacion de password.
+
+    Prioridad:
+      1) RESET_LINK_BASE_URL explicito (override para casos especiales).
+      2) http://127.0.0.1:8501 (default).
+
+    IMPORTANTE: la pantalla de reset vive DENTRO del ejecutable Streamlit
+    del cliente (aplicacion.py). Corre localmente en 127.0.0.1:8501, no
+    en el backend publico. Por eso el link debe apuntar al Streamlit
+    local, NO a audit-ia.ec / Render / etc.
+
+    Antes se usaba APP_BASE_URL como fallback, pero esa apunta al backend
+    publico (landing) donde /?reset_token=... solo muestra la landing y
+    no hay pantalla para setear la nueva password.
+    """
+    base_url = os.getenv("RESET_LINK_BASE_URL", "").strip()
     if not base_url:
         base_url = "http://127.0.0.1:8501"
     base_url = base_url.rstrip("/")
