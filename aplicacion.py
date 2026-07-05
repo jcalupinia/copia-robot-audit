@@ -3387,8 +3387,32 @@ def _build_custom_report_from_folder(
         rows.append(row)
         xml_count += 1
 
+    # HOTFIX 2026-07-04: para facturas emitidas ONLY, permitir que el usuario
+    # dropee PDFs en carpetas con nombres custom (e.g., "PDF",
+    # "Reporte-Factura-Emitidos") que no tienen "emitidos" como segmento exacto
+    # del path. Sin este fallback, `_infer_origin_and_status_from_path`
+    # devuelve "Desconocido" para esos paths y el filtro `path_origen != origen`
+    # skipea TODOS los PDFs -> reporte queda vacio.
+    # No aplica al resto de tipos (retencion, NC, ND, liquidacion) para no
+    # cambiar su comportamiento actual.
+    _SRI_FACTURA_FILENAME_RE = re.compile(
+        r"^factura__\d{8}__Factura_\d{3}-\d{3}-\d{9}",
+        re.IGNORECASE,
+    )
+
     for pdf_path in sorted(base_dir.rglob("*.pdf")):
         path_origen, path_estado = _infer_origin_and_status_from_path(pdf_path)
+        # Fallback SOLO para facturas emitidas (ver hotfix arriba).
+        if (
+            is_factura_emitida
+            and origen == "Emitidos"
+            and path_origen != "Emitidos"
+        ):
+            filename_matches_sri = bool(_SRI_FACTURA_FILENAME_RE.match(pdf_path.name))
+            parts_normalized = [_normalize_compare_text(p) for p in pdf_path.parts]
+            has_emitido_segment = any("emitido" in p for p in parts_normalized)
+            if filename_matches_sri or has_emitido_segment:
+                path_origen = "Emitidos"
         if path_origen != origen:
             continue
         if origen == "Emitidos" and estado_emitidos and path_estado and path_estado != estado_emitidos:
