@@ -632,7 +632,7 @@ def _fecha_coincide_consolidacion(
 ) -> bool:
     if anio_archivo != anio_objetivo:
         return False
-    if modo_fecha == "Ano completo":
+    if modo_fecha == "Año completo":
         return True
     if modo_fecha == "Rango de meses":
         return mes_inicio <= mes_archivo <= mes_fin
@@ -650,7 +650,7 @@ def _sufijo_periodo_consolidacion(
     mes_fin: int,
     dia: int,
 ) -> str:
-    if modo_fecha == "Ano completo":
+    if modo_fecha == "Año completo":
         return f"{anio:04d}"
     if modo_fecha == "Rango de meses":
         return f"{anio:04d}{mes_inicio:02d}{mes_fin:02d}"
@@ -883,6 +883,60 @@ def _copiar_documentos_unicos(archivos: list[Path], destino: Path) -> int:
         except Exception as err:
             print(f"[WARN] No se pudo copiar documento consolidado: {origen} ({err})")
     return copiados
+
+
+def _copiar_documentos_unicos_por_mes(
+    archivos: list[Path],
+    destino_base: Path,
+    tipo_prefijo: str,
+    tipo_slug_archivo: str | None,
+) -> tuple[int, dict[int, int]]:
+    """Copia archivos agrupados por subcarpeta de mes ('Enero', 'Febrero', ...).
+
+    Devuelve (total_copiados, {mes_num: copiados_del_mes}). Los archivos cuyo
+    mes no se pueda inferir se copian a 'Sin_fecha'.
+    """
+    if not archivos:
+        return 0, {}
+    destino_base.mkdir(parents=True, exist_ok=True)
+    copiados_total = 0
+    por_mes: dict[int, int] = {}
+    sin_fecha = 0
+    for origen in archivos:
+        if not origen.exists():
+            continue
+        fecha_info = _extraer_fecha_desde_ruta_documento(
+            origen, tipo_prefijo, tipo_slug_archivo
+        )
+        if fecha_info:
+            _, mes_arch, _ = fecha_info
+            carpeta_mes = MESES_ES[mes_arch - 1] if 1 <= mes_arch <= 12 else "Sin_fecha"
+        else:
+            mes_arch = 0
+            carpeta_mes = "Sin_fecha"
+        destino_mes = destino_base / carpeta_mes
+        destino_mes.mkdir(parents=True, exist_ok=True)
+        destino_final = destino_mes / origen.name
+        if destino_final.exists():
+            sufijo = 1
+            while True:
+                candidato = destino_mes / f"{origen.stem}_{sufijo}{origen.suffix}"
+                if not candidato.exists():
+                    destino_final = candidato
+                    break
+                sufijo += 1
+        try:
+            shutil.copy2(origen, destino_final)
+            copiados_total += 1
+            if mes_arch:
+                por_mes[mes_arch] = por_mes.get(mes_arch, 0) + 1
+            else:
+                sin_fecha += 1
+        except Exception as err:
+            print(f"[WARN] No se pudo copiar documento consolidado: {origen} ({err})")
+    if sin_fecha:
+        por_mes[0] = sin_fecha
+    return copiados_total, por_mes
 
 
 def _consolidar_reportes_xml_desde_excels(reportes: list[Path], destino: Path) -> Path | None:
@@ -3510,9 +3564,12 @@ def _build_custom_report_from_folder(
             "errors": errores,
         }
 
-    # El reporte se guarda dentro de la carpeta del RUC (search_root) para que
-    # cada contribuyente tenga sus reportes personalizados aislados.
-    report_dir = search_root / "Reportes_personalizados"
+    # El reporte se guarda en <base>/Reportes_personalizados/<RUC>/ para que
+    # todos los reportes personalizados queden centralizados y separados por
+    # contribuyente. Sirve tanto si el usuario apunto a la carpeta padre
+    # (`<base>`) como directo a `<base>/<RUC>` — en ambos casos `search_root`
+    # es `<base>/<RUC>` y su `.parent` es `<base>`.
+    report_dir = search_root.parent / "Reportes_personalizados" / ruc_norm
     report_dir.mkdir(parents=True, exist_ok=True)
     origen_slug = _normalize_compare_text(origen)
     tipo_slug = _canonical_tipo(tipo)
@@ -5971,12 +6028,20 @@ with tab3:
     with _group_card(2, "Filtros", "RUC, origen, tipo, año y periodo"):
         col_ruc_cons, col_origen_cons = st.columns([1.2, 1.2])
         with col_ruc_cons:
-            ruc_consolidar = st.text_input(
-                "RUC a buscar (opcional)",
+            # RUC obligatorio: los documentos se agrupan en Consolidados/<RUC>/
+            # y la búsqueda queda restringida a esa carpeta para no mezclar
+            # comprobantes de distintos contribuyentes.
+            ruc_consolidar_raw = st.text_input(
+                "RUC del contribuyente (obligatorio)",
                 value=ruc,
-                help="Si lo dejas vacio, se intentara consolidar desde la carpeta seleccionada.",
+                max_chars=13,
+                help=(
+                    "RUC de 13 dígitos. Los documentos consolidados se "
+                    "guardarán en Consolidados/<RUC>/…"
+                ),
                 key="consolidar_ruc_hint",
             )
+            ruc_consolidar = (ruc_consolidar_raw or "").strip()
         with col_origen_cons:
             origen_consolidar = st.selectbox(
                 "Origen a consolidar",
@@ -6104,6 +6169,12 @@ with tab3:
                     st.session_state.get("download_base_dir", str(DESC_DIR)),
                 )
             ).expanduser()
+            if not ruc_consolidar:
+                st.error("Ingresa el RUC del contribuyente (obligatorio).")
+                st.stop()
+            if not ruc_consolidar.isdigit() or len(ruc_consolidar) != 13:
+                st.error("El RUC debe tener exactamente 13 dígitos numéricos.")
+                st.stop()
             if not carpeta_base_cons.exists():
                 st.error(f"La carpeta seleccionada no existe: {carpeta_base_cons}")
                 st.stop()
@@ -6138,10 +6209,13 @@ with tab3:
                 st.stop()
 
             prefix_base = "recibidos_reporte" if origen_consolidar == "Recibidos" else "emitidos_reporte"
-            destino_anual_dir = carpeta_base_cons / "Consolidados" / origen_consolidar
+            # Ruta con RUC inmediatamente después de "Consolidados" para
+            # aislar los documentos de cada contribuyente:
+            # <base>/Consolidados/<RUC>/<origen>/[<estado>]/<periodo>/
+            destino_anual_dir = carpeta_base_cons / "Consolidados" / ruc_consolidar / origen_consolidar
             if origen_consolidar == "Emitidos" and estado_slug:
                 destino_anual_dir = destino_anual_dir / estado_slug
-            if modo_fecha_consolidar == "Ano completo":
+            if modo_fecha_consolidar == "Año completo":
                 destino_anual_dir = destino_anual_dir / f"{anio_int:04d}"
             else:
                 destino_anual_dir = destino_anual_dir / periodo_suffix
@@ -6197,9 +6271,20 @@ with tab3:
                     st.info("No se encontraron insumos XML para consolidar.")
 
                 destino_copia_xml = destino_anual_dir / "XML"
-                copiados_xml = _copiar_documentos_unicos(xml_files, destino_copia_xml)
+                copiados_xml, xml_por_mes = _copiar_documentos_unicos_por_mes(
+                    xml_files,
+                    destino_copia_xml,
+                    tipo_prefijo,
+                    tipo_slug,
+                )
                 if copiados_xml > 0:
                     st.success(f"XML copiados: {copiados_xml} en `{destino_copia_xml}`")
+                    if xml_por_mes:
+                        detalle_mes_xml = ", ".join(
+                            f"{MESES_ES[m - 1] if 1 <= m <= 12 else 'Sin_fecha'}: {n}"
+                            for m, n in sorted(xml_por_mes.items())
+                        )
+                        st.caption(f"Distribución por mes (XML): {detalle_mes_xml}")
                 else:
                     st.info("No se copiaron XML porque no hubo documentos para el periodo seleccionado.")
 
@@ -6241,9 +6326,20 @@ with tab3:
                     st.info("No se encontraron reportes PDF para consolidar.")
 
                 destino_copia_pdf = destino_anual_dir / "PDF"
-                copiados_pdf = _copiar_documentos_unicos(pdf_files, destino_copia_pdf)
+                copiados_pdf, pdf_por_mes = _copiar_documentos_unicos_por_mes(
+                    pdf_files,
+                    destino_copia_pdf,
+                    tipo_prefijo,
+                    tipo_slug,
+                )
                 if copiados_pdf > 0:
                     st.success(f"PDF copiados: {copiados_pdf} en `{destino_copia_pdf}`")
+                    if pdf_por_mes:
+                        detalle_mes_pdf = ", ".join(
+                            f"{MESES_ES[m - 1] if 1 <= m <= 12 else 'Sin_fecha'}: {n}"
+                            for m, n in sorted(pdf_por_mes.items())
+                        )
+                        st.caption(f"Distribución por mes (PDF): {detalle_mes_pdf}")
                 else:
                     st.info("No se copiaron PDF porque no hubo documentos para el periodo seleccionado.")
 
