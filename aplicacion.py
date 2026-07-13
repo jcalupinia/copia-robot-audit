@@ -3292,6 +3292,7 @@ def _map_xml_to_retencion_row(cabecera: dict, retenciones: list[dict]) -> dict:
 def _build_custom_report_from_folder(
     base_dir: Path,
     *,
+    ruc: str,
     origen: str,
     tipo: str,
     fecha_inicio: date,
@@ -3299,6 +3300,39 @@ def _build_custom_report_from_folder(
     estado_emitidos: str | None = None,
 ) -> dict:
     base_dir = Path(base_dir).expanduser()
+    ruc_norm = (ruc or "").strip()
+    if not ruc_norm:
+        return {
+            "ok": False,
+            "message": "Debes indicar el RUC del contribuyente para generar el reporte.",
+            "xml_count": 0,
+            "pdf_count": 0,
+            "errors": [],
+        }
+
+    # La búsqueda queda restringida a la subcarpeta cuyo nombre coincida
+    # EXACTAMENTE con el RUC. Sin esto, si `base_dir` contiene varios RUCs,
+    # rglob mezcla documentos de distintos contribuyentes (ej. dos RUCs con
+    # facturas en marzo/2026 acaban en el mismo reporte). Se acepta que el
+    # usuario apunte directamente a `<base>/<RUC>` o al padre `<base>`.
+    if base_dir.name == ruc_norm and base_dir.is_dir():
+        search_root = base_dir
+    else:
+        candidate = base_dir / ruc_norm
+        if not candidate.exists() or not candidate.is_dir():
+            return {
+                "ok": False,
+                "message": (
+                    f"No se encontró una carpeta llamada '{ruc_norm}' dentro de "
+                    f"'{base_dir}'. Verifica que la carpeta fuente contenga una "
+                    "subcarpeta cuyo nombre sea exactamente el número del RUC."
+                ),
+                "xml_count": 0,
+                "pdf_count": 0,
+                "errors": [],
+            }
+        search_root = candidate
+
     target_tipo = _canonical_tipo(tipo)
     is_retencion = target_tipo == "retenciones"
     is_nota_credito = target_tipo == "notas_de_credito"
@@ -3311,7 +3345,7 @@ def _build_custom_report_from_folder(
     pdf_count = 0
     errores: list[str] = []
 
-    for xml_path in sorted(base_dir.rglob("*.xml")):
+    for xml_path in sorted(search_root.rglob("*.xml")):
         path_origen, path_estado = _infer_origin_and_status_from_path(xml_path)
         if path_origen != origen:
             continue
@@ -3400,7 +3434,7 @@ def _build_custom_report_from_folder(
         re.IGNORECASE,
     )
 
-    for pdf_path in sorted(base_dir.rglob("*.pdf")):
+    for pdf_path in sorted(search_root.rglob("*.pdf")):
         path_origen, path_estado = _infer_origin_and_status_from_path(pdf_path)
         # Fallback SOLO para facturas emitidas (ver hotfix arriba).
         if (
@@ -3476,15 +3510,17 @@ def _build_custom_report_from_folder(
             "errors": errores,
         }
 
-    report_dir = base_dir / "Reportes_personalizados"
+    # El reporte se guarda dentro de la carpeta del RUC (search_root) para que
+    # cada contribuyente tenga sus reportes personalizados aislados.
+    report_dir = search_root / "Reportes_personalizados"
     report_dir.mkdir(parents=True, exist_ok=True)
     origen_slug = _normalize_compare_text(origen)
     tipo_slug = _canonical_tipo(tipo)
     sufijo = f"{fecha_inicio.strftime('%Y%m%d')}_{fecha_fin.strftime('%Y%m%d')}"
-    output_path = report_dir / f"reporte_personalizado_{origen_slug}_{tipo_slug}_{sufijo}.xlsx"
+    output_path = report_dir / f"reporte_personalizado_{ruc_norm}_{origen_slug}_{tipo_slug}_{sufijo}.xlsx"
     if output_path.exists():
         timestamp = datetime.now().strftime("%H%M%S")
-        output_path = report_dir / f"reporte_personalizado_{origen_slug}_{tipo_slug}_{sufijo}_{timestamp}.xlsx"
+        output_path = report_dir / f"reporte_personalizado_{ruc_norm}_{origen_slug}_{tipo_slug}_{sufijo}_{timestamp}.xlsx"
 
     guardado = (
         _guardar_reporte_pdf_retencion_emitidos_excel(rows, output_path)
@@ -5156,6 +5192,21 @@ with tab2:
             "Noviembre",
             "Diciembre",
         ]
+        # RUC obligatorio: la búsqueda queda restringida a la subcarpeta cuyo
+        # nombre coincida EXACTAMENTE con el RUC. Sin esto, si la carpeta
+        # fuente contiene varios RUCs, el rglob mezcla documentos de distintos
+        # contribuyentes.
+        custom_ruc_raw = st.text_input(
+            "RUC del contribuyente (obligatorio)",
+            key="custom_report_ruc",
+            max_chars=13,
+            help=(
+                "RUC de 13 dígitos. La búsqueda se restringirá a la carpeta "
+                "cuyo nombre coincida exactamente con este número."
+            ),
+        )
+        custom_ruc = (custom_ruc_raw or "").strip()
+
         cr1, cr2, cr3 = st.columns([1.2, 1.2, 1.2])
         with cr1:
             custom_origen = st.selectbox("Origen", ["Recibidos", "Emitidos"], key="custom_report_origen")
@@ -5264,7 +5315,11 @@ with tab2:
 
         if st.button("Generar reporte por fechas", key="btn_generate_custom_report", use_container_width=True):
             source_dir = Path(st.session_state.get("custom_report_base_dir_input") or "").expanduser()
-            if not source_dir.exists():
+            if not custom_ruc:
+                st.error("Ingresa el RUC del contribuyente (obligatorio).")
+            elif not custom_ruc.isdigit() or len(custom_ruc) != 13:
+                st.error("El RUC debe tener exactamente 13 dígitos numéricos.")
+            elif not source_dir.exists():
                 st.error("La carpeta fuente no existe. Selecciona una ruta válida.")
             elif fecha_inicio_custom is None or fecha_fin_custom is None:
                 st.error("Debes definir un rango de fechas válido.")
@@ -5273,6 +5328,7 @@ with tab2:
             else:
                 resultado_custom = _build_custom_report_from_folder(
                     source_dir,
+                    ruc=custom_ruc,
                     origen=custom_origen,
                     tipo=custom_tipo,
                     fecha_inicio=fecha_inicio_custom,
