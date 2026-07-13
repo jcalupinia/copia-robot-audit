@@ -1366,6 +1366,49 @@ def descargar_sri(
                             last_completed_day=None,
                             last_completed_label=f"{_mes_a_texto(mes_actual)} {anio}",
                         )
+                    # Fix Recibidos año-completo / rango de meses: entre meses
+                    # cerramos el navegador y reabrimos con login fresco. Sin
+                    # esto la sesión se degrada mes a mes (ej. Feb baja de 74 a
+                    # 24) por captcha score, cookies y estado JSF acumulado.
+                    # Solo aplica si aun quedan meses por procesar; la logica
+                    # de descarga de un solo mes (_flujo_recibidos) no se toca.
+                    if mes_actual < mes_fin_val:
+                        _check_cancel("recibidos_reset_navegador")
+                        print(
+                            f"[INFO] Recibidos: cerrando navegador tras mes {mes_actual:02d} "
+                            f"y reabriendo para {mes_actual + 1:02d}.",
+                            flush=True,
+                        )
+                        try:
+                            context.close()
+                        except Exception as err_close_ctx:
+                            print(
+                                f"[WARN] Recibidos: error cerrando context: {err_close_ctx}",
+                                flush=True,
+                            )
+                        try:
+                            if browser is not None:
+                                browser.close()
+                        except Exception as err_close_br:
+                            print(
+                                f"[WARN] Recibidos: error cerrando browser: {err_close_br}",
+                                flush=True,
+                            )
+                        context, browser, using_persistent_profile = _abrir_navegador(p)
+                        page = context.pages[0] if context.pages else context.new_page()
+                        _login(
+                            context,
+                            page,
+                            ruc,
+                            clave,
+                            cookies_path,
+                            destino_url,
+                            ci_adicional=ci_adicional,
+                        )
+                        _check_cancel("recibidos_reset_post_login")
+                        _verificar_estado_post_login(page)
+                        modulo_page = _abrir_modulo_consultas(page, origen)
+                        consultas_recibidos = 0
                 resultado = dict(resultado_mes or {})
                 resultado["n_xml"] = total_xml
                 resultado["n_pdf"] = total_pdf
