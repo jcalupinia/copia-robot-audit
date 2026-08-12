@@ -3,10 +3,14 @@
 browser_profile/
 descargas/
 historiales/
+Reportes/
 __pycache__/
 *.db
 cookies_*.json
 session_cache.json
+# El cache real se llama session_cache_<hash>.json y NO lo cubre la linea de
+# arriba. Contiene auth_token y device_fingerprint — nunca commitearlo.
+.session_cache/
 user_prefs.json
 *.zip
 dist/
