@@ -93,6 +93,15 @@ def registrar_descarga(ruc, origen, anio, mes, dia, tipo, resultado, device_id=N
                 registro["reporte_xml_anual"] = str(Path(reporte_xml_anual).resolve())
             except Exception:
                 registro["reporte_xml_anual"] = str(reporte_xml_anual)
+        # Reportes del modo rapido (Recibidos sin PDF/XML): solo uno de los
+        # tres existe por ejecucion, segun el alcance consultado.
+        for campo_txt in ("reporte_txt", "reporte_txt_rango", "reporte_txt_anual"):
+            valor_txt = resultado.get(campo_txt)
+            if valor_txt:
+                try:
+                    registro[campo_txt] = str(Path(valor_txt).resolve())
+                except Exception:
+                    registro[campo_txt] = str(valor_txt)
         reportes_xml = resultado.get("reportes_xml")
         if reportes_xml:
             registro["reportes_xml"] = reportes_xml

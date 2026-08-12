@@ -4178,6 +4178,25 @@ else:
     _app_version_display = "3.0 (dev)"
 
 
+def _on_modo_rapido_recibidos() -> None:
+    """El modo rápido y los formatos PDF/XML son excluyentes.
+
+    Al activarlo se vacían los formatos (no se descarga ningún comprobante);
+    al desactivarlo se restaura el default para no dejar al usuario con una
+    selección vacía que luego rebota en la validación.
+    """
+    if st.session_state.get("modo_rapido_recibidos"):
+        st.session_state["formatos_recibidos"] = []
+    elif not st.session_state.get("formatos_recibidos"):
+        st.session_state["formatos_recibidos"] = ["XML", "PDF"]
+
+
+def _on_formatos_recibidos() -> None:
+    """Elegir PDF o XML desmarca el modo rápido (ver `_on_modo_rapido_recibidos`)."""
+    if st.session_state.get("formatos_recibidos"):
+        st.session_state["modo_rapido_recibidos"] = False
+
+
 def _render_topbar(app_version: str) -> None:
     """Topbar sticky pegado arriba con brand a la izquierda, titulo al
     centro, version + theme toggle + profile popover a la derecha.
@@ -4614,7 +4633,47 @@ with tab1:
                         "Día (0 = Todos)", min_value=0, max_value=31, value=0, step=1,
                         help="Elige 0 para descargar todo el mes o un día específico (1-31).",
                     )
-            formatos = st.multiselect("Formatos a descargar", ["XML", "PDF"], default=["XML", "PDF"])
+            # --------------------------------------------------------- #
+            # Modo rapido: reporte desde el TXT del portal, sin PDF/XML
+            # --------------------------------------------------------- #
+            # Va deliberadamente entre los modos de fecha y los formatos:
+            # es la decision de "que quiero obtener" previa a "en que
+            # formato". Excluyente con PDF/XML — marcarlo vacia los
+            # formatos, y elegir un formato lo desmarca.
+            st.markdown("---")
+            modo_rapido_recibidos = st.checkbox(
+                "Modo rápido: solo reporte (sin descargar PDF ni XML)",
+                key="modo_rapido_recibidos",
+                on_change=_on_modo_rapido_recibidos,
+                help=(
+                    "Arma el reporte con el archivo TXT que el portal del SRI ofrece en "
+                    "'Descargar reporte', usando los mismos datos que muestra la tabla. "
+                    "No descarga comprobantes, así que tarda segundos en vez de minutos."
+                ),
+            )
+            # El valor inicial se siembra en session_state en vez de pasarse
+            # como `default`: los callbacks escriben esa misma key y Streamlit
+            # avisa cuando un widget tiene default y ademas se setea por estado.
+            if "formatos_recibidos" not in st.session_state:
+                st.session_state["formatos_recibidos"] = ["XML", "PDF"]
+            formatos = st.multiselect(
+                "Formatos a descargar",
+                ["XML", "PDF"],
+                key="formatos_recibidos",
+                on_change=_on_formatos_recibidos,
+                disabled=modo_rapido_recibidos,
+                help=(
+                    "Deshabilitado mientras el modo rápido esté activo."
+                    if modo_rapido_recibidos
+                    else None
+                ),
+            )
+            if modo_rapido_recibidos:
+                formatos = []
+                st.caption(
+                    "Se generará un Excel con los comprobantes del período elegido, "
+                    "hoja por hoja del listado del SRI."
+                )
         else:
             modo_fechas_emitidos = st.radio(
                 "Modo de fecha",
@@ -4779,10 +4838,13 @@ with tab1:
             st.warning(" Ingresa RUC y clave antes de continuar.")
         else:
             mes_fin_val = None
+            # El modo rapido solo existe en Recibidos; se lee de session_state
+            # porque la variable local no se define cuando origen es Emitidos.
+            modo_rapido_val = bool(st.session_state.get("modo_rapido_recibidos")) and origen == "Recibidos"
             if origen == "Recibidos":
-                formatos_final = formatos
-                if not formatos_final:
-                    st.warning("Selecciona al menos un formato (XML o PDF).")
+                formatos_final = [] if modo_rapido_val else formatos
+                if not formatos_final and not modo_rapido_val:
+                    st.warning("Selecciona al menos un formato (XML o PDF) o activa el modo rápido.")
                     st.stop()
                 anio_val = int(anio_recibidos)
                 mes_val = int(mes_recibidos)
@@ -4902,6 +4964,7 @@ with tab1:
                 "estado_emitidos": estado_emitidos_val,
                 "establecimiento": establecimiento_val,
                 "punto_emision": punto_emision_val,
+                "modo_rapido": modo_rapido_val,
             }
             checkpoint_payload = build_checkpoint_payload(st.session_state.get("user_email"), params)
             _start_download_process(params, resume_download=False, checkpoint_payload=checkpoint_payload)
@@ -5069,6 +5132,35 @@ with tab1:
                                 file_name=Path(reporte_xml_anual).name,
                                 use_container_width=True,
                             )
+            elif resultado.get("modo_rapido") or params.get("modo_rapido"):
+                tipo_visible = resultado.get("tipo_visible", params.get("tipo"))
+                n_registros = resultado.get("n_registros", 0)
+                st.success(
+                    f" Reporte rápido generado ({tipo_visible}): {n_registros} registro(s)."
+                )
+                st.caption(f"Archivos organizados en: `{carpeta_tipo}`")
+                # Un unico boton: el reporte del alcance que se consulto
+                # (anual > rango > mes/dia). Los tres nunca coexisten.
+                for clave, etiqueta in (
+                    ("reporte_txt_anual", " Descargar reporte anual (Excel)"),
+                    ("reporte_txt_rango", " Descargar reporte del rango (Excel)"),
+                    ("reporte_txt", " Descargar reporte (Excel)"),
+                ):
+                    ruta_reporte = resultado.get(clave)
+                    if ruta_reporte and Path(ruta_reporte).exists():
+                        with open(ruta_reporte, "rb") as f:
+                            st.download_button(
+                                etiqueta,
+                                f,
+                                file_name=Path(ruta_reporte).name,
+                                use_container_width=True,
+                            )
+                        break
+                else:
+                    st.warning(
+                        "No se pudo generar el reporte: el portal no entregó el archivo "
+                        "'Descargar reporte'. Reintenta o usa la descarga con PDF/XML."
+                    )
             else:
                 n_xml = resultado.get("n_xml", 0)
                 n_pdf = resultado.get("n_pdf", 0)
@@ -5851,6 +5943,9 @@ with tab2:
                 "reporte_pdf",
                 "reporte_pdf_anual",
                 "reporte_xml_anual",
+                "reporte_txt",
+                "reporte_txt_rango",
+                "reporte_txt_anual",
                 "reportes_xml",
                 "reportes_pdf",
                 "xml_dir",
