@@ -5682,6 +5682,203 @@ with tab2:
         elif isinstance(_nc_result, dict) and not _nc_result.get("ok"):
             st.error(_nc_result.get("message", "No se pudo generar el reporte."))
 
+    # =====================================================================
+    # MODULO AISLADO: Cruce de Retenciones emitidas vs Facturas recibidas.
+    # A diferencia del card anterior NO pide credenciales: trabaja solo con
+    # archivos ya descargados. La factura se ubica por RUC del proveedor +
+    # numero, datos que el propio comprobante de retencion trae.
+    # =====================================================================
+    with _group_card(
+        3,
+        "Reporte Retenciones vs Facturas",
+        "Cruce local, sin conectarse al SRI",
+    ):
+        st.markdown(
+            "Genera un Excel que cruza cada **Comprobante de Retención "
+            "emitido** con la **Factura recibida** que le sirve de sustento.\n\n"
+            "El comprobante de retención ya trae el RUC del proveedor y el "
+            "número de la factura, así que el cruce se hace con eso — no hace "
+            "falta consultar el portal ni reconstruir claves de acceso."
+        )
+
+        if "ret_vs_fact_carpeta_input" not in st.session_state:
+            st.session_state["ret_vs_fact_carpeta_input"] = st.session_state.get(
+                "download_base_dir", str(DESC_DIR)
+            )
+        if "_ret_vs_fact_carpeta_pending" in st.session_state:
+            _pending = st.session_state.pop("_ret_vs_fact_carpeta_pending")
+            st.session_state["ret_vs_fact_carpeta_input"] = _pending
+
+        st.text_input(
+            "Carpeta con Comprobantes de Retención ya descargados",
+            key="ret_vs_fact_carpeta_input",
+            help=(
+                "Acepta PDF o XML. Puede ser el mes específico o cualquier "
+                "nivel superior; se explora recursivamente. Si la carpeta "
+                "cuelga de la carpeta del RUC, las facturas recibidas se "
+                "ubican solas."
+            ),
+        )
+        if st.button(
+            "Seleccionar carpeta de Retenciones",
+            key="btn_ret_vs_fact_select_dir",
+        ):
+            _sel, _err = _select_directory_dialog(
+                st.session_state.get("ret_vs_fact_carpeta_input")
+            )
+            if _sel:
+                st.session_state["_ret_vs_fact_carpeta_pending"] = _sel
+                st.rerun()
+            elif _err:
+                st.warning(_err)
+
+        _ret_fact_dir = st.text_input(
+            "Carpeta con Facturas recibidas (opcional)",
+            key="ret_vs_fact_facturas_input",
+            help=(
+                "Déjala vacía para que el sistema busque solo en los meses que "
+                "indiquen las propias retenciones. Acepta XML de facturas o el "
+                "Excel que genera el modo rápido."
+            ),
+        )
+
+        _ret_auto = st.checkbox(
+            "Buscar las facturas en el portal del SRI automáticamente",
+            key="ret_vs_fact_auto",
+            help=(
+                "Lee las retenciones, deduce de qué meses son las facturas y "
+                "consulta el listado de Recibidos de esos meses. Una consulta "
+                "por mes, no por factura."
+            ),
+        )
+        if _ret_auto:
+            _c1, _c2 = st.columns([1, 1])
+            with _c1:
+                st.text_input(
+                    "RUC del agente de retención",
+                    key="ret_vs_fact_ruc",
+                    placeholder="Ejemplo: 1790602885001",
+                )
+            with _c2:
+                st.text_input(
+                    "Clave del SRI",
+                    type="password",
+                    key="ret_vs_fact_clave",
+                    placeholder="********",
+                )
+            st.caption(
+                "Debe ser el RUC que **emitió** las retenciones: las facturas "
+                "sustento son sus comprobantes recibidos."
+            )
+
+        st.info(
+            "ℹ️ El reporte calcula cuatro cosas: **neto a pagar** "
+            "(`Total factura − Total retenido`), si la retención se calculó "
+            "sobre la **base correcta**, si `base × porcentaje` da el **valor "
+            "retenido** declarado, y el **% efectivo**. La columna "
+            "`Verificacion` resume cada fila como `OK` o `REVISAR`.\n\n"
+            "Para que las bases se puedan verificar, las facturas recibidas "
+            "deben estar descargadas **en XML**: el listado del portal solo "
+            "trae el importe total, sin el IVA desglosado."
+        )
+
+        if st.button(
+            "Generar reporte Retenciones vs Facturas",
+            key="btn_ret_vs_fact_run",
+            use_container_width=True,
+        ):
+            _ret_clean = str(
+                st.session_state.get("ret_vs_fact_carpeta_input") or ""
+            ).strip()
+            _ret_ruc_val = str(st.session_state.get("ret_vs_fact_ruc") or "").strip()
+            _ret_clave_val = str(st.session_state.get("ret_vs_fact_clave") or "").strip()
+            if not _ret_clean or not Path(_ret_clean).expanduser().is_dir():
+                st.error(
+                    "La carpeta indicada no existe. Selecciona una ruta válida "
+                    "con Comprobantes de Retención descargados."
+                )
+            elif _ret_auto and not (_ret_ruc_val and _ret_clave_val):
+                st.error(
+                    "Para buscar en el portal necesitas el RUC y la clave del "
+                    "SRI, o desmarca la búsqueda automática."
+                )
+            else:
+                _ret_out_dir = Path(_ret_clean).expanduser()
+                _ret_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                _ret_excel = _ret_out_dir / f"Retenciones_vs_Facturas_{_ret_ts}.xlsx"
+
+                from robot.retencion_vs_factura import generar_reporte_retenciones
+
+                _ret_msgs: list[str] = []
+                _ret_facturas = [
+                    p for p in [str(_ret_fact_dir or "").strip()] if p
+                ]
+
+                with st.status(
+                    "Procesando Retenciones vs Facturas...", expanded=True
+                ) as _ret_status:
+                    try:
+                        _resultado_ret = generar_reporte_retenciones(
+                            carpeta_retenciones=_ret_clean,
+                            carpetas_facturas=_ret_facturas or None,
+                            salida_excel=_ret_excel,
+                            ruc=_ret_ruc_val if _ret_auto else None,
+                            clave=_ret_clave_val if _ret_auto else None,
+                            destino_descargas=(
+                                st.session_state.get("download_base_dir")
+                                or str(DESC_DIR)
+                            ),
+                            progress=lambda m: (
+                                _ret_msgs.append(m),
+                                _ret_status.update(label=m),
+                            ),
+                        )
+                        for _m in _ret_msgs:
+                            st.write(_m)
+                        _ret_status.update(
+                            label=_resultado_ret.get("message", "Listo."),
+                            state="complete" if _resultado_ret.get("ok") else "error",
+                        )
+                        st.session_state["ret_vs_fact_result"] = _resultado_ret
+                    except Exception as exc:
+                        _ret_status.update(
+                            label=f"Error inesperado: {exc}", state="error"
+                        )
+                        st.session_state["ret_vs_fact_result"] = {
+                            "ok": False,
+                            "message": str(exc),
+                            "excel_path": "",
+                        }
+
+        _ret_result = st.session_state.get("ret_vs_fact_result")
+        if isinstance(_ret_result, dict) and _ret_result.get("ok"):
+            st.success(
+                f"✅ {_ret_result.get('total_retenciones', 0)} retención(es), "
+                f"{_ret_result.get('total_documentos', 0)} documento(s) sustento — "
+                f"con factura: {_ret_result.get('con_factura', 0)}, "
+                f"sin encontrar: {_ret_result.get('sin_factura', 0)}, "
+                f"sustento que no es factura: {_ret_result.get('no_facturas', 0)}."
+            )
+            if _ret_result.get("sin_factura"):
+                st.warning(
+                    "Algunas facturas no aparecieron. Suele ser porque falta "
+                    "descargar el mes en que se emitieron — la columna "
+                    "'Fecha factura (segun retencion)' indica cuál."
+                )
+            _ret_path = Path(_ret_result.get("excel_path", ""))
+            if _ret_path.is_file():
+                with open(_ret_path, "rb") as _f:
+                    st.download_button(
+                        "⬇️ Descargar reporte Retenciones vs Facturas (Excel)",
+                        data=_f.read(),
+                        file_name=_ret_path.name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_download_ret_vs_fact",
+                        use_container_width=True,
+                    )
+        elif isinstance(_ret_result, dict) and not _ret_result.get("ok"):
+            st.error(_ret_result.get("message", "No se pudo generar el reporte."))
+
     st.markdown('<h3 class="historial-title">Historial de ejecuciones recientes</h3>', unsafe_allow_html=True)
     historial = obtener_historial(DEVICE_FINGERPRINT)
     historial_raw = historial.copy()
