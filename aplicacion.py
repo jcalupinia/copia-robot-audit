@@ -5772,14 +5772,11 @@ with tab2:
             )
 
         st.info(
-            "ℹ️ El reporte calcula cuatro cosas: **neto a pagar** "
-            "(`Total factura − Total retenido`), si la retención se calculó "
-            "sobre la **base correcta**, si `base × porcentaje` da el **valor "
-            "retenido** declarado, y el **% efectivo**. La columna "
-            "`Verificacion` resume cada fila como `OK` o `REVISAR`.\n\n"
-            "Para que las bases se puedan verificar, las facturas recibidas "
-            "deben estar descargadas **en XML**: el listado del portal solo "
-            "trae el importe total, sin el IVA desglosado."
+            "ℹ️ Cada fila lleva los datos de la retención junto a los de su "
+            "factura (clave de acceso, fecha, subtotal, IVA e importe total), "
+            "y cierra con **Días entre factura y retención**.\n\n"
+            "Los sustentos que no son facturas — documentos IFIS, notas de "
+            "venta — van a una hoja aparte, no se mezclan con el cruce."
         )
 
         if st.button(

@@ -48,7 +48,6 @@ import threading
 import unicodedata
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
@@ -804,131 +803,42 @@ def rutas_facturas_sugeridas(base_ruc: Path, fechas: Iterable[datetime]) -> list
 
 
 # =============================================================================
-# OPERACION MATEMATICA -- PENDIENTE DE DEFINIR
+# COLUMNA CALCULADA: DIAS ENTRE LA FACTURA Y LA RETENCION
 # =============================================================================
-# Este es el unico punto que falta. Todo el pipeline de arriba ya deja los
-# insumos crudos: por cada retencion y su factura se tienen base, porcentaje y
-# valor retenido de cada impuesto, y subtotal / importe total de la factura.
+# El reporte es descriptivo: pone los datos de la retencion y los de su factura
+# uno al lado del otro. Lo unico que se calcula son los dias transcurridos entre
+# la emision de la factura y la de la retencion.
 #
-# Cuando se confirme que operacion se hace y con que valores:
-#   1. Listar los nombres de las columnas nuevas en COLUMNAS_OPERACION.
-#   2. Devolverlas desde calcular_operacion().
-# No hace falta tocar nada mas: el Excel se arma con lo que devuelva.
+# La fecha de la factura sale del comprobante encontrado, que es la fuente
+# autorizada; si no se lo encontro, se cae a la que declara el RIDE de la
+# retencion en su documento sustento. Asi la columna se llena igual en las filas
+# sin factura, que es donde el dato suele importar mas.
 #
-# Recordatorio de que significa cada base, que no es obvio:
-#   - base del IVA   = el IVA de la factura (subtotal * 15%)
-#   - base de RENTA  = el subtotal de la factura
-#   - porcentaje     = la tasa de retencion, no el IVA
+# Para agregar mas columnas calculadas: sumar el nombre a COLUMNAS_OPERACION y
+# devolverlo desde calcular_operacion(). El Excel se arma con lo que devuelva.
 
 COLUMNAS_OPERACION: list[str] = [
-    "Total retenido",
-    "Neto a pagar",
-    "Dif. base IVA",
-    "Dif. base Renta",
-    "Dif. valor IVA",
-    "Dif. valor Renta",
-    "% efectivo retenido",
-    "Verificacion",
+    "Dias entre factura y retencion",
 ]
-
-# Un centavo de margen: el SRI declara con dos decimales y el recalculo puede
-# diferir en el ultimo por redondeo.
-TOLERANCIA = 0.011
-
-
-def _redondear(valor: Optional[float], decimales: int = 2) -> Optional[float]:
-    """Redondeo mitad-hacia-arriba, que es el que usa el SRI.
-
-    round() de Python usa redondeo bancario: 121.55 * 30% = 36.465 le da 36.46,
-    pero el comprobante declara 36.47. Sin esto la verificacion marcaria una
-    diferencia de un centavo en practicamente todas las filas.
-    """
-    if valor is None:
-        return None
-    cuantizador = Decimal(1).scaleb(-decimales)
-    return float(Decimal(str(valor)).quantize(cuantizador, rounding=ROUND_HALF_UP))
 
 
 def calcular_operacion(
     retencion: dict, documento: dict, factura: Optional[dict]
 ) -> dict:
-    """Devuelve {nombre_columna: valor} para agregar a la fila del reporte.
+    """Devuelve {nombre_columna: valor} para agregar al final de la fila.
 
-    Se calculan cuatro cosas, que responden a preguntas distintas:
-
-      A. Neto a pagar   -- cuanto se le queda debiendo al proveedor.
-      B. Dif. de bases  -- si la retencion se calculo sobre la base correcta
-                           (la de renta debe ser el subtotal de la factura; la
-                           de IVA, el IVA de la factura).
-      C. Dif. de valores-- si `base x porcentaje` da lo que se declaro retener.
-      D. % efectivo     -- cuanto represento la retencion sobre el total.
-
-    A, B y D necesitan la factura. C es interna al comprobante de retencion, asi
-    que se calcula SIEMPRE, incluso en las filas sin factura o cuyo sustento no
-    es una factura.
+    Los dias son `fecha de la retencion - fecha de la factura`, asi que un
+    valor positivo significa que la retencion se emitio despues de la factura,
+    que es lo normal. Un negativo indica que la retencion es anterior a la
+    factura que dice sustentar.
     """
-    iva = _linea_por_impuesto(documento, "iva") or {}
-    renta = _linea_por_impuesto(documento, "renta") or {}
-    lineas = documento.get("lineas", [])
-
-    total_retenido = _redondear(
-        sum(l.get("valor_retenido") or 0.0 for l in lineas)
+    fecha_retencion = _parse_fecha(retencion.get("fecha_emision"))
+    fecha_factura = _parse_fecha((factura or {}).get("fecha_emision")) or _parse_fecha(
+        documento.get("fecha_emision")
     )
-    salida: dict[str, object] = {c: "" for c in COLUMNAS_OPERACION}
-    salida["Total retenido"] = total_retenido
-    alertas: list[str] = []
-
-    # --- C: base x porcentaje == valor retenido (no necesita la factura) -----
-    for etiqueta, linea in (("IVA", iva), ("Renta", renta)):
-        base, pct, valor = linea.get("base"), linea.get("porcentaje"), linea.get("valor_retenido")
-        if base is None or pct is None or valor is None:
-            continue
-        esperado = _redondear(base * pct / 100.0)
-        diferencia = _redondear(valor - esperado)
-        salida[f"Dif. valor {etiqueta}"] = diferencia
-        if abs(diferencia) > TOLERANCIA:
-            alertas.append(
-                f"{etiqueta}: retuvo {valor} y {base} x {pct}% da {esperado}"
-            )
-
-    # --- A, B y D: necesitan la factura --------------------------------------
-    if factura:
-        subtotal = factura.get("total_sin_impuestos")
-        iva_factura = factura.get("iva_factura")
-        total_factura = factura.get("importe_total")
-
-        if renta.get("base") is not None and subtotal is not None:
-            diferencia = _redondear(renta["base"] - subtotal)
-            salida["Dif. base Renta"] = diferencia
-            if abs(diferencia) > TOLERANCIA:
-                alertas.append(
-                    f"base Renta {renta['base']} != subtotal factura {subtotal}"
-                )
-        if iva.get("base") is not None and iva_factura is not None:
-            diferencia = _redondear(iva["base"] - iva_factura)
-            salida["Dif. base IVA"] = diferencia
-            if abs(diferencia) > TOLERANCIA:
-                alertas.append(
-                    f"base IVA {iva['base']} != IVA factura {iva_factura}"
-                )
-
-        if total_factura is not None and total_retenido is not None:
-            salida["Neto a pagar"] = _redondear(total_factura - total_retenido)
-            if total_factura:
-                salida["% efectivo retenido"] = _redondear(
-                    total_retenido / total_factura * 100.0
-                )
-
-        if iva_factura is None and iva.get("base") is not None:
-            alertas.append("la factura no trae el IVA desglosado (indexada desde el listado, no del XML)")
-
-    if not factura:
-        salida["Verificacion"] = "Sin factura: solo se verifico base x porcentaje"
-    else:
-        salida["Verificacion"] = "; ".join(alertas) if alertas else "OK"
-    if alertas and factura:
-        salida["Verificacion"] = "REVISAR - " + salida["Verificacion"]
-    return salida
+    if not fecha_retencion or not fecha_factura:
+        return {"Dias entre factura y retencion": ""}
+    return {"Dias entre factura y retencion": (fecha_retencion - fecha_factura).days}
 
 
 # =============================================================================
