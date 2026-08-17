@@ -211,14 +211,47 @@ _ANCLAS_TABLA = [
 
 
 def _palabras_pdf(pdf_path: Path) -> list[tuple[float, float, float, float, str]]:
-    """Devuelve [(x0, y0, x1, y1, texto)] de la primera pagina."""
-    import fitz  # import perezoso: pesa y no siempre se usa
+    """Devuelve [(x0, y0, x1, y1, texto)] de la primera pagina.
 
-    with fitz.open(pdf_path) as doc:
-        if not doc.page_count:
-            return []
-        palabras = doc[0].get_text("words")
-    return [(w[0], w[1], w[2], w[3], w[4]) for w in palabras]
+    Usa pdfplumber, que es lo que ya usan pdf_extraction.py y downloader.py, y
+    cae a PyMuPDF si no estuviera. Las dos librerias figuran en requirements
+    pero PyMuPDF no siempre termina instalada en el entorno donde corre la app
+    -- y cuando falta, sin este fallback el reporte sale vacio con un unico
+    aviso de 'No module named fitz' por archivo.
+    """
+    errores = []
+
+    try:
+        import pdfplumber
+
+        with pdfplumber.open(str(pdf_path)) as doc:
+            if not doc.pages:
+                return []
+            palabras = doc.pages[0].extract_words()
+        # 'top'/'bottom' son la misma orientacion que el y0/y1 de PyMuPDF.
+        return [
+            (float(w["x0"]), float(w["top"]), float(w["x1"]), float(w["bottom"]), w["text"])
+            for w in palabras
+        ]
+    except ImportError as err:
+        errores.append(f"pdfplumber: {err}")
+    except Exception as err:
+        errores.append(f"pdfplumber: {err}")
+
+    try:
+        import fitz
+
+        with fitz.open(pdf_path) as doc:
+            if not doc.page_count:
+                return []
+            palabras = doc[0].get_text("words")
+        return [(w[0], w[1], w[2], w[3], w[4]) for w in palabras]
+    except Exception as err:
+        errores.append(f"PyMuPDF: {err}")
+
+    raise RuntimeError(
+        "No se pudo leer el PDF con ninguna libreria disponible. " + " | ".join(errores)
+    )
 
 
 def _centro_x(palabra) -> float:
