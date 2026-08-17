@@ -5763,10 +5763,9 @@ with tab2:
         )
         if _ret_sentido == "recibidas":
             st.caption(
-                "Las facturas se buscarán en **Emitidos**. Ojo: para ese módulo "
-                "el portal no ofrece listado rápido, así que la búsqueda "
-                "automática descarga el PDF de cada factura y demora bastante "
-                "más."
+                "Las facturas se buscarán en **Emitidos**. Ese módulo del portal "
+                "filtra por día, así que la búsqueda automática consulta día por "
+                "día y tarda más que en Recibidos."
             )
 
         if "ret_vs_fact_carpeta_input" not in st.session_state:

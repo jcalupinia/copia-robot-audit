@@ -854,25 +854,25 @@ def descargar_listados_facturas(
     formulario -N veces la exposicion al captcha- para obtener lo mismo que una
     sola consulta mensual devuelve de una.
 
-    En Recibidos usa el modo rapido: baja el TXT que publica el portal en vez
-    del PDF/XML de cada factura, y ese listado ya trae subtotal, IVA, importe
-    total y clave de acceso.
-
-    En Emitidos el modo rapido no aplica -`descargar_sri` lo restringe a
-    Recibidos- y el XML se sirve por el WS publico, que no responde comprobantes
-    de mas de ~30 dias. Se piden PDF, que si estan siempre: el flujo genera de
-    paso el Excel `emitidos_reporte_pdf_factura_*.xlsx`, que es de donde se leen
-    los datos. Es bastante mas lento que el modo rapido porque baja un archivo
-    por factura.
+    Siempre en modo rapido: baja el TXT que publica el portal en vez del PDF o
+    el XML de cada factura. Ese listado ya trae subtotal, IVA, importe total y
+    clave de acceso, que es todo lo que el cruce necesita.
 
     Un unico `descargar_sri` por anio, cubriendo de su mes menor al mayor, para
-    que sea una sola sesion y un solo login.
+    que sea una sola sesion y un solo login. Ojo: en Emitidos el portal filtra
+    por UN dia, asi que internamente consulta dia por dia; sigue siendo una
+    sola sesion, pero tarda mas que en Recibidos.
+
+    Las descargas van a `destino/<ruc>`, la misma convencion que usa el modulo
+    de Descarga de Comprobantes, para que despues se encuentren desde el flujo
+    local sin volver a bajarlas.
     """
     from robot.downloader import descargar_sri
 
     sentido = _normalizar_sentido(sentido)
     origen = _origen_facturas(sentido)
-    rapido = origen == "Recibidos"
+    ruc_limpio = re.sub(r"\D", "", str(ruc or ""))
+    destino_ruc = Path(destino) / ruc_limpio if ruc_limpio else Path(destino)
 
     def _emit(msg: str) -> None:
         if progress:
@@ -886,18 +886,17 @@ def descargar_listados_facturas(
     for anio, mes in sorted(set(periodos)):
         por_anio.setdefault(int(anio), []).append(int(mes))
 
-    if not rapido:
+    if origen == "Emitidos":
         _emit(
-            "Facturas emitidas: el portal no ofrece el listado rapido para "
-            "Emitidos, asi que se descarga el PDF de cada factura. Puede "
-            "demorar bastante segun el volumen del mes."
+            "Facturas emitidas: el portal filtra por dia, asi que consulta dia "
+            "por dia. Tarda mas que en Recibidos, pero no descarga comprobantes."
         )
 
     resultados = []
     for anio, meses in sorted(por_anio.items()):
         inicio, fin = min(meses), max(meses)
         pedidos = ", ".join(_MESES[m] for m in sorted(set(meses)))
-        etiqueta = "recibidas" if rapido else "emitidas"
+        etiqueta = "recibidas" if origen == "Recibidos" else "emitidas"
         if fin > inicio:
             _emit(f"Consultando facturas {etiqueta} {pedidos} de {anio} (rango {inicio}-{fin})...")
         else:
@@ -911,10 +910,10 @@ def descargar_listados_facturas(
                 mes_fin=fin if fin > inicio else None,
                 dia=0,
                 tipo="Factura",
-                formatos=[] if rapido else ["PDF"],
-                destino=Path(destino),
+                formatos=[],          # modo rapido: sin PDF ni XML
+                destino=destino_ruc,
                 origen=origen,
-                modo_rapido=rapido,
+                modo_rapido=True,
             )
         )
     return resultados
@@ -1189,6 +1188,11 @@ def generar_reporte_retenciones(
             carpeta_descarga = Path(
                 destino_descargas or (carpeta.parent / "_facturas_listado")
             ).expanduser()
+            meses_txt = ", ".join(f"{_MESES[m]} {a}" for a, m in periodos)
+            _emit(
+                f"Las retenciones apuntan a facturas de: {meses_txt}. "
+                f"Se consultara {origen_facturas} en el portal."
+            )
             try:
                 descargar_listados_facturas(
                     ruc=ruc,
@@ -1198,6 +1202,7 @@ def generar_reporte_retenciones(
                     sentido=sentido,
                     progress=progress,
                 )
+                # descargar_listados_facturas guarda bajo destino/<ruc>.
                 rutas.append(carpeta_descarga)
             except Exception as err:
                 logger.warning(f"Fallo la consulta al portal: {err}")
