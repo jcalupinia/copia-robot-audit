@@ -702,7 +702,9 @@ def _factura_desde_xml(xml_path: Path) -> Optional[dict]:
     }
 
 
-_ALIAS_RUC = {"ruc emisor", "ruc", "identificacion emisor", "ruc_emisor"}
+# Se comparan con _norm_col, que unifica espacios y guiones bajos: el TXT del
+# portal usa RUC_EMISOR y los reportes internos "RUC Emisor".
+_ALIAS_RUC = {"ruc emisor", "ruc", "identificacion emisor"}
 _ALIAS_SERIE = {"serie comprobante", "serie", "numero comprobante", "num comprobante"}
 _ALIAS_CLAVE = {"clave de acceso", "clave acceso", "claveacceso", "numero autorizacion"}
 _ALIAS_TOTAL = {"importe total", "valor total", "total", "importe"}
@@ -726,6 +728,17 @@ _ALIAS_PTO = {"punto de emision", "punto emision", "ptoemi", "pto emision"}
 _ALIAS_SEC = {"secuencial", "nro secuencial"}
 
 
+def _norm_col(texto: object) -> str:
+    """Normaliza un encabezado de columna tratando _ y - como espacios.
+
+    El TXT del portal titula sus columnas con guion bajo (`VALOR_SIN_IMPUESTOS`)
+    y los reportes internos con espacios (`Valor Sin Impuestos`). Sin unificar
+    los separadores, las columnas del listado no matchean ningun alias y el
+    cruce sale sin subtotal, IVA ni importe.
+    """
+    return re.sub(r"[\s_\-]+", " ", _norm(texto)).strip()
+
+
 def _factura_desde_excel(path: Path) -> list[dict]:
     """Lee el Excel del modo rapido (reporte TXT) de facturas recibidas."""
     try:
@@ -743,7 +756,7 @@ def _factura_desde_excel(path: Path) -> list[dict]:
             encabezado = next(filas)
         except StopIteration:
             continue
-        idx = {_norm(h): i for i, h in enumerate(encabezado) if h}
+        idx = {_norm_col(h): i for i, h in enumerate(encabezado) if h}
 
         def _col(alias: set[str]) -> Optional[int]:
             for nombre, i in idx.items():
