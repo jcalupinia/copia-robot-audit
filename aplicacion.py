@@ -4197,6 +4197,19 @@ def _on_formatos_recibidos() -> None:
         st.session_state["modo_rapido_recibidos"] = False
 
 
+def _on_modo_rapido_emitidos() -> None:
+    """Igual que en Recibidos, pero Emitidos usa dos checkboxes sueltos."""
+    if st.session_state.get("modo_rapido_emitidos"):
+        st.session_state["pdf_emitidos"] = False
+        st.session_state["xml_emitidos"] = False
+
+
+def _on_formatos_emitidos() -> None:
+    """Marcar PDF o XML desmarca el modo rápido."""
+    if st.session_state.get("pdf_emitidos") or st.session_state.get("xml_emitidos"):
+        st.session_state["modo_rapido_emitidos"] = False
+
+
 def _render_topbar(app_version: str) -> None:
     """Topbar sticky pegado arriba con brand a la izquierda, titulo al
     centro, version + theme toggle + profile popover a la derecha.
@@ -4759,21 +4772,46 @@ with tab1:
                     if solo_digitos != punto_emision_input:
                         st.session_state.punto_emision_input = solo_digitos
                         punto_emision_input = solo_digitos
+            # Mismo criterio que en Recibidos: la decision de "que quiero
+            # obtener" va antes que la de "en que formato", y es excluyente.
+            st.markdown("---")
+            modo_rapido_emitidos = st.checkbox(
+                "Modo rápido: solo reporte (sin descargar PDF ni XML)",
+                key="modo_rapido_emitidos",
+                on_change=_on_modo_rapido_emitidos,
+                help=(
+                    "Arma el reporte con el archivo TXT que el portal ofrece en "
+                    "'Descargar reporte'. En Emitidos el portal consulta día por día, "
+                    "así que hace una consulta por cada día del período — aun así "
+                    "evita bajar un archivo por comprobante."
+                ),
+            )
             descargar_pdf_emitidos = st.checkbox(
                 'Descargar PDFs individuales',
-                value=False,
+                key="pdf_emitidos",
+                on_change=_on_formatos_emitidos,
+                disabled=modo_rapido_emitidos,
                 help='Genera un PDF por cada comprobante emitido.',
             )
             descargar_xml_emitidos = st.checkbox(
                 'Descargar XMLs individuales',
-                value=False,
+                key="xml_emitidos",
+                on_change=_on_formatos_emitidos,
+                disabled=modo_rapido_emitidos,
                 help='Extrae el comprobante XML autorizado y lo organiza en la carpeta XML.',
             )
-            formatos = ["Excel"]
-            if descargar_pdf_emitidos:
-                formatos.append("PDF")
-            if descargar_xml_emitidos:
-                formatos.append("XML")
+            if modo_rapido_emitidos:
+                formatos = []
+                st.caption(
+                    "Se generará un Excel con los comprobantes del período elegido, "
+                    "consolidando el listado de cada día."
+                )
+            else:
+                formatos = ["Excel"]
+                if descargar_pdf_emitidos:
+                    formatos.append("PDF")
+                if descargar_xml_emitidos:
+                    formatos.append("XML")
 
     with _group_card(3, "Carpeta base", "Dónde se guardan las descargas"):
         current_dir = st.session_state.get("download_base_dir", str(DESC_DIR))
@@ -4840,7 +4878,11 @@ with tab1:
             mes_fin_val = None
             # El modo rapido solo existe en Recibidos; se lee de session_state
             # porque la variable local no se define cuando origen es Emitidos.
-            modo_rapido_val = bool(st.session_state.get("modo_rapido_recibidos")) and origen == "Recibidos"
+            modo_rapido_val = bool(
+                st.session_state.get("modo_rapido_recibidos")
+                if origen == "Recibidos"
+                else st.session_state.get("modo_rapido_emitidos")
+            )
             if origen == "Recibidos":
                 formatos_final = [] if modo_rapido_val else formatos
                 if not formatos_final and not modo_rapido_val:
@@ -5049,7 +5091,9 @@ with tab1:
                     st.warning(f"Verificación de descarga: {mensaje_verificacion}")
             if estado in {"sin_descargas", "sin_resultados"}:
                 st.warning(" No se encontraron comprobantes para el período seleccionado.")
-            elif params.get("origen") == "Emitidos":
+            elif params.get("origen") == "Emitidos" and not (
+                resultado.get("modo_rapido") or params.get("modo_rapido")
+            ):
                 n_regs = resultado.get("n_registros", 0)
                 st.success(f' Reporte de emitidos generado con {n_regs} registros.')
                 if "PDF" in (params.get("formatos") or []):

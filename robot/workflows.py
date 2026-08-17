@@ -56,6 +56,7 @@ from robot.txt_report import (
     construir_reporte_txt,
     descargar_txt_listado,
     parsear_txts,
+    recolectar_txt_paginado,
 )
 from robot.comprobante_types import (
     _coincide_tipo_documental,
@@ -1256,51 +1257,13 @@ def _flujo_recibidos(
         fecha_slug = f"{anio:04d}{mes:02d}"
         if dia_dir != "Todos":
             fecha_slug = f"{fecha_slug}{dia_dir}"
-        txt_paths = []
-        registros_vistos = 0
-        pagina = 1
-        while True:
-            _check_cancel("recibidos_txt_pagina")
-            try:
-                filas_pagina = tabla_datos.locator("tr").count()
-            except Exception:
-                filas_pagina = 0
-            registros_vistos += filas_pagina
-
-            nombre_txt = f"recibidos_{tipo_slug}_{fecha_slug}_pag{pagina:03d}.txt"
-            descargado = descargar_txt_listado(page, txt_dir, nombre_txt)
-            if descargado:
-                txt_paths.append(descargado)
-            logger.info(
-                f"[modo rapido] pag {pagina}: {filas_pagina} fila(s), "
-                f"TXT {'OK' if descargado else 'FALLO'}"
-            )
-
-            # Si el TXT de la primera hoja ya trae mas filas que las visibles,
-            # el portal exporta el listado completo y paginar no aporta nada.
-            if pagina == 1 and descargado and filas_pagina > 0:
-                try:
-                    _, filas_txt = parsear_txts([descargado])
-                except Exception:
-                    filas_txt = []
-                if len(filas_txt) > filas_pagina:
-                    logger.info(
-                        f"[modo rapido] el TXT trae {len(filas_txt)} fila(s) frente a "
-                        f"{filas_pagina} visibles: el portal exporta todo el listado, "
-                        f"no se pagina."
-                    )
-                    break
-
-            boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
-            if not boton_siguiente.count():
-                break
-            boton_siguiente.first.click()
-            try:
-                page.wait_for_load_state("networkidle", timeout=1000)
-            except Exception:
-                pass
-            time.sleep(0.2)
-            pagina += 1
+        txt_paths, registros_vistos = recolectar_txt_paginado(
+            page,
+            txt_dir,
+            f"recibidos_{tipo_slug}_{fecha_slug}",
+            tabla=tabla_datos,
+            check_cancel=lambda: _check_cancel("recibidos_txt_pagina"),
+        )
 
         reporte_txt_path = None
         n_filas_txt = 0
@@ -1816,6 +1779,7 @@ def _flujo_emitidos(
     resume_row_index: int = 0,
     current_month: Optional[int] = None,
     current_day: Optional[int] = None,
+    modo_rapido: bool = False,
 ):
     _check_cancel("inicio_emitidos")
     es_retencion = False
@@ -2017,6 +1981,65 @@ def _flujo_emitidos(
                 tabla_emitidos.wait_for(state="visible", timeout=1000)
             except Exception:
                 pass
+
+    if modo_rapido:
+        # A diferencia de Recibidos, Emitidos filtra por UN dia, asi que este
+        # flujo corre una vez por fecha y cada corrida deja su propio TXT. La
+        # consolidacion del mes la hace downloader.py juntando todos.
+        txt_dir = carpeta_tipo / "TXT"
+        prefijo = f"emitidos_{tipo_slug}_{fecha_token_doc}"
+        txt_paths, registros_vistos = recolectar_txt_paginado(
+            page,
+            txt_dir,
+            prefijo,
+            tabla=tabla_emitidos,
+            check_cancel=lambda: _check_cancel("emitidos_txt_pagina"),
+        )
+
+        reporte_txt_path = None
+        n_filas_txt = 0
+        if txt_paths:
+            destino_txt = txt_dir / f"{prefijo}.xlsx"
+            try:
+                reporte_txt_path, n_filas_txt = construir_reporte_txt(txt_paths, destino_txt)
+            except Exception as err:
+                logger.warning(f"[modo rapido] no se pudo construir el reporte: {err}")
+            n_registros = n_filas_txt
+            completo = bool(reporte_txt_path) or n_filas_txt == 0
+            mensaje = (
+                f"Modo rapido: {n_registros} registro(s) desde {len(txt_paths)} hoja(s) TXT."
+                if completo
+                else "Modo rapido: se bajo el TXT pero no se pudo escribir el Excel."
+            )
+        else:
+            logger.warning("[modo rapido] no se descargo ningun TXT del portal.")
+            n_registros = registros_vistos
+            completo = False
+            mensaje = "Modo rapido: el portal no entrego el archivo 'Descargar reporte'."
+
+        resultado = {
+            "estado": "ok" if n_registros else "sin_resultados",
+            "modo_rapido": True,
+            "n_xml": 0,
+            "n_pdf": 0,
+            "n_registros": n_registros,
+            "carpeta_tipo": str(carpeta_tipo),
+            "carpeta_estado": str(carpeta_estado),
+            "tipo_slug": tipo_slug,
+            "tipo_visible": tipo_visible,
+            "fecha_filtro": fecha_emision,
+            "estado_autorizacion": estado_visible,
+            "txt_dir": str(txt_dir),
+            "paginas_txt": len(txt_paths),
+            "descarga_completa": completo,
+            "mensaje_verificacion": mensaje,
+        }
+        if reporte_txt_path:
+            resultado["reporte_txt"] = str(reporte_txt_path)
+        if txt_paths:
+            resultado["txt"] = str(txt_paths[0])
+            resultado["txt_paths"] = [str(p) for p in txt_paths]
+        return resultado
 
     data = []
     if not es_rechazado:

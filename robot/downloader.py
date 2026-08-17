@@ -1101,7 +1101,7 @@ def descargar_sri(
     _check_cancel("inicio_descarga")
     # Modo rapido (solo Recibidos): arma el reporte con el TXT que publica el
     # portal en vez de descargar el PDF/XML de cada comprobante.
-    modo_rapido = bool(modo_rapido) and origen == "Recibidos"
+    modo_rapido = bool(modo_rapido)
     formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
     hoy = datetime.now().date()
     aviso_recorte = None
@@ -1651,6 +1651,7 @@ def descargar_sri(
                 total_regs = total_xml = total_pdf = 0
                 detalle_dias = []
                 resultados_verificacion = []
+                txt_paths_mes = []
                 formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
                 descargar_pdf_mes = "PDF" in formatos_norm
                 reportes_dia = []
@@ -1701,6 +1702,7 @@ def descargar_sri(
                         resume_row_index=_row_param,
                         current_month=int(mes_actual),
                         current_day=int(dia_iter),
+                        modo_rapido=modo_rapido,
                     )
                     detalle_dias.append(
                         {
@@ -1712,6 +1714,8 @@ def descargar_sri(
                     total_regs += resultado_dia.get("n_registros", 0)
                     total_xml += resultado_dia.get("n_xml", 0)
                     total_pdf += resultado_dia.get("n_pdf", 0)
+                    if modo_rapido:
+                        txt_paths_mes.extend(resultado_dia.get("txt_paths") or [])
                     resultados_verificacion.append(resultado_dia)
                     resultado_mes = resultado_dia
                     reporte_xml_dia = resultado_dia.get("reporte_xml")
@@ -1765,6 +1769,42 @@ def descargar_sri(
                     anio_dir = f"{anio:04d}"
                     mes_dir = _mes_a_texto(mes_actual)
                     carpeta_mes = destino_emitidos / estado_slug / tipo_dir_nombre / anio_dir / mes_dir
+
+                    if modo_rapido:
+                        # Emitidos consulta dia por dia, asi que cada dia dejo su
+                        # propio TXT. Aca se juntan todos en un unico Excel del
+                        # mes; construir_reporte_txt deduplica por clave.
+                        resultado_mes["txt_paths"] = list(txt_paths_mes)
+                        if txt_paths_mes:
+                            destino_txt_mes = (
+                                carpeta_mes / "TXT"
+                                / f"emitidos_reporte_txt_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
+                            )
+                            try:
+                                reporte_txt_mes, n_filas_mes = construir_reporte_txt(
+                                    txt_paths_mes, destino_txt_mes
+                                )
+                            except Exception as err:
+                                logger.warning(
+                                    f"No se pudo consolidar el reporte TXT mensual: {err}"
+                                )
+                                reporte_txt_mes, n_filas_mes = None, 0
+                            if reporte_txt_mes:
+                                resultado_mes["reporte_txt"] = str(reporte_txt_mes)
+                                resultado_mes["n_registros"] = n_filas_mes
+                        # _merge_download_verification suma PDF/XML, que en modo
+                        # rapido no existen: su mensaje no aplica.
+                        resultado_mes["descarga_completa"] = bool(
+                            resultado_mes.get("reporte_txt")
+                        ) or not txt_paths_mes
+                        resultado_mes["mensaje_verificacion"] = (
+                            f"Modo rapido: {resultado_mes.get('n_registros', 0)} registro(s) "
+                            f"desde {len(txt_paths_mes)} hoja(s) TXT."
+                            if txt_paths_mes
+                            else "Modo rapido: el portal no entrego el archivo 'Descargar reporte'."
+                        )
+                        return resultado_mes
+
                     sufijos_dia = [f"{anio:04d}{mes_actual:02d}{int(d):02d}" for d in dias_consultar]
                     reportes_xml_dia = _collect_existing_reports(
                         carpeta_mes / "XML",
@@ -1872,6 +1912,7 @@ def descargar_sri(
                 detalle_meses = []
                 total_regs = total_xml = total_pdf = 0
                 resultados_verificacion = []
+                txt_paths_rango = []
                 mes_inicio = int(resume_month if resume_download else mes)
                 mes_fin_val = int(mes_fin_val)
                 resultado_mes = None
@@ -1889,6 +1930,8 @@ def descargar_sri(
                     total_xml += resultado_mes.get("n_xml", 0)
                     total_pdf += resultado_mes.get("n_pdf", 0)
                     resultados_verificacion.append(resultado_mes)
+                    if modo_rapido:
+                        txt_paths_rango.extend(resultado_mes.get("txt_paths") or [])
                     if resultado_mes.get("reporte_xml"):
                         reportes_xml.append(resultado_mes["reporte_xml"])
                     if resultado_mes.get("reporte_pdf"):
@@ -1928,6 +1971,45 @@ def descargar_sri(
                     "tipo_slug",
                     _slug_tipo(tipo_visible or tipo),
                 )
+
+                if modo_rapido:
+                    # Un solo Excel para todo el rango, juntando los TXT de
+                    # todos los dias de todos los meses.
+                    resultado["txt_paths"] = list(txt_paths_rango)
+                    # El reporte del ultimo mes no representa el rango.
+                    resultado.pop("reporte_txt", None)
+                    if txt_paths_rango:
+                        base_rango = destino_emitidos / estado_slug / tipo_dir_nombre / f"{anio:04d}"
+                        anual = mes_inicio == 1 and mes_fin_val == 12
+                        sufijo = (
+                            f"{anio:04d}"
+                            if anual
+                            else f"{anio:04d}{mes_inicio:02d}_{anio:04d}{mes_fin_val:02d}"
+                        )
+                        destino_txt_rango = (
+                            base_rango / "TXT" / f"emitidos_reporte_txt_{tipo_slug}_{sufijo}.xlsx"
+                        )
+                        try:
+                            reporte_txt_rango, n_filas_rango = construir_reporte_txt(
+                                txt_paths_rango, destino_txt_rango
+                            )
+                        except Exception as err:
+                            logger.warning(f"No se pudo consolidar el reporte TXT del rango: {err}")
+                            reporte_txt_rango, n_filas_rango = None, 0
+                        if reporte_txt_rango:
+                            clave_reporte = "reporte_txt_anual" if anual else "reporte_txt_rango"
+                            resultado[clave_reporte] = str(reporte_txt_rango)
+                            resultado["n_registros"] = n_filas_rango
+                    resultado["descarga_completa"] = bool(
+                        resultado.get("reporte_txt_anual") or resultado.get("reporte_txt_rango")
+                    ) or not txt_paths_rango
+                    resultado["mensaje_verificacion"] = (
+                        f"Modo rapido: {resultado.get('n_registros', 0)} registro(s) "
+                        f"desde {len(txt_paths_rango)} hoja(s) TXT."
+                        if txt_paths_rango
+                        else "Modo rapido: el portal no entrego el archivo 'Descargar reporte'."
+                    )
+
                 if "PDF" in formatos_norm:
                     sufijos_mes = [f"{anio:04d}{m:02d}" for m in range(mes_inicio, mes_fin_val + 1)]
                     carpeta_rango_pdf = destino_emitidos / estado_slug / tipo_dir_nombre / f"{anio:04d}" / "PDF"

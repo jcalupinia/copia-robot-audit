@@ -41,8 +41,30 @@ from robot.file_utils import _detectar_delimitador, _es_clave
 logger = get_logger(__name__)
 
 
-# Enlace "Descargar reporte" en la pantalla de Comprobantes recibidos.
+# Enlace "Descargar reporte". En Recibidos su id es `frmPrincipal:lnkTxtlistado`;
+# en Emitidos el portal usa otro (o puede no ofrecerlo), asi que se prueban
+# varios selectores de mas a menos especifico y se registra cual funciono.
 TXT_LINK_SELECTOR = "a#frmPrincipal\\:lnkTxtlistado"
+TXT_LINK_SELECTORES = (
+    TXT_LINK_SELECTOR,
+    "a[id*='lnkTxt']",
+    "a[id*='Txtlistado']",
+    "a[title*='Descargar reporte' i]",
+    "a:has-text('Descargar reporte')",
+    "a[id*='lnkListado']",
+)
+
+
+def _ubicar_enlace_txt(page):
+    """Devuelve (locator, selector) del enlace de descarga, o (None, "")."""
+    for selector in TXT_LINK_SELECTORES:
+        try:
+            link = page.locator(selector)
+            if link.count():
+                return link, selector
+        except Exception:
+            continue
+    return None, ""
 
 # Alias de encabezado -> rol logico. Se comparan normalizados (sin acentos,
 # mayusculas, espacios colapsados). Solo sirven para formato y dedupe.
@@ -108,20 +130,89 @@ def _parsear_numero(texto: str):
         return None
 
 
+def recolectar_txt_paginado(
+    page,
+    destino_dir: Path,
+    prefijo: str,
+    tabla=None,
+    check_cancel=None,
+) -> tuple[list[Path], int]:
+    """Recorre las paginas del listado bajando el TXT de cada una.
+
+    `prefijo` nombra los archivos (`<prefijo>_pag001.txt`). `tabla` es el
+    locator del cuerpo de la tabla, solo para contar filas visibles y detectar
+    si el TXT exporta todo el listado. `check_cancel` se invoca en cada vuelta.
+
+    Devuelve (rutas de los TXT, filas vistas en pantalla).
+    """
+    import time
+
+    txt_paths: list[Path] = []
+    registros_vistos = 0
+    pagina = 1
+    while True:
+        if check_cancel:
+            check_cancel()
+        filas_pagina = 0
+        if tabla is not None:
+            try:
+                filas_pagina = tabla.locator("tr").count()
+            except Exception:
+                filas_pagina = 0
+        registros_vistos += filas_pagina
+
+        descargado = descargar_txt_listado(page, destino_dir, f"{prefijo}_pag{pagina:03d}.txt")
+        if descargado:
+            txt_paths.append(descargado)
+        logger.info(
+            f"[modo rapido] pag {pagina}: {filas_pagina} fila(s), "
+            f"TXT {'OK' if descargado else 'FALLO'}"
+        )
+
+        # Si el TXT de la primera hoja ya trae mas filas que las visibles, el
+        # portal exporta el listado completo y paginar no aporta nada.
+        if pagina == 1 and descargado and filas_pagina > 0:
+            try:
+                _, filas_txt = parsear_txts([descargado])
+            except Exception:
+                filas_txt = []
+            if len(filas_txt) > filas_pagina:
+                logger.info(
+                    f"[modo rapido] el TXT trae {len(filas_txt)} fila(s) frente a "
+                    f"{filas_pagina} visibles: el portal exporta todo el listado, "
+                    f"no se pagina."
+                )
+                break
+
+        boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
+        if not boton_siguiente.count():
+            break
+        boton_siguiente.first.click()
+        try:
+            page.wait_for_load_state("networkidle", timeout=1000)
+        except Exception:
+            pass
+        time.sleep(0.2)
+        pagina += 1
+
+    return txt_paths, registros_vistos
+
+
 def descargar_txt_listado(page, destino_dir: Path, nombre: str, timeout: int = 60000):
     """Hace clic en "Descargar reporte" y guarda el TXT como `destino_dir/nombre`.
 
     Devuelve el `Path` guardado, o None si el enlace no existe o la descarga
     falla (se registra en el log y el flujo continua con las demas paginas).
     """
-    link = page.locator(TXT_LINK_SELECTOR)
-    try:
-        if not link.count():
-            logger.warning("Modo rapido: no se encontro el enlace 'Descargar reporte'.")
-            return None
-    except Exception as err:
-        logger.warning(f"Modo rapido: no se pudo consultar el enlace 'Descargar reporte': {err}")
+    link, selector = _ubicar_enlace_txt(page)
+    if link is None:
+        logger.warning(
+            "Modo rapido: no se encontro el enlace 'Descargar reporte' con ninguno "
+            f"de los selectores conocidos ({len(TXT_LINK_SELECTORES)} probados)."
+        )
         return None
+    if selector != TXT_LINK_SELECTOR:
+        logger.info(f"Modo rapido: enlace 'Descargar reporte' hallado con {selector!r}.")
 
     try:
         with page.expect_download(timeout=timeout) as descarga_info:
