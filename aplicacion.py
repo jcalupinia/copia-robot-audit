@@ -5694,12 +5694,36 @@ with tab2:
         "Cruce local, sin conectarse al SRI",
     ):
         st.markdown(
-            "Genera un Excel que cruza cada **Comprobante de Retención "
-            "emitido** con la **Factura recibida** que le sirve de sustento.\n\n"
-            "El comprobante de retención ya trae el RUC del proveedor y el "
-            "número de la factura, así que el cruce se hace con eso — no hace "
-            "falta consultar el portal ni reconstruir claves de acceso."
+            "Genera un Excel que cruza cada **Comprobante de Retención** con "
+            "la **Factura** que le sirve de sustento.\n\n"
+            "El comprobante ya trae el RUC de quien emitió la factura y su "
+            "número, así que el cruce se hace con eso — no hace falta "
+            "reconstruir claves de acceso."
         )
+
+        _ret_sentido_label = st.radio(
+            "¿Qué retenciones tienes?",
+            [
+                "Emitidas — yo retuve a mi proveedor",
+                "Recibidas — me retuvieron sobre una venta",
+            ],
+            key="ret_vs_fact_sentido",
+            help=(
+                "Define dónde se buscan las facturas. En las emitidas la "
+                "factura la emitió el proveedor, así que está en Recibidos. "
+                "En las recibidas la emitiste tú, así que está en Emitidos."
+            ),
+        )
+        _ret_sentido = (
+            "recibidas" if _ret_sentido_label.startswith("Recibidas") else "emitidas"
+        )
+        if _ret_sentido == "recibidas":
+            st.caption(
+                "Las facturas se buscarán en **Emitidos**. Ojo: para ese módulo "
+                "el portal no ofrece listado rápido, así que la búsqueda "
+                "automática descarga el PDF de cada factura y demora bastante "
+                "más."
+            )
 
         if "ret_vs_fact_carpeta_input" not in st.session_state:
             st.session_state["ret_vs_fact_carpeta_input"] = st.session_state.get(
@@ -5755,7 +5779,7 @@ with tab2:
             _c1, _c2 = st.columns([1, 1])
             with _c1:
                 st.text_input(
-                    "RUC del agente de retención",
+                    "RUC del contribuyente auditado",
                     key="ret_vs_fact_ruc",
                     placeholder="Ejemplo: 1790602885001",
                 )
@@ -5767,8 +5791,10 @@ with tab2:
                     placeholder="********",
                 )
             st.caption(
-                "Debe ser el RUC que **emitió** las retenciones: las facturas "
-                "sustento son sus comprobantes recibidos."
+                "Debe ser el RUC que **emitió** las retenciones"
+                if _ret_sentido == "emitidas"
+                else "Debe ser el RUC al que **le retuvieron**: es quien emitió "
+                "las facturas de sustento."
             )
 
         st.info(
@@ -5819,6 +5845,7 @@ with tab2:
                             carpeta_retenciones=_ret_clean,
                             carpetas_facturas=_ret_facturas or None,
                             salida_excel=_ret_excel,
+                            sentido=_ret_sentido,
                             ruc=_ret_ruc_val if _ret_auto else None,
                             clave=_ret_clave_val if _ret_auto else None,
                             destino_descargas=(

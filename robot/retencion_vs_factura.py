@@ -78,6 +78,26 @@ _MESES = {
     12: "Diciembre",
 }
 
+# Los dos sentidos del cruce. Cambian de donde salen las facturas, no como se
+# las encuentra: quien emitio la factura es en ambos casos el sujeto retenido.
+#
+#   emitidas  -- el contribuyente retuvo a su proveedor.
+#                La factura se la emitio el proveedor -> esta en Recibidos.
+#   recibidas -- a el le retuvieron sobre una venta.
+#                La factura la emitio el mismo         -> esta en Emitidos.
+SENTIDO_EMITIDAS = "emitidas"
+SENTIDO_RECIBIDAS = "recibidas"
+
+
+def _normalizar_sentido(sentido: object) -> str:
+    texto = _norm(sentido)
+    return SENTIDO_RECIBIDAS if texto.startswith("recib") else SENTIDO_EMITIDAS
+
+
+def _origen_facturas(sentido: str) -> str:
+    """Modulo del portal donde vive la factura sustento de cada sentido."""
+    return "Emitidos" if _normalizar_sentido(sentido) == SENTIDO_RECIBIDAS else "Recibidos"
+
 
 # =============================================================================
 # Helpers de texto y numeros
@@ -128,6 +148,21 @@ def _normalizar_numero_doc(valor: object) -> str:
     elif len(digitos) > 15:
         digitos = digitos[-15:]
     return f"{digitos[:3]}-{digitos[3:6]}-{digitos[6:]}"
+
+
+def _numero_desde_partes(estab: object, pto: object, secuencial: object) -> str:
+    """Arma 'EEE-PPP-SSSSSSSSS' a partir de las tres partes por separado.
+
+    No sirve concatenar y normalizar: los reportes del portal traen las partes
+    SIN ceros a la izquierda (estab=1, pto=901, sec=1509), asi que hay que
+    rellenar cada una a su largo antes de unirlas.
+    """
+    e = re.sub(r"\D", "", str(estab or "")).zfill(3)[-3:]
+    p = re.sub(r"\D", "", str(pto or "")).zfill(3)[-3:]
+    s = re.sub(r"\D", "", str(secuencial or "")).zfill(9)[-9:]
+    if not any((e.strip("0"), p.strip("0"), s.strip("0"))):
+        return ""
+    return f"{e}-{p}-{s}"
 
 
 def _clave_match(ruc: object, numero: object) -> str:
@@ -240,6 +275,50 @@ def _valor_junto_a(
                 encontrado = re.search(patron, valor)
                 return encontrado.group(0) if encontrado else valor
             return valor
+    return ""
+
+
+def _razon_social_emisor(palabras) -> str:
+    """Razon social de quien EMITE la retencion, del recuadro superior izquierdo.
+
+    No viene como etiqueta-valor sino suelta dentro del recuadro, asi que se
+    toma la primera linea de texto de esa caja: en los RIDE es siempre el nombre
+    del emisor, arriba del nombre comercial y de 'Direccion Matriz'.
+
+    Importa sobre todo en retenciones RECIBIDAS, donde el emisor es el cliente
+    que retuvo (en las emitidas es el propio contribuyente).
+    """
+    ancla = [w for w in palabras if _norm(w[4]).startswith("direccion")]
+    if not ancla:
+        return ""
+    y_tope = min(w[1] for w in ancla)
+
+    # El RIDE tiene dos cajas lado a lado: la del emisor a la izquierda y la de
+    # autorizacion a la derecha. El borde es donde arranca 'R.U.C.:'. Sin este
+    # corte se cuela el titulo 'COMPROBANTE DE RETENCION', que esta a la misma
+    # altura pero en la caja de al lado.
+    ruc_x = [w[0] for w in palabras if _norm(w[4]).startswith("r.u.c")]
+    x_limite = min(ruc_x) if ruc_x else max((w[2] for w in palabras), default=600) / 2
+
+    candidatas = [w for w in palabras if w[1] < y_tope and w[0] < x_limite]
+    for linea in _agrupar_lineas(candidatas):
+        texto = " ".join(w[4] for w in linea).strip()
+        plano = _norm(texto)
+        # Saltar el encabezado del documento y las etiquetas del recuadro.
+        if not texto or len(plano) < 4:
+            continue
+        if any(
+            t in plano
+            for t in (
+                "comprobante de retencion", "r.u.c", "ruc:", "numero de autorizacion",
+                "clave de acceso", "ambiente", "emision", "fecha y hora",
+                "no tiene logo", "produccion",
+            )
+        ):
+            continue
+        if re.fullmatch(r"[\d\s./:-]+", texto):  # fechas, claves, numeros sueltos
+            continue
+        return texto
     return ""
 
 
@@ -420,6 +499,7 @@ def extraer_retencion_pdf(pdf_path: Path) -> Optional[dict]:
         ),
         "fecha_emision": _valor_junto_a(palabras, "Fecha", r"\d{1,2}/\d{1,2}/\d{4}"),
         "ruc_emisor": _valor_junto_a(palabras, "R.U.C.:", r"\d{10,13}"),
+        "razon_social_emisor": _razon_social_emisor(palabras),
         "identificacion_sujeto": _valor_junto_a(
             palabras, "Identificacion", r"\d{10,13}"
         ),
@@ -495,11 +575,12 @@ def extraer_retencion_xml(xml_path: Path) -> Optional[dict]:
         "origen": "xml",
         "archivo": str(xml_path),
         "clave_acceso": _txt(tributaria, "claveAcceso"),
-        "numero": _normalizar_numero_doc(
-            _txt(tributaria, "estab") + _txt(tributaria, "ptoEmi") + _txt(tributaria, "secuencial")
+        "numero": _numero_desde_partes(
+            _txt(tributaria, "estab"), _txt(tributaria, "ptoEmi"), _txt(tributaria, "secuencial")
         ),
         "fecha_emision": _txt(info, "fechaEmision"),
         "ruc_emisor": _txt(tributaria, "ruc"),
+        "razon_social_emisor": _txt(tributaria, "razonSocial"),
         "identificacion_sujeto": _txt(info, "identificacionSujetoRetenido"),
         "razon_social_sujeto": _txt(info, "razonSocialSujetoRetenido"),
         "documentos": documentos,
@@ -555,8 +636,8 @@ def _factura_desde_xml(xml_path: Path) -> Optional[dict]:
         return (nodo.findtext(tag) or "").strip() if nodo is not None else ""
 
     ruc = _txt(tributaria, "ruc")
-    numero = _normalizar_numero_doc(
-        _txt(tributaria, "estab") + _txt(tributaria, "ptoEmi") + _txt(tributaria, "secuencial")
+    numero = _numero_desde_partes(
+        _txt(tributaria, "estab"), _txt(tributaria, "ptoEmi"), _txt(tributaria, "secuencial")
     )
 
     # El IVA desglosado solo esta en el XML: el listado del portal (y el TXT del
@@ -605,6 +686,11 @@ _ALIAS_IVA = {
     "iva", "valor iva", "monto iva", "total iva", "impuesto iva",
     "impuesto al valor agregado",
 }
+# El reporte de Emitidos publica la serie en tres columnas separadas y sin ceros
+# a la izquierda, en vez de una sola ya armada.
+_ALIAS_ESTAB = {"establecimiento", "estab"}
+_ALIAS_PTO = {"punto de emision", "punto emision", "ptoemi", "pto emision"}
+_ALIAS_SEC = {"secuencial", "nro secuencial"}
 
 
 def _factura_desde_excel(path: Path) -> list[dict]:
@@ -633,7 +719,11 @@ def _factura_desde_excel(path: Path) -> list[dict]:
             return None
 
         i_ruc, i_serie = _col(_ALIAS_RUC), _col(_ALIAS_SERIE)
-        if i_ruc is None or i_serie is None:
+        # El reporte de Emitidos no trae la serie armada sino establecimiento,
+        # punto de emision y secuencial en columnas aparte.
+        i_estab, i_pto, i_sec = _col(_ALIAS_ESTAB), _col(_ALIAS_PTO), _col(_ALIAS_SEC)
+        tiene_partes = None not in (i_estab, i_pto, i_sec)
+        if i_ruc is None or (i_serie is None and not tiene_partes):
             continue
         i_clave, i_total = _col(_ALIAS_CLAVE), _col(_ALIAS_TOTAL)
         i_fecha, i_razon = _col(_ALIAS_FECHA_EMI), _col(_ALIAS_RAZON)
@@ -647,20 +737,28 @@ def _factura_desde_excel(path: Path) -> list[dict]:
         def _num(fila, i):
             return _a_float(fila[i]) if i is not None and i < len(fila) else None
 
+        def _celda(fila, i):
+            return str(fila[i] or "").strip() if i is not None and i < len(fila) else ""
+
         for fila in filas:
             if not fila or i_ruc >= len(fila):
                 continue
-            ruc = str(fila[i_ruc] or "").strip()
-            serie = str(fila[i_serie] or "").strip()
-            if not ruc or not serie:
+            ruc = _celda(fila, i_ruc)
+            if i_serie is not None:
+                numero = _normalizar_numero_doc(_celda(fila, i_serie))
+            else:
+                numero = _numero_desde_partes(
+                    _celda(fila, i_estab), _celda(fila, i_pto), _celda(fila, i_sec)
+                )
+            if not ruc or not numero:
                 continue
             facturas.append(
                 {
                     "ruc_emisor": ruc,
-                    "razon_social_emisor": str(fila[i_razon] or "") if i_razon is not None else "",
-                    "numero": _normalizar_numero_doc(serie),
-                    "clave_acceso": str(fila[i_clave] or "") if i_clave is not None else "",
-                    "fecha_emision": str(fila[i_fecha] or "") if i_fecha is not None else "",
+                    "razon_social_emisor": _celda(fila, i_razon),
+                    "numero": numero,
+                    "clave_acceso": _celda(fila, i_clave),
+                    "fecha_emision": _celda(fila, i_fecha),
                     "total_sin_impuestos": _num(fila, i_subtotal),
                     "total_descuento": None,
                     "iva_factura": _num(fila, i_iva),
@@ -713,23 +811,35 @@ def descargar_listados_facturas(
     clave: str,
     destino: Path,
     periodos: Iterable[tuple[int, int]],
+    sentido: str = SENTIDO_EMITIDAS,
     progress: Optional[Callable[[str], None]] = None,
 ) -> list[dict]:
-    """Trae del portal el LISTADO de facturas recibidas de los meses indicados.
+    """Trae del portal el LISTADO de facturas de los meses indicados.
 
     Consulta por mes, no por factura. Aunque el form de Recibidos permita buscar
     por clave de acceso, hacerlo comprobante por comprobante serian N envios del
     formulario -N veces la exposicion al captcha- para obtener lo mismo que una
     sola consulta mensual devuelve de una.
 
-    Reusa `descargar_sri` en modo rapido: baja el TXT que publica el portal en
-    vez del PDF/XML de cada factura. El listado ya trae subtotal, IVA, importe
-    total y clave de acceso, que es todo lo que necesita el cruce.
+    En Recibidos usa el modo rapido: baja el TXT que publica el portal en vez
+    del PDF/XML de cada factura, y ese listado ya trae subtotal, IVA, importe
+    total y clave de acceso.
+
+    En Emitidos el modo rapido no aplica -`descargar_sri` lo restringe a
+    Recibidos- y el XML se sirve por el WS publico, que no responde comprobantes
+    de mas de ~30 dias. Se piden PDF, que si estan siempre: el flujo genera de
+    paso el Excel `emitidos_reporte_pdf_factura_*.xlsx`, que es de donde se leen
+    los datos. Es bastante mas lento que el modo rapido porque baja un archivo
+    por factura.
 
     Un unico `descargar_sri` por anio, cubriendo de su mes menor al mayor, para
     que sea una sola sesion y un solo login.
     """
     from robot.downloader import descargar_sri
+
+    sentido = _normalizar_sentido(sentido)
+    origen = _origen_facturas(sentido)
+    rapido = origen == "Recibidos"
 
     def _emit(msg: str) -> None:
         if progress:
@@ -743,14 +853,22 @@ def descargar_listados_facturas(
     for anio, mes in sorted(set(periodos)):
         por_anio.setdefault(int(anio), []).append(int(mes))
 
+    if not rapido:
+        _emit(
+            "Facturas emitidas: el portal no ofrece el listado rapido para "
+            "Emitidos, asi que se descarga el PDF de cada factura. Puede "
+            "demorar bastante segun el volumen del mes."
+        )
+
     resultados = []
     for anio, meses in sorted(por_anio.items()):
         inicio, fin = min(meses), max(meses)
         pedidos = ", ".join(_MESES[m] for m in sorted(set(meses)))
+        etiqueta = "recibidas" if rapido else "emitidas"
         if fin > inicio:
-            _emit(f"Consultando facturas recibidas {pedidos} de {anio} (rango {inicio}-{fin})...")
+            _emit(f"Consultando facturas {etiqueta} {pedidos} de {anio} (rango {inicio}-{fin})...")
         else:
-            _emit(f"Consultando facturas recibidas de {pedidos} {anio}...")
+            _emit(f"Consultando facturas {etiqueta} de {pedidos} {anio}...")
         resultados.append(
             descargar_sri(
                 ruc=ruc,
@@ -760,10 +878,10 @@ def descargar_listados_facturas(
                 mes_fin=fin if fin > inicio else None,
                 dia=0,
                 tipo="Factura",
-                formatos=[],          # modo rapido: sin PDF ni XML
+                formatos=[] if rapido else ["PDF"],
                 destino=Path(destino),
-                origen="Recibidos",
-                modo_rapido=True,
+                origen=origen,
+                modo_rapido=rapido,
             )
         )
     return resultados
@@ -778,24 +896,27 @@ def inferir_base_ruc(carpeta: Path) -> Optional[Path]:
     """
     carpeta = Path(carpeta).resolve()
     for candidata in [carpeta, *carpeta.parents]:
-        if (candidata / "Recibidos").is_dir():
+        if (candidata / "Recibidos").is_dir() or (candidata / "Emitidos").is_dir():
             return candidata
     return None
 
 
-def rutas_facturas_sugeridas(base_ruc: Path, fechas: Iterable[datetime]) -> list[Path]:
-    """Carpetas de facturas recibidas para los meses de las facturas sustento.
+def rutas_facturas_sugeridas(
+    base_ruc: Path, fechas: Iterable[datetime], sentido: str = SENTIDO_EMITIDAS
+) -> list[Path]:
+    """Carpetas de facturas para los meses de las facturas sustento.
 
     La fecha sale del propio RIDE, asi que se buscan solo los meses que hacen
     falta en vez de barrer un rango a ciegas.
     """
     base_ruc = Path(base_ruc)
+    origen = _origen_facturas(sentido)
     rutas: list[Path] = []
     vistas: set[Path] = set()
     for fecha in fechas:
         if not fecha:
             continue
-        carpeta = base_ruc / "Recibidos" / "Factura" / f"{fecha.year:04d}" / _MESES[fecha.month]
+        carpeta = base_ruc / origen / "Factura" / f"{fecha.year:04d}" / _MESES[fecha.month]
         if carpeta not in vistas:
             vistas.add(carpeta)
             rutas.append(carpeta)
@@ -860,13 +981,18 @@ def _construir_fila(
     iva = _linea_por_impuesto(documento, "iva") or {}
     renta = _linea_por_impuesto(documento, "renta") or {}
 
+    # Etiquetas neutrales: en retenciones emitidas el sujeto retenido es el
+    # proveedor y en las recibidas es el propio contribuyente, asi que se nombra
+    # por el rol que cada uno cumple en el comprobante y no por la relacion
+    # comercial. Quien emitio la factura es SIEMPRE el sujeto retenido.
     fila = {
         "RUC agente de retencion": retencion.get("ruc_emisor", ""),
+        "Razon social agente de retencion": retencion.get("razon_social_emisor", ""),
         "Numero retencion": retencion.get("numero", ""),
         "Fecha retencion": retencion.get("fecha_emision", ""),
         "Clave acceso retencion": retencion.get("clave_acceso", ""),
-        "RUC proveedor": retencion.get("identificacion_sujeto", ""),
-        "Razon social proveedor": retencion.get("razon_social_sujeto", ""),
+        "RUC sujeto retenido": retencion.get("identificacion_sujeto", ""),
+        "Razon social sujeto retenido": retencion.get("razon_social_sujeto", ""),
         "Tipo documento sustento": documento.get("tipo", ""),
         "Numero factura": documento.get("numero", ""),
         "Fecha factura (segun retencion)": documento.get("fecha_emision", ""),
@@ -945,6 +1071,7 @@ def generar_reporte_retenciones(
     ruc: Optional[str] = None,
     clave: Optional[str] = None,
     destino_descargas: Optional[str | Path] = None,
+    sentido: str = SENTIDO_EMITIDAS,
     cancel_event: Optional[threading.Event] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> dict:
@@ -981,11 +1108,19 @@ def generar_reporte_retenciones(
         "message": "",
     }
 
+    sentido = _normalizar_sentido(sentido)
+    origen_facturas = _origen_facturas(sentido)
+    resumen["sentido"] = sentido
+
     carpeta = Path(carpeta_retenciones).expanduser()
     if not carpeta.is_dir():
         resumen["message"] = f"La carpeta de retenciones no existe: {carpeta}"
         return resumen
 
+    _emit(
+        f"Retenciones {sentido}: las facturas de sustento se buscan en "
+        f"{origen_facturas}."
+    )
     _emit("Leyendo comprobantes de retencion...")
     retenciones = cargar_retenciones(carpeta)
     resumen["total_retenciones"] = len(retenciones)
@@ -1027,6 +1162,7 @@ def generar_reporte_retenciones(
                     clave=clave,
                     destino=carpeta_descarga,
                     periodos=periodos,
+                    sentido=sentido,
                     progress=progress,
                 )
                 rutas.append(carpeta_descarga)
@@ -1043,16 +1179,16 @@ def generar_reporte_retenciones(
     if raiz:
         if not base_ruc:
             _emit(f"Carpeta del RUC deducida: {raiz}")
-        rutas.extend(rutas_facturas_sugeridas(raiz, fechas_sustento))
+        rutas.extend(rutas_facturas_sugeridas(raiz, fechas_sustento, sentido))
     elif not rutas:
         _emit(
-            "No se ubico la carpeta de facturas recibidas. Indicala a mano o "
+            f"No se ubico la carpeta de facturas de {origen_facturas}. Indicala a mano o "
             "usa una carpeta de retenciones que cuelgue de la carpeta del RUC."
         )
     if rutas:
-        _emit(f"Indexando facturas recibidas en {len(rutas)} carpeta(s)...")
+        _emit(f"Indexando facturas de {origen_facturas} en {len(rutas)} carpeta(s)...")
     indice = construir_indice_facturas(rutas)
-    _emit(f"{len(indice)} factura(s) recibida(s) indexada(s).")
+    _emit(f"{len(indice)} factura(s) de {origen_facturas} indexada(s).")
 
     filas_cruce: list[dict] = []
     filas_otros: list[dict] = []
@@ -1098,7 +1234,7 @@ def generar_reporte_retenciones(
                         documento,
                         None,
                         "Factura no encontrada",
-                        "No aparece en las facturas recibidas indexadas. "
+                        f"No aparece en las facturas de {origen_facturas} indexadas. "
                         "Revisa que este descargado el mes "
                         f"{documento.get('fecha_emision') or 'de la factura'}.",
                     )
