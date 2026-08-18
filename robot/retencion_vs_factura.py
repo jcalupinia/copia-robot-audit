@@ -42,6 +42,7 @@
 
 from __future__ import annotations
 
+import calendar
 import logging
 import re
 import threading
@@ -885,7 +886,7 @@ def descargar_listados_facturas(
     ruc: str,
     clave: str,
     destino: Path,
-    periodos: Iterable[tuple[int, int]],
+    fechas: Iterable[Optional[datetime]],
     sentido: str = SENTIDO_EMITIDAS,
     progress: Optional[Callable[[str], None]] = None,
 ) -> list[dict]:
@@ -924,25 +925,39 @@ def descargar_listados_facturas(
                 pass
         logger.info(msg)
 
-    por_anio: dict[int, list[int]] = {}
-    for anio, mes in sorted(set(periodos)):
-        por_anio.setdefault(int(anio), []).append(int(mes))
-
-    if origen == "Emitidos":
-        _emit(
-            "Facturas emitidas: el portal filtra por dia, asi que consulta dia "
-            "por dia. Tarda mas que en Recibidos, pero no descarga comprobantes."
-        )
+    # anio -> mes -> dias exactos que hacen falta.
+    por_anio: dict[int, dict[int, set[int]]] = {}
+    for fecha in fechas:
+        if not fecha:
+            continue
+        por_anio.setdefault(fecha.year, {}).setdefault(fecha.month, set()).add(fecha.day)
 
     resultados = []
-    for anio, meses in sorted(por_anio.items()):
+    for anio, meses_dias in sorted(por_anio.items()):
+        meses = sorted(meses_dias)
         inicio, fin = min(meses), max(meses)
-        pedidos = ", ".join(_MESES[m] for m in sorted(set(meses)))
+        nombres = ", ".join(_MESES[m] for m in meses)
         etiqueta = "recibidas" if origen == "Recibidos" else "emitidas"
+
+        # Recibidos resuelve el mes entero en UNA consulta, asi que pedirle
+        # dias sueltos seria contraproducente. Emitidos filtra por un dia, y
+        # ahi conviene pedir solo las fechas que las retenciones nombran:
+        # normalmente son unas pocas y no los 30 dias del mes.
+        dias_arg = None
+        if origen == "Emitidos":
+            dias_arg = {m: sorted(d) for m, d in meses_dias.items()}
+            total_dias = sum(len(d) for d in dias_arg.values())
+            del_mes = sum(calendar.monthrange(anio, m)[1] for m in meses)
+            _emit(
+                f"Facturas emitidas: el portal filtra por dia. Se consultaran "
+                f"{total_dias} fecha(s) puntual(es) en vez de los {del_mes} dias "
+                f"de {nombres}."
+            )
+
         if fin > inicio:
-            _emit(f"Consultando facturas {etiqueta} {pedidos} de {anio} (rango {inicio}-{fin})...")
+            _emit(f"Consultando facturas {etiqueta} {nombres} de {anio} (rango {inicio}-{fin})...")
         else:
-            _emit(f"Consultando facturas {etiqueta} de {pedidos} {anio}...")
+            _emit(f"Consultando facturas {etiqueta} de {nombres} {anio}...")
         resultados.append(
             descargar_sri(
                 ruc=ruc,
@@ -961,6 +976,7 @@ def descargar_listados_facturas(
                 # comprobantes; ademas todo cae en una carpeta "Sin_Estado".
                 estado_emitidos="Autorizados" if origen == "Emitidos" else None,
                 modo_rapido=True,
+                dias_por_mes=dias_arg,
             )
         )
     return resultados
@@ -1294,7 +1310,7 @@ def generar_reporte_retenciones(
                     ruc=ruc,
                     clave=clave,
                     destino=carpeta_descarga,
-                    periodos=periodos,
+                    fechas=fechas_sustento,
                     sentido=sentido,
                     progress=progress,
                 )

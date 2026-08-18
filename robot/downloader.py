@@ -1097,6 +1097,7 @@ def descargar_sri(
     checkpoint_path: Optional[str] = None,
     resume_download: bool = False,
     modo_rapido: bool = False,
+    dias_por_mes: Optional[dict] = None,
 ):
     _check_cancel("inicio_descarga")
     # Modo rapido (solo Recibidos): arma el reporte con el TXT que publica el
@@ -1638,7 +1639,20 @@ def descargar_sri(
                     limite_dia = min(limite_dia, hoy.day)
                     if limite_dia < dias_en_mes:
                         aviso_recorte = f"Rango ajustado hasta el día actual ({hoy.day:02d}/{hoy.month:02d}/{hoy.year})."
-                if dia_actual in (0, None):
+                # Emitidos filtra por UN dia, asi que "todo el mes" son 30
+                # consultas. Cuando el caller ya sabe que dias le interesan
+                # -- p. ej. las fechas de las facturas que sustentan unas
+                # retenciones -- se consultan solo esos.
+                if dias_por_mes is not None:
+                    pedidos = dias_por_mes.get(mes_actual) or []
+                    dias_consultar = sorted(
+                        {int(d) for d in pedidos if 1 <= int(d) <= limite_dia}
+                    )
+                    if resume_download and mes_actual == resume_month and resume_day not in (0, None):
+                        dias_consultar = [d for d in dias_consultar if d >= int(resume_day)]
+                    if not dias_consultar:
+                        return {"estado": "sin_descargas", "n_registros": 0, "n_xml": 0, "n_pdf": 0}
+                elif dia_actual in (0, None):
                     dia_inicio = 1
                     if resume_download and mes_actual == resume_month and resume_day not in (0, None):
                         dia_inicio = max(1, min(int(resume_day), limite_dia))
