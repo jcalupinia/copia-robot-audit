@@ -5873,7 +5873,24 @@ with tab2:
                 _ret_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 _ret_excel = _ret_out_dir / f"Retenciones_vs_Facturas_{_ret_ts}.xlsx"
 
-                from robot.retencion_vs_factura import generar_reporte_retenciones
+                # Importacion perezosa: si el modulo quedo desactualizado en
+                # esta instalacion, se avisa donde mirar en vez de tumbar la
+                # pagina entera con un ImportError.
+                try:
+                    from robot.retencion_vs_factura import (
+                        generar_reporte_retenciones,
+                    )
+                except ImportError as _imp_err:
+                    import robot.retencion_vs_factura as _mod_ret
+
+                    st.error(
+                        "El módulo `robot/retencion_vs_factura.py` de esta "
+                        "instalación no tiene `generar_reporte_retenciones`. "
+                        "Suele pasar cuando el archivo quedó de una versión "
+                        f"anterior.\n\n**Archivo en uso:** `{_mod_ret.__file__}`"
+                        f"\n\n**Detalle:** {_imp_err}"
+                    )
+                    st.stop()
 
                 _ret_msgs: list[str] = []
                 _ret_facturas = [
