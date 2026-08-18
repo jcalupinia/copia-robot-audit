@@ -757,7 +757,7 @@ def _norm_col(texto: object) -> str:
     return re.sub(r"[\s_\-]+", " ", _norm(texto)).strip()
 
 
-def _factura_desde_excel(path: Path) -> list[dict]:
+def _factura_desde_excel(path: Path, ruc_emisor_default: str = "") -> list[dict]:
     """Lee el Excel del modo rapido (reporte TXT) de facturas recibidas."""
     try:
         from openpyxl import load_workbook
@@ -787,7 +787,16 @@ def _factura_desde_excel(path: Path) -> list[dict]:
         # punto de emision y secuencial en columnas aparte.
         i_estab, i_pto, i_sec = _col(_ALIAS_ESTAB), _col(_ALIAS_PTO), _col(_ALIAS_SEC)
         tiene_partes = None not in (i_estab, i_pto, i_sec)
-        if i_ruc is None or (i_serie is None and not tiene_partes):
+        if i_serie is None and not tiene_partes:
+            continue
+        # En el listado de Emitidos el emisor es el propio contribuyente, asi
+        # que esa columna puede no existir: la de RUC es la del receptor. Sin
+        # este respaldo no se indexaria ni una fila.
+        if i_ruc is None and not ruc_emisor_default:
+            logger.info(
+                f"{Path(path).name}: sin columna de RUC emisor y sin RUC de "
+                f"respaldo ({sorted(idx)}). Se omite la hoja."
+            )
             continue
         i_clave, i_total = _col(_ALIAS_CLAVE), _col(_ALIAS_TOTAL)
         i_fecha, i_razon = _col(_ALIAS_FECHA_EMI), _col(_ALIAS_RAZON)
@@ -805,9 +814,9 @@ def _factura_desde_excel(path: Path) -> list[dict]:
             return str(fila[i] or "").strip() if i is not None and i < len(fila) else ""
 
         for fila in filas:
-            if not fila or i_ruc >= len(fila):
+            if not fila:
                 continue
-            ruc = _celda(fila, i_ruc)
+            ruc = _celda(fila, i_ruc) or ruc_emisor_default
             if i_serie is not None:
                 numero = _normalizar_numero_doc(_celda(fila, i_serie))
             else:
@@ -835,7 +844,9 @@ def _factura_desde_excel(path: Path) -> list[dict]:
     return facturas
 
 
-def construir_indice_facturas(carpetas: Iterable[Path]) -> dict[str, dict]:
+def construir_indice_facturas(
+    carpetas: Iterable[Path], ruc_emisor_default: str = ""
+) -> dict[str, dict]:
     """Indexa las facturas recibidas por RUC del emisor + numero.
 
     Acepta XML sueltos y los Excel que produce el modo rapido. Si la misma
@@ -857,7 +868,7 @@ def construir_indice_facturas(carpetas: Iterable[Path]) -> dict[str, dict]:
                 if factura:
                     candidatos.append(factura)
             elif archivo.suffix.lower() == ".xlsx" and not archivo.name.startswith("~$"):
-                candidatos.extend(_factura_desde_excel(archivo))
+                candidatos.extend(_factura_desde_excel(archivo, ruc_emisor_default))
 
         for factura in candidatos:
             clave = _clave_match(factura["ruc_emisor"], factura["numero"])
@@ -944,6 +955,11 @@ def descargar_listados_facturas(
                 formatos=[],          # modo rapido: sin PDF ni XML
                 destino=destino_ruc,
                 origen=origen,
+                # El form de Emitidos exige elegir el estado de autorizacion.
+                # Sin pasarlo, _flujo_emitidos ni toca el combo (solo lo
+                # selecciona `if estado_visible`) y la consulta no devuelve los
+                # comprobantes; ademas todo cae en una carpeta "Sin_Estado".
+                estado_emitidos="Autorizados" if origen == "Emitidos" else None,
                 modo_rapido=True,
             )
         )
@@ -1305,7 +1321,30 @@ def generar_reporte_retenciones(
         )
     if rutas:
         _emit(f"Indexando facturas de {origen_facturas} en {len(rutas)} carpeta(s)...")
-    indice = construir_indice_facturas(rutas)
+    # En sentido "recibidas" las facturas las emitio el propio contribuyente, y
+    # el listado de Emitidos no trae columna de RUC emisor -- ahi la columna de
+    # identificacion es la del receptor. Se toma del sujeto retenido, que en ese
+    # sentido es siempre el mismo, y si no de las credenciales.
+    ruc_emisor_default = ""
+    if sentido == SENTIDO_RECIBIDAS:
+        sujetos = {
+            re.sub(r"\D", "", str(r.get("identificacion_sujeto") or ""))
+            for r in retenciones
+        }
+        sujetos.discard("")
+        if len(sujetos) == 1:
+            ruc_emisor_default = sujetos.pop()
+        elif ruc:
+            ruc_emisor_default = re.sub(r"\D", "", str(ruc))
+        if len(sujetos) > 1:
+            _emit(
+                f"Ojo: las retenciones nombran {len(sujetos)} sujetos retenidos "
+                "distintos. En retenciones recibidas se esperaria uno solo."
+            )
+        if ruc_emisor_default:
+            _emit(f"Emisor de las facturas (sujeto retenido): {ruc_emisor_default}")
+
+    indice = construir_indice_facturas(rutas, ruc_emisor_default)
     _emit(f"{len(indice)} factura(s) de {origen_facturas} indexada(s).")
 
     # Meses que el indice llego a cubrir. Sirve para distinguir dos situaciones
