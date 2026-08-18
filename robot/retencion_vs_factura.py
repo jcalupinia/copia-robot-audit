@@ -1038,6 +1038,36 @@ def _linea_por_impuesto(documento: dict, *nombres: str) -> Optional[dict]:
     return None
 
 
+def _observacion_no_encontrada(
+    retencion: dict, documento: dict, origen_facturas: str
+) -> str:
+    """Explica por que una factura pudo no aparecer, sin apuntar a una sola causa.
+
+    Decir solo "falta descargar el mes" manda a revisar lo unico que el usuario
+    ya reviso. Una factura sustento puede faltar del listado por tres motivos
+    distintos, y el que aplica cambia que hacer con la fila.
+    """
+    fecha = documento.get("fecha_emision") or "la fecha que declara la retencion"
+    identificacion = re.sub(r"\D", "", str(retencion.get("identificacion_sujeto") or ""))
+
+    causas = [
+        f"que su fecha real no sea {fecha}, que es la que declara la retencion",
+        "que este anulada",
+        "que no sea electronica: una factura preimpresa sustenta la retencion "
+        f"igual, pero nunca aparece en el listado de {origen_facturas}",
+    ]
+    if len(identificacion) == 10:
+        # Sin RUC de por medio suele tratarse de un emisor pequeno, donde la
+        # factura en papel es lo habitual.
+        causas[-1] += " (el sujeto retenido esta identificado con cedula, no con RUC)"
+
+    return (
+        f"No aparece en el listado de {origen_facturas}. Puede ser "
+        + "; ".join(causas)
+        + ". Buscala en el portal por el mes completo antes de darla por perdida."
+    )
+
+
 def _construir_fila(
     retencion: dict, documento: dict, factura: Optional[dict], estado: str, observacion: str
 ) -> dict:
@@ -1303,9 +1333,9 @@ def generar_reporte_retenciones(
                         documento,
                         None,
                         "Factura no encontrada",
-                        f"No aparece en las facturas de {origen_facturas} indexadas. "
-                        "Revisa que este descargado el mes "
-                        f"{documento.get('fecha_emision') or 'de la factura'}.",
+                        _observacion_no_encontrada(
+                            retencion, documento, origen_facturas
+                        ),
                     )
                 )
 
