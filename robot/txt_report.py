@@ -381,6 +381,10 @@ def guardar_reporte_txt_excel(columnas: list[str], filas: list[dict], path: Path
             celda.alignment = Alignment(vertical="center")
 
     ws.freeze_panes = "A2"
+    # La carpeta puede no existir: en el modo rapido nadie crea el subdirectorio
+    # TXT, porque no se descarga ningun archivo en el. Sin esto el guardado
+    # explota con FileNotFoundError y el reporte queda sin escribir.
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(path))
     return True
 

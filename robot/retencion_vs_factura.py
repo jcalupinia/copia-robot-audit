@@ -1345,7 +1345,7 @@ def generar_reporte_retenciones(
                 f"Se consultara {origen_facturas} en el portal."
             )
             try:
-                descargar_listados_facturas(
+                resultados_descarga = descargar_listados_facturas(
                     ruc=ruc,
                     clave=clave,
                     destino=carpeta_descarga,
@@ -1353,8 +1353,33 @@ def generar_reporte_retenciones(
                     sentido=sentido,
                     progress=progress,
                 )
-                # descargar_listados_facturas guarda bajo destino/<ruc>.
-                rutas.append(carpeta_descarga)
+                # Se usan las rutas EXACTAS que devolvio la descarga en vez de
+                # deducir carpetas: el arbol de Emitidos intercala el estado de
+                # autorizacion, asi que adivinarlo termina en un indice vacio.
+                generados = []
+                for resultado_descarga in resultados_descarga:
+                    if not isinstance(resultado_descarga, dict):
+                        continue
+                    for campo in (
+                        "reporte_txt",
+                        "reporte_txt_rango",
+                        "reporte_txt_anual",
+                    ):
+                        valor = resultado_descarga.get(campo)
+                        if valor:
+                            generados.append(Path(valor))
+                    generados.extend(
+                        Path(v) for v in (resultado_descarga.get("reportes_txt_meses") or [])
+                    )
+                if generados:
+                    _emit(f"El portal dejo {len(generados)} reporte(s) de facturas.")
+                    rutas.extend(generados)
+                else:
+                    _emit(
+                        "La consulta al portal no genero ningun reporte de "
+                        "facturas. Se buscara igual en disco."
+                    )
+                    rutas.append(carpeta_descarga)
             except Exception as err:
                 logger.warning(f"Fallo la consulta al portal: {err}")
                 _emit(

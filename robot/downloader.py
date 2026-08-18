@@ -242,7 +242,7 @@ from robot.workflows import (
 
 # Modo rapido (Recibidos): consolida en un unico Excel los TXT de
 # "Descargar reporte" que `_flujo_recibidos` baja hoja por hoja.
-from robot.txt_report import construir_reporte_txt
+from robot.txt_report import construir_reporte_txt, guardar_reporte_txt_excel
 
 # Definiciones de columnas Excel (Sub-fase 2c-i): listas, sets y mapeos que
 # describen los reportes generados. Re-exportadas porque aplicacion.py importa
@@ -1666,6 +1666,7 @@ def descargar_sri(
                 detalle_dias = []
                 resultados_verificacion = []
                 txt_paths_mes = []
+                filas_rapidas_mes = []
                 formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
                 descargar_pdf_mes = "PDF" in formatos_norm
                 reportes_dia = []
@@ -1729,7 +1730,7 @@ def descargar_sri(
                     total_xml += resultado_dia.get("n_xml", 0)
                     total_pdf += resultado_dia.get("n_pdf", 0)
                     if modo_rapido:
-                        txt_paths_mes.extend(resultado_dia.get("txt_paths") or [])
+                        filas_rapidas_mes.extend(resultado_dia.get("filas_rapidas") or [])
                     resultados_verificacion.append(resultado_dia)
                     resultado_mes = resultado_dia
                     reporte_xml_dia = resultado_dia.get("reporte_xml")
@@ -1785,37 +1786,44 @@ def descargar_sri(
                     carpeta_mes = destino_emitidos / estado_slug / tipo_dir_nombre / anio_dir / mes_dir
 
                     if modo_rapido:
-                        # Emitidos consulta dia por dia, asi que cada dia dejo su
-                        # propio TXT. Aca se juntan todos en un unico Excel del
-                        # mes; construir_reporte_txt deduplica por clave.
-                        resultado_mes["txt_paths"] = list(txt_paths_mes)
-                        if txt_paths_mes:
+                        # Emitidos consulta dia por dia y cada uno devuelve las
+                        # filas que leyo de la tabla. Aca se juntan todas en un
+                        # unico Excel del mes, deduplicando por clave de acceso.
+                        vistas_mes = set()
+                        filas_mes = []
+                        for fila_rapida in filas_rapidas_mes:
+                            huella = fila_rapida.get("CLAVE_ACCESO") or "|".join(
+                                str(v) for v in fila_rapida.values()
+                            )
+                            if huella in vistas_mes:
+                                continue
+                            vistas_mes.add(huella)
+                            filas_mes.append(fila_rapida)
+
+                        resultado_mes["n_registros"] = len(filas_mes)
+                        if filas_mes:
                             destino_txt_mes = (
                                 carpeta_mes / "TXT"
                                 / f"emitidos_reporte_txt_{tipo_slug}_{anio:04d}{mes_actual:02d}.xlsx"
                             )
                             try:
-                                reporte_txt_mes, n_filas_mes = construir_reporte_txt(
-                                    txt_paths_mes, destino_txt_mes
-                                )
+                                if guardar_reporte_txt_excel(
+                                    list(filas_mes[0].keys()), filas_mes, destino_txt_mes
+                                ):
+                                    resultado_mes["reporte_txt"] = str(destino_txt_mes)
                             except Exception as err:
                                 logger.warning(
-                                    f"No se pudo consolidar el reporte TXT mensual: {err}"
+                                    f"No se pudo consolidar el reporte del mes: {err}"
                                 )
-                                reporte_txt_mes, n_filas_mes = None, 0
-                            if reporte_txt_mes:
-                                resultado_mes["reporte_txt"] = str(reporte_txt_mes)
-                                resultado_mes["n_registros"] = n_filas_mes
                         # _merge_download_verification suma PDF/XML, que en modo
                         # rapido no existen: su mensaje no aplica.
                         resultado_mes["descarga_completa"] = bool(
                             resultado_mes.get("reporte_txt")
-                        ) or not txt_paths_mes
+                        ) or not filas_mes
                         resultado_mes["mensaje_verificacion"] = (
-                            f"Modo rapido: {resultado_mes.get('n_registros', 0)} registro(s) "
-                            f"desde {len(txt_paths_mes)} hoja(s) TXT."
-                            if txt_paths_mes
-                            else "Modo rapido: el portal no entrego el archivo 'Descargar reporte'."
+                            f"Modo rapido: {len(filas_mes)} registro(s) leidos de la tabla."
+                            if filas_mes
+                            else "Modo rapido: la consulta no devolvio comprobantes."
                         )
                         return resultado_mes
 
@@ -1927,6 +1935,7 @@ def descargar_sri(
                 total_regs = total_xml = total_pdf = 0
                 resultados_verificacion = []
                 txt_paths_rango = []
+                reportes_txt_meses = []
                 mes_inicio = int(resume_month if resume_download else mes)
                 mes_fin_val = int(mes_fin_val)
                 resultado_mes = None
@@ -1946,6 +1955,8 @@ def descargar_sri(
                     resultados_verificacion.append(resultado_mes)
                     if modo_rapido:
                         txt_paths_rango.extend(resultado_mes.get("txt_paths") or [])
+                        if resultado_mes.get("reporte_txt"):
+                            reportes_txt_meses.append(resultado_mes["reporte_txt"])
                     if resultado_mes.get("reporte_xml"):
                         reportes_xml.append(resultado_mes["reporte_xml"])
                     if resultado_mes.get("reporte_pdf"):
@@ -1990,6 +2001,9 @@ def descargar_sri(
                     # Un solo Excel para todo el rango, juntando los TXT de
                     # todos los dias de todos los meses.
                     resultado["txt_paths"] = list(txt_paths_rango)
+                    # Los Excel de cada mes, para que quien consuma el
+                    # resultado no tenga que adivinar donde quedaron.
+                    resultado["reportes_txt_meses"] = list(reportes_txt_meses)
                     # El reporte del ultimo mes no representa el rango.
                     resultado.pop("reporte_txt", None)
                     if txt_paths_rango:

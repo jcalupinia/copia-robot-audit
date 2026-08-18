@@ -2189,9 +2189,9 @@ def _flujo_emitidos(
         }
         if reporte_txt_path:
             resultado["reporte_txt"] = str(reporte_txt_path)
-        if txt_paths:
-            resultado["txt"] = str(txt_paths[0])
-            resultado["txt_paths"] = [str(p) for p in txt_paths]
+        # Las filas viajan crudas para que downloader.py consolide el mes. Aca
+        # no se bajan TXT, asi que no hay rutas de archivo que acumular.
+        resultado["filas_rapidas"] = filas_tabla
         return resultado
 
     data = _filas_tabla_emitidos(
