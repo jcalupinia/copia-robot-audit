@@ -5935,11 +5935,19 @@ with tab2:
                 f"sin encontrar: {_ret_result.get('sin_factura', 0)}, "
                 f"sustento que no es factura: {_ret_result.get('no_facturas', 0)}."
             )
-            if _ret_result.get("sin_factura"):
+            if _ret_result.get("mes_sin_descargar"):
                 st.warning(
-                    "Algunas facturas no aparecieron. Suele ser porque falta "
-                    "descargar el mes en que se emitieron — la columna "
-                    "'Fecha factura (segun retencion)' indica cuál."
+                    f"{_ret_result['mes_sin_descargar']} factura(s) de meses que "
+                    "no se indexaron. Falta descargarlos — la columna "
+                    "'Fecha factura (segun retencion)' indica cuáles."
+                )
+            if _ret_result.get("sin_factura_electronica"):
+                st.info(
+                    f"ℹ️ {_ret_result['sin_factura_electronica']} factura(s) no "
+                    "figuran en el portal aunque su mes **sí se revisó**. "
+                    "Normalmente son facturas preimpresas: sustentan la "
+                    "retención igual, pero no son electrónicas. Filtra el Excel "
+                    "por `Estado = Sin factura electronica` para revisarlas."
                 )
             _ret_path = Path(_ret_result.get("excel_path", ""))
             if _ret_path.is_file():

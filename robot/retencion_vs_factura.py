@@ -1039,32 +1039,45 @@ def _linea_por_impuesto(documento: dict, *nombres: str) -> Optional[dict]:
 
 
 def _observacion_no_encontrada(
-    retencion: dict, documento: dict, origen_facturas: str
+    retencion: dict,
+    documento: dict,
+    origen_facturas: str,
+    facturas_del_mes: Optional[int] = None,
 ) -> str:
-    """Explica por que una factura pudo no aparecer, sin apuntar a una sola causa.
+    """Explica por que una factura no aparecio, segun se haya revisado o no su mes.
 
-    Decir solo "falta descargar el mes" manda a revisar lo unico que el usuario
-    ya reviso. Una factura sustento puede faltar del listado por tres motivos
-    distintos, y el que aplica cambia que hacer con la fila.
+    Son dos situaciones distintas y la accion que sigue tambien:
+
+    - El mes NO se indexo: falta descargarlo, y punto.
+    - El mes SI se indexo y la factura igual no esta: el portal no la tiene.
+      Lo mas comun es que no sea electronica -- una factura preimpresa sustenta
+      la retencion igual pero nunca figura en el listado.
+
+    Decir siempre "revisa que este descargado el mes" mandaba a revisar
+    justamente lo unico que ya estaba bien.
     """
     fecha = documento.get("fecha_emision") or "la fecha que declara la retencion"
     identificacion = re.sub(r"\D", "", str(retencion.get("identificacion_sujeto") or ""))
 
-    causas = [
-        f"que su fecha real no sea {fecha}, que es la que declara la retencion",
-        "que este anulada",
-        "que no sea electronica: una factura preimpresa sustenta la retencion "
-        f"igual, pero nunca aparece en el listado de {origen_facturas}",
-    ]
-    if len(identificacion) == 10:
-        # Sin RUC de por medio suele tratarse de un emisor pequeno, donde la
-        # factura en papel es lo habitual.
-        causas[-1] += " (el sujeto retenido esta identificado con cedula, no con RUC)"
+    if not facturas_del_mes:
+        return (
+            f"No se indexo ninguna factura de {origen_facturas} de {fecha}. "
+            "Falta descargar ese mes: volve a generar el reporte con la busqueda "
+            "automatica marcada, o indica la carpeta donde estan."
+        )
 
+    pista_cedula = (
+        " El sujeto retenido esta identificado con cedula y no con RUC, lo que "
+        "refuerza esa posibilidad."
+        if len(identificacion) == 10
+        else ""
+    )
     return (
-        f"No aparece en el listado de {origen_facturas}. Puede ser "
-        + "; ".join(causas)
-        + ". Buscala en el portal por el mes completo antes de darla por perdida."
+        f"El listado de {origen_facturas} de {fecha} si se reviso "
+        f"({facturas_del_mes} factura(s)) y esta no figura. Lo mas probable es "
+        "que no sea electronica: una factura preimpresa sustenta la retencion "
+        f"igual, pero no aparece en el portal.{pista_cedula} Tambien puede estar "
+        "anulada o tener una fecha de emision distinta a la declarada."
     )
 
 
@@ -1196,6 +1209,9 @@ def generar_reporte_retenciones(
         "total_documentos": 0,
         "con_factura": 0,
         "sin_factura": 0,
+        # Desglose de `sin_factura`: el mes se reviso y no estaba, o falta bajarlo.
+        "sin_factura_electronica": 0,
+        "mes_sin_descargar": 0,
         "no_facturas": 0,
         "excel_path": "",
         "message": "",
@@ -1289,6 +1305,25 @@ def generar_reporte_retenciones(
     indice = construir_indice_facturas(rutas)
     _emit(f"{len(indice)} factura(s) de {origen_facturas} indexada(s).")
 
+    # Meses que el indice llego a cubrir. Sirve para distinguir dos situaciones
+    # que hoy se confundian: que falte descargar el mes, o que el mes se haya
+    # revisado y la factura igual no este -- caso tipico de una factura
+    # preimpresa, que sustenta la retencion pero no figura en el portal.
+    facturas_por_mes: dict[tuple[int, int], int] = {}
+    for factura_indexada in indice.values():
+        fecha_ind = _parse_fecha(factura_indexada.get("fecha_emision"))
+        if fecha_ind:
+            periodo = (fecha_ind.year, fecha_ind.month)
+            facturas_por_mes[periodo] = facturas_por_mes.get(periodo, 0) + 1
+    if facturas_por_mes:
+        _emit(
+            "Meses cubiertos: "
+            + ", ".join(
+                f"{_MESES[m]} {a} ({n})"
+                for (a, m), n in sorted(facturas_por_mes.items())
+            )
+        )
+
     filas_cruce: list[dict] = []
     filas_otros: list[dict] = []
 
@@ -1327,14 +1362,28 @@ def generar_reporte_retenciones(
                 )
             else:
                 resumen["sin_factura"] += 1
+                fecha_doc = _parse_fecha(documento.get("fecha_emision"))
+                del_mes = (
+                    facturas_por_mes.get((fecha_doc.year, fecha_doc.month), 0)
+                    if fecha_doc
+                    else 0
+                )
+                # Si el mes se reviso y la factura no esta, el portal no la
+                # tiene: no es lo mismo que no haberlo descargado.
+                if del_mes:
+                    resumen["sin_factura_electronica"] += 1
+                    estado_fila = "Sin factura electronica"
+                else:
+                    resumen["mes_sin_descargar"] += 1
+                    estado_fila = "Factura no encontrada"
                 filas_cruce.append(
                     _construir_fila(
                         retencion,
                         documento,
                         None,
-                        "Factura no encontrada",
+                        estado_fila,
                         _observacion_no_encontrada(
-                            retencion, documento, origen_facturas
+                            retencion, documento, origen_facturas, del_mes
                         ),
                     )
                 )
@@ -1345,11 +1394,17 @@ def generar_reporte_retenciones(
 
     resumen["ok"] = True
     resumen["excel_path"] = str(salida)
-    resumen["message"] = (
-        f"{resumen['con_factura']} con factura, "
-        f"{resumen['sin_factura']} sin encontrar, "
-        f"{resumen['no_facturas']} con sustento que no es factura."
-    )
+    partes = [f"{resumen['con_factura']} con factura"]
+    if resumen["mes_sin_descargar"]:
+        partes.append(f"{resumen['mes_sin_descargar']} con el mes sin descargar")
+    if resumen["sin_factura_electronica"]:
+        partes.append(
+            f"{resumen['sin_factura_electronica']} sin factura electronica "
+            "(el mes se reviso y no figuran)"
+        )
+    if resumen["no_facturas"]:
+        partes.append(f"{resumen['no_facturas']} con sustento que no es factura")
+    resumen["message"] = ", ".join(partes) + "."
     if not COLUMNAS_OPERACION:
         resumen["message"] += " Falta definir la operacion matematica."
     _emit(resumen["message"])
