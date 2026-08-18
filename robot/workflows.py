@@ -55,6 +55,7 @@ from robot.download_resume import (
 from robot.txt_report import (
     construir_reporte_txt,
     descargar_txt_listado,
+    guardar_reporte_txt_excel,
     parsear_txts,
     recolectar_txt_paginado,
 )
@@ -1754,6 +1755,90 @@ def _flujo_recibidos(
     return resultado
 
 
+def _filas_tabla_emitidos(page, tabla, tipo_visible, tipo, fecha_emision, es_rechazado):
+    """Lee la tabla de Emitidos de la pagina ACTUAL y devuelve sus filas.
+
+    Las columnas coinciden con las que publica el TXT del portal, asi que el
+    reporte del modo rapido se puede armar desde cualquiera de las dos fuentes.
+    La tabla tiene la ventaja de no depender del enlace 'Descargar reporte',
+    que en Emitidos no esta garantizado.
+    """
+    data = []
+    if not es_rechazado:
+        html = page.content()
+        rows = re.findall(r"<tr[^>]*>\s*(.*?)\s*</tr>", html, flags=re.DOTALL)
+        for r in rows:
+            cols = re.findall(r"<td[^>]*>(.*?)</td>", r, flags=re.DOTALL)
+            textos = [re.sub("<.*?>", "", c).strip() for c in cols]
+            if len(textos) < 3:
+                continue
+            fecha_emision_col = textos[0]
+            comprobante_raw = textos[1]
+            tipo_detectado = _extraer_tipo_documento(comprobante_raw)
+            if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
+                continue
+            partes_tipo = comprobante_raw.split()
+            comprobante = partes_tipo[0] if partes_tipo else ""
+            serie = " ".join(partes_tipo[1:]) if len(partes_tipo) > 1 else ""
+            clave = textos[2]
+            fecha_autorizacion = textos[3] if len(textos) > 3 else ""
+            valor_sin_impuestos = textos[5] if len(textos) > 5 else ""
+            iva_val = textos[6] if len(textos) > 6 else ""
+            importe_total = textos[7] if len(textos) > 7 else ""
+            if valor_sin_impuestos and not re.search(r"\d", valor_sin_impuestos):
+                valor_sin_impuestos = ""
+            if iva_val and not re.search(r"\d", iva_val):
+                iva_val = ""
+            if importe_total and not re.search(r"\d", importe_total):
+                importe_total = ""
+
+            data.append({
+                "COMPROBANTE": comprobante,
+                "SERIE_COMPROBANTE": serie,
+                "CLAVE_ACCESO": clave,
+                "FECHA_AUTORIZACION": fecha_autorizacion,
+                "FECHA_EMISION": fecha_emision_col,
+                "VALOR_SIN_IMPUESTOS": valor_sin_impuestos,
+                "IVA": iva_val,
+                "IMPORTE_TOTAL": importe_total,
+            })
+    else:
+        filas_rech = tabla.locator("tr")
+        total_rech = filas_rech.count()
+        for idx in range(total_rech):
+            fila = filas_rech.nth(idx)
+            celdas = fila.locator("td")
+            if not celdas.count():
+                continue
+            try:
+                tipo_serie_texto = celdas.nth(1).inner_text().strip()
+            except Exception:
+                tipo_serie_texto = ""
+            tipo_detectado = _extraer_tipo_documento(tipo_serie_texto)
+            if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
+                continue
+            try:
+                clave_texto = celdas.nth(2).inner_text().strip()
+            except Exception:
+                clave_texto = ""
+            try:
+                fecha_aut = celdas.nth(3).inner_text().strip()
+            except Exception:
+                fecha_aut = ""
+
+            data.append({
+                "COMPROBANTE": tipo_serie_texto,
+                "SERIE_COMPROBANTE": "",
+                "CLAVE_ACCESO": clave_texto,
+                "FECHA_AUTORIZACION": fecha_aut,
+                "FECHA_EMISION": fecha_emision,
+                "VALOR_SIN_IMPUESTOS": "",
+                "IVA": "",
+                "IMPORTE_TOTAL": "",
+            })
+    return data
+
+
 def _flujo_emitidos(
     page,
     destino: Path,
@@ -1988,34 +2073,61 @@ def _flujo_emitidos(
         # consolidacion del mes la hace downloader.py juntando todos.
         txt_dir = carpeta_tipo / "TXT"
         prefijo = f"emitidos_{tipo_slug}_{fecha_token_doc}"
-        txt_paths, registros_vistos = recolectar_txt_paginado(
-            page,
-            txt_dir,
-            prefijo,
-            tabla=tabla_emitidos,
-            check_cancel=lambda: _check_cancel("emitidos_txt_pagina"),
-        )
+
+        # Se lee la TABLA, no el TXT. La tabla de Emitidos ya publica clave de
+        # acceso, valor sin impuestos, IVA e importe total -- lo mismo que el
+        # TXT -- y no depende de que exista el enlace 'Descargar reporte', que
+        # en este modulo no esta garantizado.
+        filas_tabla = []
+        vistas = set()
+        pagina = 1
+        while True:
+            _check_cancel("emitidos_tabla_pagina")
+            del_pagina = _filas_tabla_emitidos(
+                page, tabla_emitidos, tipo_visible, tipo, fecha_emision, es_rechazado
+            )
+            nuevas = 0
+            for fila_tabla in del_pagina:
+                huella = fila_tabla.get("CLAVE_ACCESO") or "|".join(
+                    str(v) for v in fila_tabla.values()
+                )
+                if huella in vistas:
+                    continue
+                vistas.add(huella)
+                filas_tabla.append(fila_tabla)
+                nuevas += 1
+            logger.info(
+                f"[modo rapido] pag {pagina}: {len(del_pagina)} fila(s), {nuevas} nueva(s)"
+            )
+
+            boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
+            if not boton_siguiente.count():
+                break
+            boton_siguiente.first.click()
+            try:
+                page.wait_for_load_state("networkidle", timeout=1000)
+            except Exception:
+                pass
+            time.sleep(0.2)
+            pagina += 1
 
         reporte_txt_path = None
-        n_filas_txt = 0
-        if txt_paths:
+        if filas_tabla:
+            columnas = list(filas_tabla[0].keys())
             destino_txt = txt_dir / f"{prefijo}.xlsx"
             try:
-                reporte_txt_path, n_filas_txt = construir_reporte_txt(txt_paths, destino_txt)
+                if guardar_reporte_txt_excel(columnas, filas_tabla, destino_txt):
+                    reporte_txt_path = destino_txt
             except Exception as err:
                 logger.warning(f"[modo rapido] no se pudo construir el reporte: {err}")
-            n_registros = n_filas_txt
-            completo = bool(reporte_txt_path) or n_filas_txt == 0
-            mensaje = (
-                f"Modo rapido: {n_registros} registro(s) desde {len(txt_paths)} hoja(s) TXT."
-                if completo
-                else "Modo rapido: se bajo el TXT pero no se pudo escribir el Excel."
-            )
-        else:
-            logger.warning("[modo rapido] no se descargo ningun TXT del portal.")
-            n_registros = registros_vistos
-            completo = False
-            mensaje = "Modo rapido: el portal no entrego el archivo 'Descargar reporte'."
+        n_registros = len(filas_tabla)
+        completo = bool(reporte_txt_path) or n_registros == 0
+        mensaje = (
+            f"Modo rapido: {n_registros} registro(s) leidos de la tabla en {pagina} pagina(s)."
+            if completo
+            else "Modo rapido: se leyo la tabla pero no se pudo escribir el Excel."
+        )
+        txt_paths = []
 
         resultado = {
             "estado": "ok" if n_registros else "sin_resultados",
@@ -2041,85 +2153,9 @@ def _flujo_emitidos(
             resultado["txt_paths"] = [str(p) for p in txt_paths]
         return resultado
 
-    data = []
-    if not es_rechazado:
-        html = page.content()
-        rows = re.findall(
-            r"<tr[^>]*>\s*(.*?)\s*</tr>",
-            html,
-            flags=re.DOTALL
-        )
-
-        encabezado_textos = ["EMITIDOS", "", "CLA VE ACCESO"]  # placeholder; se ajustara con row data
-        for r in rows:
-            cols = re.findall(r"<td[^>]*>(.*?)</td>", r, flags=re.DOTALL)
-            textos = [re.sub("<.*?>", "", c).strip() for c in cols]
-            if len(textos) < 3:
-                continue
-            fecha_emision_col = textos[0]
-            comprobante_raw = textos[1]
-            tipo_detectado = _extraer_tipo_documento(comprobante_raw)
-            if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
-                continue
-            partes_tipo = comprobante_raw.split()
-            comprobante = partes_tipo[0] if partes_tipo else ""
-            serie = " ".join(partes_tipo[1:]) if len(partes_tipo) > 1 else ""
-            clave = textos[2]
-            fecha_autorizacion = textos[3] if len(textos) > 3 else ""
-            valor_sin_impuestos = textos[5] if len(textos) > 5 else ""
-            iva_val = textos[6] if len(textos) > 6 else ""
-            importe_total = textos[7] if len(textos) > 7 else ""
-            if valor_sin_impuestos and not re.search(r"\d", valor_sin_impuestos):
-                valor_sin_impuestos = ""
-            if iva_val and not re.search(r"\d", iva_val):
-                iva_val = ""
-            if importe_total and not re.search(r"\d", importe_total):
-                importe_total = ""
-
-            data.append({
-                "COMPROBANTE": comprobante,
-                "SERIE_COMPROBANTE": serie,
-                "CLAVE_ACCESO": clave,
-                "FECHA_AUTORIZACION": fecha_autorizacion,
-                "FECHA_EMISION": fecha_emision_col,
-                "VALOR_SIN_IMPUESTOS": valor_sin_impuestos,
-                "IVA": iva_val,
-                "IMPORTE_TOTAL": importe_total,
-            })
-    else:
-        filas_rech = tabla_emitidos.locator("tr")
-        total_rech = filas_rech.count()
-        for idx in range(total_rech):
-            fila = filas_rech.nth(idx)
-            celdas = fila.locator("td")
-            if not celdas.count():
-                continue
-            try:
-                tipo_serie_texto = celdas.nth(1).inner_text().strip()
-            except Exception:
-                tipo_serie_texto = ""
-            tipo_detectado = _extraer_tipo_documento(tipo_serie_texto)
-            if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
-                continue
-            try:
-                clave_texto = celdas.nth(2).inner_text().strip()
-            except Exception:
-                clave_texto = ""
-            try:
-                fecha_aut = celdas.nth(3).inner_text().strip()
-            except Exception:
-                fecha_aut = ""
-
-            data.append({
-                "COMPROBANTE": tipo_serie_texto,
-                "SERIE_COMPROBANTE": "",
-                "CLAVE_ACCESO": clave_texto,
-                "FECHA_AUTORIZACION": fecha_aut,
-                "FECHA_EMISION": fecha_emision,
-                "VALOR_SIN_IMPUESTOS": "",
-                "IVA": "",
-                "IMPORTE_TOTAL": "",
-            })
+    data = _filas_tabla_emitidos(
+        page, tabla_emitidos, tipo_visible, tipo, fecha_emision, es_rechazado
+    )
 
     n_pdf = 0
     n_xml = 0
