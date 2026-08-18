@@ -11,6 +11,7 @@ Extraido de `robot/downloader.py` en la Fase 4 del refactor.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import random
 import re
@@ -1264,7 +1265,7 @@ def _flujo_recibidos(
             f"recibidos_{tipo_slug}_{fecha_slug}",
             tabla=tabla_datos,
             check_cancel=lambda: _check_cancel("recibidos_txt_pagina"),
-            pasar_pagina=_pasar_pagina,
+            pasar_pagina=lambda pg: _pasar_pagina(pg, tabla_datos),
         )
 
         reporte_txt_path = None
@@ -1756,17 +1757,37 @@ def _flujo_recibidos(
     return resultado
 
 
-def _huella_tabla(page) -> str:
-    """Identifica el contenido visible de la tabla para detectar si cambio."""
+def _huella_tabla(page, tabla=None) -> str:
+    """Identifica el contenido visible de la tabla para detectar si cambio.
+
+    Se usan TODAS las claves de acceso de la pagina. Mirar solo las primeras
+    filas del HTML no sirve: en el portal las de arriba son de la cabecera y
+    los filtros, no de la tabla de datos, y sin claves ahi la huella caia a un
+    conteo de <tr> identico entre paginas. La huella nunca cambiaba y el
+    recorrido se cortaba en la hoja 1, perdiendo el resto del dia.
+    """
     try:
-        filas = re.findall(r"<tr[^>]*>\s*(.*?)\s*</tr>", page.content(), flags=re.DOTALL)
+        html = page.content()
     except Exception:
         return ""
-    claves = re.findall(r"\d{49}", " ".join(filas[:6]))
-    return "|".join(claves) or str(len(filas))
+
+    claves = re.findall(r"\d{49}", html)
+    if claves:
+        return f"{len(claves)}:{hashlib.md5('|'.join(claves).encode()).hexdigest()}"
+
+    # Sin claves (p. ej. tipos que no las muestran) se cae al texto de la tabla.
+    if tabla is not None:
+        try:
+            texto = tabla.inner_text()
+            if texto.strip():
+                return hashlib.md5(texto.encode("utf-8", "replace")).hexdigest()
+        except Exception:
+            pass
+    filas = re.findall(r"<tr[^>]*>", html)
+    return f"tr:{len(filas)}"
 
 
-def _pasar_pagina(page, timeout_ms: int = 12000) -> bool:
+def _pasar_pagina(page, tabla=None, timeout_ms: int = 12000) -> bool:
     """Va a la pagina siguiente y espera a que la tabla realmente cambie.
 
     PrimeFaces repinta por AJAX: si se lee la tabla apenas se hace clic, se
@@ -1785,7 +1806,7 @@ def _pasar_pagina(page, timeout_ms: int = 12000) -> bool:
     except Exception:
         return False
 
-    huella_previa = _huella_tabla(page)
+    huella_previa = _huella_tabla(page, tabla)
     try:
         # Timeout propio: el de Playwright son 30 s por clic, demasiado para un
         # boton que puede quedar tapado o deshabilitarse a mitad de camino.
@@ -1796,7 +1817,7 @@ def _pasar_pagina(page, timeout_ms: int = 12000) -> bool:
 
     limite = time.time() + timeout_ms / 1000
     while time.time() < limite:
-        if _huella_tabla(page) != huella_previa:
+        if _huella_tabla(page, tabla) != huella_previa:
             return True
         time.sleep(0.15)
     logger.warning("[modo rapido] la tabla no cambio tras pasar de pagina; se corta aqui.")
@@ -2148,7 +2169,7 @@ def _flujo_emitidos(
                 f"[modo rapido] pag {pagina}: {len(del_pagina)} fila(s), {nuevas} nueva(s)"
             )
 
-            if not _pasar_pagina(page):
+            if not _pasar_pagina(page, tabla_emitidos):
                 break
             pagina += 1
 
