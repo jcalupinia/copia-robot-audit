@@ -5935,6 +5935,14 @@ with tab2:
                 f"sin encontrar: {_ret_result.get('sin_factura', 0)}, "
                 f"sustento que no es factura: {_ret_result.get('no_facturas', 0)}."
             )
+            if _ret_result.get("tipo_ilegible"):
+                st.error(
+                    f"⚠️ {_ret_result['tipo_ilegible']} documento(s) sustento "
+                    "cuyo tipo no se pudo leer del PDF. Es un formato de emisor "
+                    "que el extractor no reconoce — no es que no sean facturas. "
+                    "Filtra el Excel por `Estado = No se pudo leer el sustento` "
+                    "para ver de qué archivos se trata."
+                )
             if _ret_result.get("mes_sin_descargar"):
                 st.warning(
                     f"{_ret_result['mes_sin_descargar']} factura(s) de meses que "

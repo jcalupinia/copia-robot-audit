@@ -1213,6 +1213,9 @@ def generar_reporte_retenciones(
         "sin_factura_electronica": 0,
         "mes_sin_descargar": 0,
         "no_facturas": 0,
+        # Documentos cuyo tipo no se pudo leer: fallo del extractor, no un
+        # sustento legitimamente no cruzable.
+        "tipo_ilegible": 0,
         "excel_path": "",
         "message": "",
     }
@@ -1336,6 +1339,24 @@ def generar_reporte_retenciones(
             tipo = _norm(documento.get("tipo"))
             cod = documento.get("cod_doc_sustento") or ""
 
+            # Un tipo vacio NO es "no es factura": es que no se pudo leer el
+            # RIDE. Mezclarlos esconde fallos del extractor entre documentos
+            # legitimamente no cruzables (IFIS, notas de venta).
+            if not cod and not tipo:
+                resumen["tipo_ilegible"] += 1
+                filas_otros.append(
+                    _construir_fila(
+                        retencion,
+                        documento,
+                        None,
+                        "No se pudo leer el sustento",
+                        "No se reconocio el tipo de comprobante en el RIDE. Puede "
+                        "ser un formato de emisor que el extractor todavia no "
+                        f"maneja: {Path(retencion.get('archivo', '')).name}",
+                    )
+                )
+                continue
+
             es_factura = cod == COD_FACTURA if cod else tipo.startswith("factura")
             if not es_factura:
                 resumen["no_facturas"] += 1
@@ -1346,7 +1367,7 @@ def generar_reporte_retenciones(
                         None,
                         "Sustento no es factura",
                         f"El documento sustento es '{documento.get('tipo')}', "
-                        "no cruza contra facturas recibidas.",
+                        f"no cruza contra facturas de {origen_facturas}.",
                     )
                 )
                 continue
@@ -1404,6 +1425,8 @@ def generar_reporte_retenciones(
         )
     if resumen["no_facturas"]:
         partes.append(f"{resumen['no_facturas']} con sustento que no es factura")
+    if resumen["tipo_ilegible"]:
+        partes.append(f"{resumen['tipo_ilegible']} sin poder leer el sustento")
     resumen["message"] = ", ".join(partes) + "."
     if not COLUMNAS_OPERACION:
         resumen["message"] += " Falta definir la operacion matematica."
