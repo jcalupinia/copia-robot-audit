@@ -845,6 +845,29 @@ def _factura_desde_excel(path: Path, ruc_emisor_default: str = "") -> list[dict]
     return facturas
 
 
+def _clave_acceso_sustento(documento: dict) -> str:
+    """Clave de acceso de la factura, si la retencion la declara.
+
+    `numAutDocSustento` es el numero de autorizacion del documento sustento. La
+    ficha tecnica del SRI lo define como `[0-9]{10,49}`, y ese rango es el dato
+    util: en comprobantes electronicos el numero de autorizacion ES la clave de
+    acceso (49 digitos), mientras que 10 digitos corresponden al esquema
+    preimpreso anterior. O sea que el campo no solo da la clave servida: cuando
+    trae 10 digitos esta diciendo que la factura NO es electronica y que por eso
+    no va a aparecer en el listado del portal.
+
+    El campo es opcional en el esquema (minOccurs="0"), asi que puede faltar.
+    """
+    valor = re.sub(r"\D", "", str(documento.get("num_aut_doc_sustento") or ""))
+    return valor if len(valor) == 49 else ""
+
+
+def _es_sustento_preimpreso(documento: dict) -> bool:
+    """True si la retencion declara una autorizacion del esquema preimpreso."""
+    valor = re.sub(r"\D", "", str(documento.get("num_aut_doc_sustento") or ""))
+    return 10 <= len(valor) < 49
+
+
 def construir_indice_facturas(
     carpetas: Iterable[Path], ruc_emisor_default: str = ""
 ) -> dict[str, dict]:
@@ -872,12 +895,23 @@ def construir_indice_facturas(
                 candidatos.extend(_factura_desde_excel(archivo, ruc_emisor_default))
 
         for factura in candidatos:
+            entradas = []
             clave = _clave_match(factura["ruc_emisor"], factura["numero"])
-            if not clave:
-                continue
-            previo = indice.get(clave)
-            if previo is None or (previo["origen"] != "xml" and factura["origen"] == "xml"):
-                indice[clave] = factura
+            if clave:
+                entradas.append(clave)
+            # Segunda entrada por clave de acceso, para cruzar contra la que
+            # declara la retencion en numAutDocSustento.
+            clave_acceso = re.sub(r"\D", "", str(factura.get("clave_acceso") or ""))
+            # Se descartan los rellenos tipo 000...0: si varias filas comparten
+            # un placeholder, todas se pisarian bajo la misma entrada.
+            if len(clave_acceso) == 49 and len(set(clave_acceso)) > 1:
+                entradas.append(f"clave|{clave_acceso}")
+            for entrada in entradas:
+                previo = indice.get(entrada)
+                if previo is None or (
+                    previo["origen"] != "xml" and factura["origen"] == "xml"
+                ):
+                    indice[entrada] = factura
     return indice
 
 
@@ -1141,7 +1175,12 @@ def _construir_fila(
         "Base retencion Renta": renta.get("base", ""),
         "Porcentaje retencion Renta": renta.get("porcentaje", ""),
         "Valor retenido Renta": renta.get("valor_retenido", ""),
-        "Clave acceso factura": factura.get("clave_acceso", "") if factura else "",
+        # Si no se encontro la factura pero la retencion declara su clave de
+        # acceso, se muestra igual: sirve para buscarla a mano en el portal.
+        "Clave acceso factura": (
+            factura.get("clave_acceso", "") if factura else _clave_acceso_sustento(documento)
+        ),
+        "Nro. autorizacion sustento": documento.get("num_aut_doc_sustento", ""),
         "Fecha factura (segun listado)": factura.get("fecha_emision", "") if factura else "",
         "Subtotal factura": factura.get("total_sin_impuestos", "") if factura else "",
         "IVA factura": factura.get("iva_factura", "") if factura else "",
@@ -1361,14 +1400,17 @@ def generar_reporte_retenciones(
             _emit(f"Emisor de las facturas (sujeto retenido): {ruc_emisor_default}")
 
     indice = construir_indice_facturas(rutas, ruc_emisor_default)
-    _emit(f"{len(indice)} factura(s) de {origen_facturas} indexada(s).")
+    # Cada factura entra dos veces (por RUC+numero y por clave de acceso), asi
+    # que para contar y para los meses cubiertos se usa solo la primera forma.
+    facturas_unicas = [f for k, f in indice.items() if not k.startswith("clave|")]
+    _emit(f"{len(facturas_unicas)} factura(s) de {origen_facturas} indexada(s).")
 
     # Meses que el indice llego a cubrir. Sirve para distinguir dos situaciones
     # que hoy se confundian: que falte descargar el mes, o que el mes se haya
     # revisado y la factura igual no este -- caso tipico de una factura
     # preimpresa, que sustenta la retencion pero no figura en el portal.
     facturas_por_mes: dict[tuple[int, int], int] = {}
-    for factura_indexada in indice.values():
+    for factura_indexada in facturas_unicas:
         fecha_ind = _parse_fecha(factura_indexada.get("fecha_emision"))
         if fecha_ind:
             periodo = (fecha_ind.year, fecha_ind.month)
@@ -1427,10 +1469,17 @@ def generar_reporte_retenciones(
                 )
                 continue
 
-            clave = _clave_match(
-                retencion.get("identificacion_sujeto"), documento.get("numero")
-            )
-            factura = indice.get(clave)
+            # La clave de acceso que declara la retencion identifica la factura
+            # sin ambiguedad; el cruce por RUC + numero queda de respaldo para
+            # cuando el campo no viene (es opcional en el esquema, y el RIDE en
+            # PDF no lo imprime).
+            clave_declarada = _clave_acceso_sustento(documento)
+            factura = indice.get(f"clave|{clave_declarada}") if clave_declarada else None
+            if factura is None:
+                clave = _clave_match(
+                    retencion.get("identificacion_sujeto"), documento.get("numero")
+                )
+                factura = indice.get(clave)
             if factura:
                 resumen["con_factura"] += 1
                 filas_cruce.append(
@@ -1438,6 +1487,25 @@ def generar_reporte_retenciones(
                 )
             else:
                 resumen["sin_factura"] += 1
+                # El propio comprobante lo dice: una autorizacion de menos de
+                # 49 digitos es del esquema preimpreso, no electronica. No hace
+                # falta inferirlo de que no aparezca en el listado.
+                if _es_sustento_preimpreso(documento):
+                    resumen["sin_factura_electronica"] += 1
+                    filas_cruce.append(
+                        _construir_fila(
+                            retencion,
+                            documento,
+                            None,
+                            "Sin factura electronica",
+                            "La retencion declara una autorizacion de "
+                            f"{len(re.sub(r'[^0-9]', '', documento.get('num_aut_doc_sustento') or ''))} "
+                            "digitos: es una factura preimpresa, no electronica. "
+                            "Sustenta la retencion igual, pero por definicion no "
+                            "figura en el listado del portal.",
+                        )
+                    )
+                    continue
                 fecha_doc = _parse_fecha(documento.get("fecha_emision"))
                 del_mes = (
                     facturas_por_mes.get((fecha_doc.year, fecha_doc.month), 0)
