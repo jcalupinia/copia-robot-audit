@@ -136,12 +136,17 @@ def recolectar_txt_paginado(
     prefijo: str,
     tabla=None,
     check_cancel=None,
+    pasar_pagina=None,
 ) -> tuple[list[Path], int]:
     """Recorre las paginas del listado bajando el TXT de cada una.
 
     `prefijo` nombra los archivos (`<prefijo>_pag001.txt`). `tabla` es el
     locator del cuerpo de la tabla, solo para contar filas visibles y detectar
     si el TXT exporta todo el listado. `check_cancel` se invoca en cada vuelta.
+    `pasar_pagina` avanza a la hoja siguiente y devuelve False cuando no queda
+    ninguna; conviene pasar una que espere a que la tabla cambie de verdad, ya
+    que PrimeFaces repinta por AJAX y dormir un rato fijo puede leer dos veces
+    la misma hoja -- y saltearse la que sigue.
 
     Devuelve (rutas de los TXT, filas vistas en pantalla).
     """
@@ -184,15 +189,19 @@ def recolectar_txt_paginado(
                 )
                 break
 
-        boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
-        if not boton_siguiente.count():
-            break
-        boton_siguiente.first.click()
-        try:
-            page.wait_for_load_state("networkidle", timeout=1000)
-        except Exception:
-            pass
-        time.sleep(0.2)
+        if pasar_pagina is not None:
+            if not pasar_pagina(page):
+                break
+        else:
+            boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
+            if not boton_siguiente.count():
+                break
+            boton_siguiente.first.click()
+            try:
+                page.wait_for_load_state("networkidle", timeout=1000)
+            except Exception:
+                pass
+            time.sleep(0.2)
         pagina += 1
 
     return txt_paths, registros_vistos

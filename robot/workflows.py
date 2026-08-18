@@ -1264,6 +1264,7 @@ def _flujo_recibidos(
             f"recibidos_{tipo_slug}_{fecha_slug}",
             tabla=tabla_datos,
             check_cancel=lambda: _check_cancel("recibidos_txt_pagina"),
+            pasar_pagina=_pasar_pagina,
         )
 
         reporte_txt_path = None
@@ -1755,6 +1756,53 @@ def _flujo_recibidos(
     return resultado
 
 
+def _huella_tabla(page) -> str:
+    """Identifica el contenido visible de la tabla para detectar si cambio."""
+    try:
+        filas = re.findall(r"<tr[^>]*>\s*(.*?)\s*</tr>", page.content(), flags=re.DOTALL)
+    except Exception:
+        return ""
+    claves = re.findall(r"\d{49}", " ".join(filas[:6]))
+    return "|".join(claves) or str(len(filas))
+
+
+def _pasar_pagina(page, timeout_ms: int = 12000) -> bool:
+    """Va a la pagina siguiente y espera a que la tabla realmente cambie.
+
+    PrimeFaces repinta por AJAX: si se lee la tabla apenas se hace clic, se
+    vuelve a leer la pagina anterior. Eso no solo duplica -- como el dedupe la
+    descarta y el bucle sigue clickeando, la pagina siguiente se SALTEA y sus
+    filas se pierden. Por eso se espera a que la huella cambie en vez de dormir
+    un rato fijo.
+
+    Devuelve False cuando ya no hay pagina siguiente o cuando el portal no
+    respondio, para que el bucle corte en vez de colgarse.
+    """
+    boton = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
+    try:
+        if not boton.count():
+            return False
+    except Exception:
+        return False
+
+    huella_previa = _huella_tabla(page)
+    try:
+        # Timeout propio: el de Playwright son 30 s por clic, demasiado para un
+        # boton que puede quedar tapado o deshabilitarse a mitad de camino.
+        boton.first.click(timeout=timeout_ms // 2)
+    except Exception as err:
+        logger.info(f"[modo rapido] no se pudo pasar de pagina: {err}")
+        return False
+
+    limite = time.time() + timeout_ms / 1000
+    while time.time() < limite:
+        if _huella_tabla(page) != huella_previa:
+            return True
+        time.sleep(0.15)
+    logger.warning("[modo rapido] la tabla no cambio tras pasar de pagina; se corta aqui.")
+    return False
+
+
 def _filas_tabla_emitidos(page, tabla, tipo_visible, tipo, fecha_emision, es_rechazado):
     """Lee la tabla de Emitidos de la pagina ACTUAL y devuelve sus filas.
 
@@ -2100,15 +2148,8 @@ def _flujo_emitidos(
                 f"[modo rapido] pag {pagina}: {len(del_pagina)} fila(s), {nuevas} nueva(s)"
             )
 
-            boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
-            if not boton_siguiente.count():
+            if not _pasar_pagina(page):
                 break
-            boton_siguiente.first.click()
-            try:
-                page.wait_for_load_state("networkidle", timeout=1000)
-            except Exception:
-                pass
-            time.sleep(0.2)
             pagina += 1
 
         reporte_txt_path = None
