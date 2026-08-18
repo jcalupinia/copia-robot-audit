@@ -5902,10 +5902,19 @@ with tab2:
                         )
                         for _m in _ret_msgs:
                             st.write(_m)
+                        # Label corto: el detalle ya va en el cuerpo y en el
+                        # resumen de abajo. Uno largo se encima con el icono
+                        # de estado que dibuja st.status.
                         _ret_status.update(
-                            label=_resultado_ret.get("message", "Listo."),
+                            label=(
+                                "Reporte generado"
+                                if _resultado_ret.get("ok")
+                                else "No se pudo generar el reporte"
+                            ),
                             state="complete" if _resultado_ret.get("ok") else "error",
                         )
+                        if _resultado_ret.get("message"):
+                            st.write(_resultado_ret["message"])
                         st.session_state["ret_vs_fact_result"] = _resultado_ret
                     except Exception as exc:
                         _ret_status.update(

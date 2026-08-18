@@ -165,9 +165,27 @@ def _numero_desde_partes(estab: object, pto: object, secuencial: object) -> str:
     return f"{e}-{p}-{s}"
 
 
+def _canonizar_identificacion(valor: object) -> str:
+    """Lleva cedula y RUC de una misma persona natural a la misma forma.
+
+    Un RIDE puede identificar al sujeto retenido con la CEDULA (10 digitos)
+    mientras que en el listado esa persona factura con su RUC (la cedula mas
+    '001'). Comparando los digitos crudos, `1716891658` y `1716891658001`
+    nunca coinciden y la factura queda como no encontrada.
+
+    Solo se recorta cuando es RUC de persona natural: el tercer digito indica
+    el tipo de contribuyente, y 6 (publico) y 9 (sociedad) no se tocan porque
+    ahi el '001' es parte del establecimiento, no un sufijo de la cedula.
+    """
+    digitos = re.sub(r"\D", "", str(valor or ""))
+    if len(digitos) == 13 and digitos.endswith("001") and digitos[2] not in "69":
+        return digitos[:10]
+    return digitos
+
+
 def _clave_match(ruc: object, numero: object) -> str:
-    """Clave de cruce entre retencion y factura: RUC + numero normalizado."""
-    ruc_s = re.sub(r"\D", "", str(ruc or ""))
+    """Clave de cruce entre retencion y factura: identificacion + numero."""
+    ruc_s = _canonizar_identificacion(ruc)
     num_s = re.sub(r"\D", "", str(numero or ""))
     if not ruc_s or not num_s:
         return ""
