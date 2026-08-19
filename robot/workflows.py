@@ -1757,6 +1757,36 @@ def _flujo_recibidos(
     return resultado
 
 
+_RE_FECHA_CELDA = re.compile(r"\b(\d{1,2}/\d{1,2}/\d{4})\b")
+
+
+def _fechas_de_fila(textos: list) -> tuple[str, str]:
+    """Devuelve (fecha de emision, fecha de autorizacion) de una fila.
+
+    Se buscan por forma y no por posicion. La tabla del portal antepone el
+    numero de fila, asi que tomar la primera celda daba "88" en vez de una
+    fecha: el reporte quedaba sin fecha de emision utilizable y el cruce creia
+    que ese mes no se habia descargado.
+
+    La de autorizacion es la que trae hora; la de emision, la que no.
+    """
+    con_hora, sin_hora = "", ""
+    for texto in textos:
+        celda = str(texto or "").strip()
+        encontrado = _RE_FECHA_CELDA.search(celda)
+        if not encontrado:
+            continue
+        if re.search(r"\d{1,2}:\d{2}", celda):
+            con_hora = con_hora or celda
+        else:
+            sin_hora = sin_hora or encontrado.group(1)
+    # Si solo hay una fecha y viene con hora, sirve para ambas: es lo unico que
+    # publica la tabla en algunos estados.
+    if not sin_hora and con_hora:
+        sin_hora = _RE_FECHA_CELDA.search(con_hora).group(1)
+    return sin_hora, con_hora
+
+
 def _huella_tabla(page, tabla=None) -> str:
     """Identifica el contenido visible de la tabla para detectar si cambio.
 
@@ -1841,7 +1871,7 @@ def _filas_tabla_emitidos(page, tabla, tipo_visible, tipo, fecha_emision, es_rec
             textos = [re.sub("<.*?>", "", c).strip() for c in cols]
             if len(textos) < 3:
                 continue
-            fecha_emision_col = textos[0]
+            fecha_emision_col, fecha_autorizacion_col = _fechas_de_fila(textos)
             comprobante_raw = textos[1]
             tipo_detectado = _extraer_tipo_documento(comprobante_raw)
             if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
@@ -1850,7 +1880,9 @@ def _filas_tabla_emitidos(page, tabla, tipo_visible, tipo, fecha_emision, es_rec
             comprobante = partes_tipo[0] if partes_tipo else ""
             serie = " ".join(partes_tipo[1:]) if len(partes_tipo) > 1 else ""
             clave = textos[2]
-            fecha_autorizacion = textos[3] if len(textos) > 3 else ""
+            fecha_autorizacion = fecha_autorizacion_col or (
+                textos[3] if len(textos) > 3 else ""
+            )
             valor_sin_impuestos = textos[5] if len(textos) > 5 else ""
             iva_val = textos[6] if len(textos) > 6 else ""
             importe_total = textos[7] if len(textos) > 7 else ""
