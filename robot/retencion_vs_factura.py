@@ -89,6 +89,12 @@ _MESES = {
 SENTIDO_EMITIDAS = "emitidas"
 SENTIDO_RECIBIDAS = "recibidas"
 
+# Si las fechas que declaran las retenciones ya cubren esta fraccion del mes,
+# se consulta el mes completo: lo que se ahorra saltando los pocos dias que
+# faltan no compensa perder una factura cuya fecha declarada no coincide con la
+# de emision real.
+COBERTURA_MES_COMPLETO = 0.5
+
 
 def _normalizar_sentido(sentido: object) -> str:
     texto = _norm(sentido)
@@ -979,13 +985,27 @@ def descargar_listados_facturas(
         # normalmente son unas pocas y no los 30 dias del mes.
         dias_arg = None
         if origen == "Emitidos":
-            dias_arg = {m: sorted(d) for m, d in meses_dias.items()}
+            dias_arg = {}
+            for m, dias in meses_dias.items():
+                dias_en_mes = calendar.monthrange(anio, m)[1]
+                # La fecha que declara la retencion puede no ser la de emision
+                # real de la factura, y entonces ese dia no se pide nunca. Con
+                # el mes casi cubierto el ahorro es marginal frente al riesgo,
+                # asi que se piden todos los dias y no queda ninguno ciego.
+                if len(dias) >= dias_en_mes * COBERTURA_MES_COMPLETO:
+                    dias_arg[m] = list(range(1, dias_en_mes + 1))
+                    _emit(
+                        f"{_MESES[m]}: las retenciones nombran {len(dias)} de "
+                        f"{dias_en_mes} dias, asi que se consulta el mes entero "
+                        "para no perder facturas con la fecha declarada distinta."
+                    )
+                else:
+                    dias_arg[m] = sorted(dias)
             total_dias = sum(len(d) for d in dias_arg.values())
             del_mes = sum(calendar.monthrange(anio, m)[1] for m in meses)
             _emit(
                 f"Facturas emitidas: el portal filtra por dia. Se consultaran "
-                f"{total_dias} fecha(s) puntual(es) en vez de los {del_mes} dias "
-                f"de {nombres}."
+                f"{total_dias} fecha(s) de los {del_mes} dias de {nombres}."
             )
 
         if fin > inicio:
