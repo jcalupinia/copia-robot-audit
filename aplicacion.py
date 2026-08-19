@@ -5758,22 +5758,22 @@ with tab2:
             st.error(_nc_result.get("message", "No se pudo generar el reporte."))
 
     # =====================================================================
-    # MODULO AISLADO: Cruce de Retenciones emitidas vs Facturas recibidas.
-    # A diferencia del card anterior NO pide credenciales: trabaja solo con
-    # archivos ya descargados. La factura se ubica por RUC del proveedor +
-    # numero, datos que el propio comprobante de retencion trae.
+    # MODULO AISLADO: Cruce de Retenciones vs Facturas de sustento.
+    # Las retenciones salen de la carpeta que indique el usuario y las
+    # facturas se consultan siempre en el portal: los meses a pedir se
+    # deducen de las propias retenciones. La factura se ubica por RUC de
+    # quien la emitio + numero, datos que el comprobante ya trae.
     # =====================================================================
     with _group_card(
         3,
         "Reporte Retenciones vs Facturas",
-        "Cruce local, sin conectarse al SRI",
+        "Las facturas se consultan en el portal del SRI",
     ):
         st.markdown(
             "Genera un Excel que cruza cada **Comprobante de Retención** con "
             "la **Factura** que le sirve de sustento.\n\n"
-            "El comprobante ya trae el RUC de quien emitió la factura y su "
-            "número, así que el cruce se hace con eso — no hace falta "
-            "reconstruir claves de acceso."
+            "Solo hacen falta las retenciones descargadas: el sistema deduce "
+            "de ellas qué facturas buscar y las consulta en el portal."
         )
 
         _ret_sentido_label = st.radio(
@@ -5795,8 +5795,8 @@ with tab2:
         if _ret_sentido == "recibidas":
             st.caption(
                 "Las facturas se buscarán en **Emitidos**. Ese módulo del portal "
-                "filtra por día, así que la búsqueda automática consulta día por "
-                "día y tarda más que en Recibidos."
+                "filtra por día, así que la consulta va día por día y tarda "
+                "más que en Recibidos."
             )
 
         if "ret_vs_fact_carpeta_input" not in st.session_state:
@@ -5830,46 +5830,28 @@ with tab2:
             elif _err:
                 st.warning(_err)
 
-        _ret_fact_dir = st.text_input(
-            "Carpeta con Facturas recibidas (opcional)",
-            key="ret_vs_fact_facturas_input",
-            help=(
-                "Déjala vacía para que el sistema busque solo en los meses que "
-                "indiquen las propias retenciones. Acepta XML de facturas o el "
-                "Excel que genera el modo rápido."
-            ),
-        )
-
-        _ret_auto = st.checkbox(
-            "Buscar las facturas en el portal del SRI automáticamente",
-            key="ret_vs_fact_auto",
-            help=(
-                "Lee las retenciones, deduce de qué meses son las facturas y "
-                "consulta el listado de Recibidos de esos meses. Una consulta "
-                "por mes, no por factura."
-            ),
-        )
-        if _ret_auto:
-            _c1, _c2 = st.columns([1, 1])
-            with _c1:
-                st.text_input(
-                    "RUC del contribuyente auditado",
-                    key="ret_vs_fact_ruc",
-                    placeholder="Ejemplo: 1790602885001",
-                )
-            with _c2:
-                st.text_input(
-                    "Clave del SRI",
-                    type="password",
-                    key="ret_vs_fact_clave",
-                    placeholder="********",
-                )
-            st.caption(
-                "Debe ser el RUC que **emitió** las retenciones"
-                if _ret_sentido == "emitidas"
-                else "Debe ser el RUC al que **le retuvieron**: es quien emitió "
-                "las facturas de sustento."
+        # Las facturas se buscan siempre en el portal: sin credenciales el
+        # reporte quedaria sin la contraparte de cada retencion.
+        _c1, _c2 = st.columns([1, 1])
+        with _c1:
+            st.text_input(
+                "RUC del contribuyente auditado",
+                key="ret_vs_fact_ruc",
+                placeholder="Ejemplo: 1790602885001",
             )
+        with _c2:
+            st.text_input(
+                "Clave del SRI",
+                type="password",
+                key="ret_vs_fact_clave",
+                placeholder="********",
+            )
+        st.caption(
+            "Debe ser el RUC que **emitió** las retenciones"
+            if _ret_sentido == "emitidas"
+            else "Debe ser el RUC al que **le retuvieron**: es quien emitió "
+            "las facturas de sustento."
+        )
 
         st.info(
             "ℹ️ Cada fila lleva los datos de la retención junto a los de su "
@@ -5894,10 +5876,10 @@ with tab2:
                     "La carpeta indicada no existe. Selecciona una ruta válida "
                     "con Comprobantes de Retención descargados."
                 )
-            elif _ret_auto and not (_ret_ruc_val and _ret_clave_val):
+            elif not (_ret_ruc_val and _ret_clave_val):
                 st.error(
-                    "Para buscar en el portal necesitas el RUC y la clave del "
-                    "SRI, o desmarca la búsqueda automática."
+                    "Necesitas el RUC y la clave del SRI: las facturas se "
+                    "buscan en el portal."
                 )
             else:
                 _ret_out_dir = Path(_ret_clean).expanduser()
@@ -5924,9 +5906,6 @@ with tab2:
                     st.stop()
 
                 _ret_msgs: list[str] = []
-                _ret_facturas = [
-                    p for p in [str(_ret_fact_dir or "").strip()] if p
-                ]
 
                 # Se usa un spinner y no st.status: el icono de estado de
                 # st.status se renderiza como la palabra "check" encimada sobre
@@ -5936,11 +5915,10 @@ with tab2:
                     try:
                         _resultado_ret = generar_reporte_retenciones(
                             carpeta_retenciones=_ret_clean,
-                            carpetas_facturas=_ret_facturas or None,
                             salida_excel=_ret_excel,
                             sentido=_ret_sentido,
-                            ruc=_ret_ruc_val if _ret_auto else None,
-                            clave=_ret_clave_val if _ret_auto else None,
+                            ruc=_ret_ruc_val,
+                            clave=_ret_clave_val,
                             destino_descargas=(
                                 st.session_state.get("download_base_dir")
                                 or str(DESC_DIR)
