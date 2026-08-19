@@ -573,6 +573,25 @@ def extraer_retencion_pdf(pdf_path: Path) -> Optional[dict]:
 # =============================================================================
 
 
+def _iva_doc_sustento(doc) -> Optional[float]:
+    """IVA de la factura sustento, declarado por la propia retencion.
+
+    La ficha tecnica define dentro de `docSustento` un bloque
+    `impuestosDocSustento` donde el codigo 2 es el IVA. Junto con
+    `totalSinImpuestos` e `importeTotal` -- ambos obligatorios en el esquema --
+    la retencion describe la factura entera, asi que no hace falta ir al portal
+    a buscar esos importes.
+    """
+    total = 0.0
+    hubo = False
+    for imp in doc.findall("./impuestosDocSustento/impuestoDocSustento"):
+        if (imp.findtext("codImpuestoDocSustento") or "").strip() != "2":
+            continue
+        hubo = True
+        total += _a_float(imp.findtext("valorImpuesto")) or 0.0
+    return round(total, 2) if hubo else None
+
+
 def extraer_retencion_xml(xml_path: Path) -> Optional[dict]:
     """Lee el XML de una retencion agrupando cada docSustento con SUS impuestos.
 
@@ -625,6 +644,7 @@ def extraer_retencion_xml(xml_path: Path) -> Optional[dict]:
                 "num_aut_doc_sustento": _txt(doc, "numAutDocSustento"),
                 "total_sin_impuestos": _a_float(_txt(doc, "totalSinImpuestos")),
                 "importe_total": _a_float(_txt(doc, "importeTotal")),
+                "iva_factura": _iva_doc_sustento(doc),
                 "lineas": lineas,
             }
         )
@@ -1167,11 +1187,39 @@ def _observacion_no_encontrada(
     )
 
 
+def _factura_declarada(documento: dict) -> Optional[dict]:
+    """Datos de la factura tal como los declara la propia retencion.
+
+    En el esquema v2.0 el docSustento trae `totalSinImpuestos` e `importeTotal`
+    como obligatorios, el IVA en `impuestosDocSustento` y la clave de acceso en
+    `numAutDocSustento`. Con eso el reporte se completa sin consultar el portal,
+    que en Emitidos cuesta una consulta por dia.
+
+    Se marca `origen="retencion"` para que en el Excel se vea que el dato lo
+    afirma el agente de retencion y no el listado del SRI.
+    """
+    total = documento.get("importe_total")
+    subtotal = documento.get("total_sin_impuestos")
+    if total is None and subtotal is None:
+        return None
+    return {
+        "clave_acceso": _clave_acceso_sustento(documento),
+        "fecha_emision": documento.get("fecha_emision", ""),
+        "total_sin_impuestos": subtotal,
+        "iva_factura": documento.get("iva_factura"),
+        "importe_total": total,
+        "origen": "retencion",
+    }
+
+
 def _construir_fila(
     retencion: dict, documento: dict, factura: Optional[dict], estado: str, observacion: str
 ) -> dict:
     iva = _linea_por_impuesto(documento, "iva") or {}
     renta = _linea_por_impuesto(documento, "renta") or {}
+    # Sin factura del portal se usan los importes que declara la retencion.
+    if factura is None:
+        factura = _factura_declarada(documento)
 
     # Etiquetas neutrales: en retenciones emitidas el sujeto retenido es el
     # proveedor y en las recibidas es el propio contribuyente, asi que se nombra
