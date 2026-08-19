@@ -1444,6 +1444,37 @@ div[data-testid="stDecoration"]{
   background:color-mix(in srgb, var(--text-muted) 15%, transparent);
   color:var(--text-muted); border-color:var(--border);
 }
+/* Tarjetas de resultado de Retenciones vs Facturas. Reusan los mismos tokens
+   de panel, borde y radio que el resto de la app; el acento sale de --success
+   y --warn con la tecnica de color-mix que ya usan los pills de estado. */
+.rvf-stats{
+  display:grid; grid-template-columns:repeat(4, minmax(0,1fr));
+  gap:12px; margin:.25rem 0 .85rem;
+}
+@media (max-width:900px){ .rvf-stats{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
+.rvf-stat{
+  background:var(--glass); border:1px solid var(--border);
+  border-radius:var(--radius); padding:14px 16px; min-width:0;
+}
+.rvf-stat .rvf-label{
+  display:block; font-size:.72rem; font-weight:600; letter-spacing:.03em;
+  text-transform:uppercase; color:var(--text-muted);
+  margin:0 0 6px; line-height:1.25;
+}
+.rvf-stat .rvf-value{
+  display:block; font-size:1.7rem; font-weight:700; line-height:1.1;
+  color:var(--text-strong); font-variant-numeric:tabular-nums;
+}
+.rvf-stat.is-ok{
+  background:color-mix(in srgb, var(--success) 10%, var(--glass));
+  border-color:color-mix(in srgb, var(--success) 35%, transparent);
+}
+.rvf-stat.is-ok .rvf-value{ color:var(--success); }
+.rvf-stat.is-warn{
+  background:color-mix(in srgb, var(--warn) 12%, var(--glass));
+  border-color:color-mix(in srgb, var(--warn) 35%, transparent);
+}
+.rvf-stat.is-warn .rvf-value{ color:var(--warn); }
 /* Autorizacion: Autorizados azul, No autorizados naranja */
 .pill-auth-yes{
   background:color-mix(in srgb, #3b82f6 18%, transparent);
@@ -5897,9 +5928,11 @@ with tab2:
                     p for p in [str(_ret_fact_dir or "").strip()] if p
                 ]
 
-                with st.status(
-                    "Procesando Retenciones vs Facturas...", expanded=True
-                ) as _ret_status:
+                # Se usa un spinner y no st.status: el icono de estado de
+                # st.status se renderiza como la palabra "check" encimada sobre
+                # el label cuando la fuente de iconos no carga. El detalle del
+                # proceso se muestra despues, dentro de un desplegable.
+                with st.spinner("Procesando Retenciones vs Facturas..."):
                     try:
                         _resultado_ret = generar_reporte_retenciones(
                             carpeta_retenciones=_ret_clean,
@@ -5912,46 +5945,60 @@ with tab2:
                                 st.session_state.get("download_base_dir")
                                 or str(DESC_DIR)
                             ),
-                            progress=lambda m: (
-                                _ret_msgs.append(m),
-                                _ret_status.update(label=m),
-                            ),
+                            progress=_ret_msgs.append,
                         )
-                        for _m in _ret_msgs:
-                            st.write(_m)
-                        # Label corto: el detalle ya va en el cuerpo y en el
-                        # resumen de abajo. Uno largo se encima con el icono
-                        # de estado que dibuja st.status.
-                        _ret_status.update(
-                            label=(
-                                "Reporte generado"
-                                if _resultado_ret.get("ok")
-                                else "No se pudo generar el reporte"
-                            ),
-                            state="complete" if _resultado_ret.get("ok") else "error",
-                        )
-                        if _resultado_ret.get("message"):
-                            st.write(_resultado_ret["message"])
                         st.session_state["ret_vs_fact_result"] = _resultado_ret
                     except Exception as exc:
-                        _ret_status.update(
-                            label=f"Error inesperado: {exc}", state="error"
-                        )
-                        st.session_state["ret_vs_fact_result"] = {
+                        _resultado_ret = {
                             "ok": False,
                             "message": str(exc),
                             "excel_path": "",
                         }
+                        st.session_state["ret_vs_fact_result"] = _resultado_ret
+                # El resumen final ya viaja como ultimo mensaje de progreso, asi
+                # que no se vuelve a escribir aparte: hacerlo lo duplicaba.
+                st.session_state["ret_vs_fact_log"] = list(_ret_msgs)
 
         _ret_result = st.session_state.get("ret_vs_fact_result")
+        _ret_log = st.session_state.get("ret_vs_fact_log") or []
         if isinstance(_ret_result, dict) and _ret_result.get("ok"):
-            st.success(
-                f"✅ {_ret_result.get('total_retenciones', 0)} retención(es), "
-                f"{_ret_result.get('total_documentos', 0)} documento(s) sustento — "
-                f"con factura: {_ret_result.get('con_factura', 0)}, "
-                f"sin encontrar: {_ret_result.get('sin_factura', 0)}, "
-                f"sustento que no es factura: {_ret_result.get('no_facturas', 0)}."
+            st.markdown("##### Reporte generado")
+
+            # Los cuatro numeros que resumen la corrida. Verde en los que
+            # cruzaron y ambar en los que no son electronicos; los otros dos
+            # quedan neutros para que el ojo vaya a los que importan.
+            _rvf_tarjetas = [
+                ("Retenciones leídas", _ret_result.get("total_retenciones", 0), ""),
+                ("Con factura", _ret_result.get("con_factura", 0), " is-ok"),
+                (
+                    "Sin factura electrónica",
+                    _ret_result.get("sin_factura_electronica", 0),
+                    " is-warn",
+                ),
+                ("Otro sustento", _ret_result.get("no_facturas", 0), ""),
+            ]
+            st.markdown(
+                '<div class="rvf-stats">'
+                + "".join(
+                    f'<div class="rvf-stat{_clase}">'
+                    f'<span class="rvf-label">{_titulo}</span>'
+                    f'<span class="rvf-value">{_valor}</span>'
+                    "</div>"
+                    for _titulo, _valor, _clase in _rvf_tarjetas
+                )
+                + "</div>",
+                unsafe_allow_html=True,
             )
+
+            # Va pegado a las tarjetas y no al final: explica el numero ambar.
+            if _ret_result.get("sin_factura_electronica"):
+                st.warning(
+                    f"{_ret_result['sin_factura_electronica']} factura(s) no "
+                    "figuran en el portal aunque su mes **sí se revisó**. "
+                    "Normalmente son facturas preimpresas: sustentan la "
+                    "retención igual, pero no son electrónicas. Filtra el Excel "
+                    "por `Estado = Sin factura electronica` para revisarlas."
+                )
             if _ret_result.get("tipo_ilegible"):
                 st.error(
                     f"⚠️ {_ret_result['tipo_ilegible']} documento(s) sustento "
@@ -5966,14 +6013,14 @@ with tab2:
                     "no se indexaron. Falta descargarlos — la columna "
                     "'Fecha factura (segun retencion)' indica cuáles."
                 )
-            if _ret_result.get("sin_factura_electronica"):
-                st.info(
-                    f"ℹ️ {_ret_result['sin_factura_electronica']} factura(s) no "
-                    "figuran en el portal aunque su mes **sí se revisó**. "
-                    "Normalmente son facturas preimpresas: sustentan la "
-                    "retención igual, pero no son electrónicas. Filtra el Excel "
-                    "por `Estado = Sin factura electronica` para revisarlas."
-                )
+
+            # El paso a paso sirve para diagnosticar, pero no debe competir con
+            # el resultado: va cerrado.
+            if _ret_log:
+                with st.expander("Ver detalle del proceso", expanded=False):
+                    for _m in _ret_log:
+                        st.write(_m)
+
             _ret_path = Path(_ret_result.get("excel_path", ""))
             if _ret_path.is_file():
                 with open(_ret_path, "rb") as _f:
@@ -5987,6 +6034,10 @@ with tab2:
                     )
         elif isinstance(_ret_result, dict) and not _ret_result.get("ok"):
             st.error(_ret_result.get("message", "No se pudo generar el reporte."))
+            if _ret_log:
+                with st.expander("Ver detalle del proceso", expanded=False):
+                    for _m in _ret_log:
+                        st.write(_m)
 
     st.markdown('<h3 class="historial-title">Historial de ejecuciones recientes</h3>', unsafe_allow_html=True)
     historial = obtener_historial(DEVICE_FINGERPRINT)
