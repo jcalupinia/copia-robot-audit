@@ -1817,6 +1817,43 @@ def _huella_tabla(page, tabla=None) -> str:
     return f"tr:{len(filas)}"
 
 
+# El markup del paginador difiere entre modulos: en Recibidos el control es un
+# <span> y en Emitidos un <a> (ver _navegar_a_pagina_emitidos en browser.py).
+# Se prueban ambos para no depender de cual tabla se este recorriendo.
+_SEL_SIGUIENTE = (
+    "#frmPrincipal\:tablaCompEmitidos_paginator_top a.ui-paginator-next:not(.ui-state-disabled)",
+    "a.ui-paginator-next:not(.ui-state-disabled)",
+    "span.ui-paginator-next:not(.ui-state-disabled)",
+)
+
+
+def _paginas_totales(page) -> tuple[int, int]:
+    """Lee el indicador "(X of Y)" del paginador. (0, 0) si no esta."""
+    try:
+        ind = page.locator("span.ui-paginator-current")
+        if not ind.count():
+            return 0, 0
+        texto = (ind.first.inner_text() or "").strip()
+    except Exception:
+        return 0, 0
+    encontrado = re.search(r"\(\s*(\d+)\s*(?:of|de)\s*(\d+)\s*\)", texto, re.IGNORECASE)
+    if not encontrado:
+        return 0, 0
+    return int(encontrado.group(1)), int(encontrado.group(2))
+
+
+def _boton_siguiente(page):
+    """Primer control de "pagina siguiente" que exista y este habilitado."""
+    for selector in _SEL_SIGUIENTE:
+        try:
+            boton = page.locator(selector)
+            if boton.count():
+                return boton
+        except Exception:
+            continue
+    return None
+
+
 def _pasar_pagina(page, tabla=None, timeout_ms: int = 12000) -> bool:
     """Va a la pagina siguiente y espera a que la tabla realmente cambie.
 
@@ -1829,11 +1866,14 @@ def _pasar_pagina(page, tabla=None, timeout_ms: int = 12000) -> bool:
     Devuelve False cuando ya no hay pagina siguiente o cuando el portal no
     respondio, para que el bucle corte en vez de colgarse.
     """
-    boton = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
-    try:
-        if not boton.count():
-            return False
-    except Exception:
+    boton = _boton_siguiente(page)
+    if boton is None:
+        actual, total = _paginas_totales(page)
+        if total and actual < total:
+            logger.warning(
+                f"[modo rapido] el paginador dice {actual} de {total} pero no hay "
+                "boton de siguiente habilitado; quedan filas sin leer."
+            )
         return False
 
     huella_previa = _huella_tabla(page, tabla)
@@ -2197,11 +2237,21 @@ def _flujo_emitidos(
                 vistas.add(huella)
                 filas_tabla.append(fila_tabla)
                 nuevas += 1
+            _, total_paginas = _paginas_totales(page)
             logger.info(
-                f"[modo rapido] pag {pagina}: {len(del_pagina)} fila(s), {nuevas} nueva(s)"
+                f"[modo rapido] pag {pagina}"
+                + (f" de {total_paginas}" if total_paginas else "")
+                + f": {len(del_pagina)} fila(s), {nuevas} nueva(s)"
             )
 
             if not _pasar_pagina(page, tabla_emitidos):
+                # El portal dice cuantas hojas hay: si se corta antes, se avisa
+                # en vez de dar por completo un dia al que le faltan filas.
+                if total_paginas and pagina < total_paginas:
+                    logger.warning(
+                        f"[modo rapido] {fecha_emision}: se leyeron {pagina} de "
+                        f"{total_paginas} hoja(s). Quedan comprobantes sin traer."
+                    )
                 break
             pagina += 1
 
