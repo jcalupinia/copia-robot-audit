@@ -89,11 +89,16 @@ _MESES = {
 SENTIDO_EMITIDAS = "emitidas"
 SENTIDO_RECIBIDAS = "recibidas"
 
-# Si las fechas que declaran las retenciones ya cubren esta fraccion del mes,
-# se consulta el mes completo: lo que se ahorra saltando los pocos dias que
-# faltan no compensa perder una factura cuya fecha declarada no coincide con la
-# de emision real.
-COBERTURA_MES_COMPLETO = 0.5
+# Si las fechas de las facturas ya cubren esta fraccion del mes, se pide el mes
+# entero: a esa altura los pocos dias que faltan no ahorran nada y evitan
+# perder alguna cuya fecha declarada no coincida con la de emision real.
+#
+# El umbral es alto a proposito. Solo cuentan los sustentos que son facturas
+# -- los IFIS y notas de venta ya no aportan fechas -- y ademas se prefiere la
+# fecha que va dentro de la clave de acceso, que es la real. Con esas dos cosas
+# la lista de dias es corta y confiable, asi que barrer el mes entero seria
+# tiempo tirado.
+COBERTURA_MES_COMPLETO = 0.9
 
 
 def _normalizar_sentido(sentido: object) -> str:
@@ -1144,6 +1149,34 @@ def _linea_por_impuesto(documento: dict, *nombres: str) -> Optional[dict]:
     return None
 
 
+def _es_factura(documento: dict) -> bool:
+    """True si el sustento es una FACTURA y por lo tanto puede cruzarse.
+
+    Los IFIS, notas de venta y demas no figuran en el listado de facturas del
+    portal, asi que sus fechas no deben decidir que dias se consultan.
+    """
+    cod = documento.get("cod_doc_sustento") or ""
+    if cod:
+        return cod == COD_FACTURA
+    return _norm(documento.get("tipo")).startswith("factura")
+
+
+def _fecha_para_consulta(documento: dict) -> Optional[datetime]:
+    """Dia en que conviene consultar el portal por esta factura.
+
+    Se prefiere la que va dentro de la clave de acceso -- sus primeros ocho
+    digitos son la fecha de emision real, `ddmmaaaa` -- sobre la que declara la
+    retencion, que el agente pudo copiar mal o tomar del registro contable.
+    """
+    clave = _clave_acceso_sustento(documento)
+    if clave:
+        try:
+            return datetime.strptime(clave[:8], "%d%m%Y")
+        except ValueError:
+            pass
+    return _parse_fecha(documento.get("fecha_emision"))
+
+
 def _observacion_no_encontrada(
     retencion: dict,
     documento: dict,
@@ -1388,12 +1421,22 @@ def generar_reporte_retenciones(
 
     # Meses en los que viven las facturas sustento. Salen del propio RIDE, asi
     # que no hay que barrer un rango a ciegas.
-    fechas_sustento = [
-        _parse_fecha(doc.get("fecha_emision"))
-        for ret in retenciones
-        for doc in ret.get("documentos", [])
+    # Solo los sustentos que SON facturas deciden que dias pedirle al portal.
+    # Incluir los IFIS y notas de venta agregaba fechas donde no hay ninguna
+    # factura que buscar, y de paso inflaba la cobertura del mes.
+    documentos_todos = [
+        doc for ret in retenciones for doc in ret.get("documentos", [])
     ]
+    documentos_factura = [doc for doc in documentos_todos if _es_factura(doc)]
+    fechas_sustento = [_fecha_para_consulta(doc) for doc in documentos_factura]
     periodos = sorted({(f.year, f.month) for f in fechas_sustento if f})
+    _descartados = len(documentos_todos) - len(documentos_factura)
+    if _descartados:
+        _emit(
+            f"{len(documentos_factura)} de {len(documentos_todos)} sustento(s) son "
+            f"facturas; los otros {_descartados} (IFIS, notas de venta) no se "
+            "buscan en el portal."
+        )
 
     # Carpetas de facturas: explicitas, o deducidas de las fechas de sustento.
     rutas = [Path(c).expanduser() for c in (carpetas_facturas or [])]
@@ -1547,7 +1590,7 @@ def generar_reporte_retenciones(
                 )
                 continue
 
-            es_factura = cod == COD_FACTURA if cod else tipo.startswith("factura")
+            es_factura = _es_factura(documento)
             if not es_factura:
                 resumen["no_facturas"] += 1
                 filas_otros.append(
