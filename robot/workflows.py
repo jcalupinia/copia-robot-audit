@@ -1904,7 +1904,17 @@ def _filas_tabla_emitidos(page, tabla, tipo_visible, tipo, fecha_emision, es_rec
     """
     data = []
     if not es_rechazado:
-        html = page.content()
+        # Solo las filas del CUERPO de la tabla de datos. Barrer el HTML entero
+        # arrastraba filas de la cabecera, los filtros y los dialogos ocultos:
+        # se contaban 55 filas en una hoja de 50 y ensuciaban el dedupe.
+        html = ""
+        if tabla is not None:
+            try:
+                html = tabla.inner_html()
+            except Exception:
+                html = ""
+        if not html:
+            html = page.content()
         rows = re.findall(r"<tr[^>]*>\s*(.*?)\s*</tr>", html, flags=re.DOTALL)
         for r in rows:
             cols = re.findall(r"<td[^>]*>(.*?)</td>", r, flags=re.DOTALL)
