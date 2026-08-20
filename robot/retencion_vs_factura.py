@@ -540,6 +540,41 @@ def _extraer_documentos_pdf(palabras) -> list[dict]:
     return documentos
 
 
+def _fusionar_documentos_repetidos(documentos: list[dict]) -> list[dict]:
+    """Junta los sustentos que son la MISMA factura partida por impuesto.
+
+    Los RIDE dibujan la tabla de sustento de dos formas segun el emisor: unos
+    combinan la celda del comprobante para que abarque sus dos filas de
+    impuesto, y otros repiten numero y fecha en cada fila. En el segundo caso
+    una sola factura entraba como dos documentos, y el reporte salia con la
+    fila duplicada -- con el IVA en una y la renta en la otra, ninguna completa.
+
+    Se agrupa por numero + fecha, concatenando las lineas de impuesto. Si dos
+    lineas apuntan a facturas distintas, cada una sigue siendo su propio
+    documento, que es lo correcto: una retencion puede cubrir varias facturas.
+    """
+    fusionados: list[dict] = []
+    indice: dict[tuple, dict] = {}
+    for doc in documentos:
+        clave = (doc.get("numero", ""), doc.get("fecha_emision", ""))
+        if not clave[0]:
+            fusionados.append(doc)
+            continue
+        previo = indice.get(clave)
+        if previo is None:
+            indice[clave] = doc
+            fusionados.append(doc)
+            continue
+        previo["lineas"] = list(previo.get("lineas") or []) + list(doc.get("lineas") or [])
+        # Los campos sueltos se completan con lo que traiga el repetido.
+        for campo, valor in doc.items():
+            if campo == "lineas":
+                continue
+            if not previo.get(campo) and valor:
+                previo[campo] = valor
+    return fusionados
+
+
 def extraer_retencion_pdf(pdf_path: Path) -> Optional[dict]:
     """Lee un RIDE de comprobante de retencion. None si no se puede parsear."""
     try:
@@ -569,7 +604,7 @@ def extraer_retencion_pdf(pdf_path: Path) -> Optional[dict]:
         "razon_social_sujeto": _valor_junto_a(
             palabras, "Razon Social / Nombres y Apellidos:"
         ),
-        "documentos": _extraer_documentos_pdf(palabras),
+        "documentos": _fusionar_documentos_repetidos(_extraer_documentos_pdf(palabras)),
     }
 
 
@@ -666,7 +701,7 @@ def extraer_retencion_xml(xml_path: Path) -> Optional[dict]:
         "razon_social_emisor": _txt(tributaria, "razonSocial"),
         "identificacion_sujeto": _txt(info, "identificacionSujetoRetenido"),
         "razon_social_sujeto": _txt(info, "razonSocialSujetoRetenido"),
-        "documentos": documentos,
+        "documentos": _fusionar_documentos_repetidos(documentos),
     }
 
 
