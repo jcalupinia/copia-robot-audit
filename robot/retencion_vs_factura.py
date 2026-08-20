@@ -1093,6 +1093,23 @@ def descargar_listados_facturas(
                 dias_por_mes=dias_arg,
             )
         )
+        # Cuanto devolvio el portal por mes. Sin esto no se distingue un mes
+        # que vino vacio del portal de uno que si trajo filas pero no llegaron
+        # al indice, y son problemas distintos.
+        ultimo = resultados[-1]
+        if isinstance(ultimo, dict):
+            detalle = ultimo.get("detalles_meses")
+            if detalle:
+                _emit(
+                    "El portal devolvio: "
+                    + ", ".join(
+                        f"{_MESES[int(d.get('mes', 0))]} {d.get('n_registros', 0)}"
+                        for d in detalle
+                        if d.get("mes")
+                    )
+                )
+            else:
+                _emit(f"El portal devolvio {ultimo.get('n_registros', 0)} comprobante(s).")
     return resultados
 
 
@@ -1423,6 +1440,9 @@ def generar_reporte_retenciones(
         # Documentos cuyo tipo no se pudo leer: fallo del extractor, no un
         # sustento legitimamente no cruzable.
         "tipo_ilegible": 0,
+        # Meses que se pidieron al portal y volvieron sin ninguna factura.
+        "meses_sin_datos": [],
+        "portal_error": "",
         "excel_path": "",
         "message": "",
     }
@@ -1528,10 +1548,14 @@ def generar_reporte_retenciones(
                     rutas.append(carpeta_descarga)
             except Exception as err:
                 logger.warning(f"Fallo la consulta al portal: {err}")
+                resumen["portal_error"] = str(err)
+                # Una excepcion a mitad de camino no invalida los meses que ya
+                # se alcanzaron a escribir: se busca igual en la carpeta.
                 _emit(
-                    f"No se pudo consultar el portal ({err}). Se sigue con lo "
-                    "que haya en disco."
+                    f"No se pudo consultar el portal ({err}). Se usara lo que "
+                    "haya quedado descargado."
                 )
+                rutas.append(carpeta_descarga)
         if _cancelado():
             resumen["message"] = "Cancelado por el usuario."
             return resumen
@@ -1593,6 +1617,17 @@ def generar_reporte_retenciones(
                 f"{_MESES[m]} {a} ({n})"
                 for (a, m), n in sorted(facturas_por_mes.items())
             )
+        )
+    # Un mes pedido que vuelve sin una sola factura no es un resultado normal:
+    # significa que la consulta de ese mes no llego a devolver nada, y sin este
+    # aviso sus retenciones salen como "falta descargar el mes" sin mas pista.
+    meses_vacios = [per for per in periodos if per not in facturas_por_mes]
+    if meses_vacios:
+        resumen["meses_sin_datos"] = [f"{_MESES[m]} {a}" for a, m in meses_vacios]
+        _emit(
+            "El portal no devolvio NINGUNA factura de: "
+            + ", ".join(resumen["meses_sin_datos"])
+            + ". Las retenciones de esos meses no van a cruzar."
         )
 
     filas_cruce: list[dict] = []

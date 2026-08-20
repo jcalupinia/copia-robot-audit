@@ -5977,6 +5977,22 @@ with tab2:
                     "retención igual, pero no son electrónicas. Filtra el Excel "
                     "por `Estado = Sin factura electronica` para revisarlas."
                 )
+            # Un mes que el portal devolvio vacio explica de golpe todas las
+            # filas de ese mes: va arriba de los demas avisos.
+            if _ret_result.get("meses_sin_datos"):
+                st.error(
+                    "⚠️ El portal no devolvió **ninguna** factura de "
+                    f"**{', '.join(_ret_result['meses_sin_datos'])}**. Las "
+                    "retenciones de esos meses no pueden cruzar. Revisa "
+                    "'Ver detalle del proceso': si la consulta falló, ahí está "
+                    "el motivo."
+                )
+            if _ret_result.get("portal_error"):
+                st.error(
+                    "⚠️ La consulta al portal se interrumpió: "
+                    f"`{_ret_result['portal_error']}`. Se usó lo que alcanzó a "
+                    "descargarse, así que puede faltar parte del período."
+                )
             if _ret_result.get("tipo_ilegible"):
                 st.error(
                     f"⚠️ {_ret_result['tipo_ilegible']} documento(s) sustento "
