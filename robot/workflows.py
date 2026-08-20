@@ -1796,25 +1796,25 @@ def _huella_tabla(page, tabla=None) -> str:
     conteo de <tr> identico entre paginas. La huella nunca cambiaba y el
     recorrido se cortaba en la hoja 1, perdiendo el resto del dia.
     """
-    try:
-        html = page.content()
-    except Exception:
-        return ""
+    # Se mira solo la tabla: page.content() serializa el DOM entero y es caro
+    # de mas para esto, sobre todo con cientos de filas.
+    html = ""
+    if tabla is not None:
+        try:
+            html = tabla.inner_html()
+        except Exception:
+            html = ""
+    if not html:
+        try:
+            html = page.content()
+        except Exception:
+            return ""
 
     claves = re.findall(r"\d{49}", html)
     if claves:
         return f"{len(claves)}:{hashlib.md5('|'.join(claves).encode()).hexdigest()}"
-
-    # Sin claves (p. ej. tipos que no las muestran) se cae al texto de la tabla.
-    if tabla is not None:
-        try:
-            texto = tabla.inner_text()
-            if texto.strip():
-                return hashlib.md5(texto.encode("utf-8", "replace")).hexdigest()
-        except Exception:
-            pass
     filas = re.findall(r"<tr[^>]*>", html)
-    return f"tr:{len(filas)}"
+    return f"tr:{len(filas)}:{len(html)}"
 
 
 # El markup del paginador difiere entre modulos: en Recibidos el control es un
@@ -1876,7 +1876,11 @@ def _pasar_pagina(page, tabla=None, timeout_ms: int = 12000) -> bool:
             )
         return False
 
-    huella_previa = _huella_tabla(page, tabla)
+    # El paginador publica en que hoja esta: comparar ese numero cuesta leer un
+    # elemento, contra hashear la tabla entera en cada vuelta del sondeo. La
+    # huella queda de respaldo para cuando el indicador no existe.
+    pagina_previa, _ = _paginas_totales(page)
+    huella_previa = "" if pagina_previa else _huella_tabla(page, tabla)
     try:
         # Timeout propio: el de Playwright son 30 s por clic, demasiado para un
         # boton que puede quedar tapado o deshabilitarse a mitad de camino.
@@ -1887,9 +1891,13 @@ def _pasar_pagina(page, tabla=None, timeout_ms: int = 12000) -> bool:
 
     limite = time.time() + timeout_ms / 1000
     while time.time() < limite:
-        if _huella_tabla(page, tabla) != huella_previa:
+        if pagina_previa:
+            actual, _ = _paginas_totales(page)
+            if actual and actual != pagina_previa:
+                return True
+        elif _huella_tabla(page, tabla) != huella_previa:
             return True
-        time.sleep(0.15)
+        time.sleep(0.05)
     logger.warning("[modo rapido] la tabla no cambio tras pasar de pagina; se corta aqui.")
     return False
 
