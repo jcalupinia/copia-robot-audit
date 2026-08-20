@@ -2015,13 +2015,19 @@ def _abrir_modulo_consultas(page, origen: str):
                 logger.warning(f"Reintentando acceso directo al formulario ({intento + 1}/3): {err}")
         raise RuntimeError(f"No se pudo abrir el formulario de {origen.lower()}: {ultimo_error}")
 
+    # El menu del portal es PrimeFaces sobre Angular y anima al abrirse: los
+    # 1500 ms originales expiraban con el elemento todavia "not stable", justo
+    # cuando el clic empezaba. Al fallar el panel no se abre, el modulo queda
+    # sin cargar y la consulta siguiente lee una tabla vieja o vacia.
+    MENU_CLICK_TIMEOUT = 8000
+
     def _ensure_menu_visible():
         try:
             if page.locator(FACTURACION_MENU_SELECTOR).first.is_visible(timeout=500):
                 return True
         except Exception:
             pass
-        return _click_locator(MENU_TOGGLE_SELECTOR, "el botón de menú", timeout=1500)
+        return _click_locator(MENU_TOGGLE_SELECTOR, "el botón de menú", timeout=MENU_CLICK_TIMEOUT)
 
     def _expand_panel(selector: str, descripcion: str):
         header = page.locator(selector)
@@ -2035,7 +2041,7 @@ def _abrir_modulo_consultas(page, origen: str):
         if expanded == "true":
             return True
         try:
-            header.first.click(timeout=1500)
+            header.first.click(timeout=MENU_CLICK_TIMEOUT)
             page.wait_for_timeout(200)
             return True
         except Exception as err:
@@ -2070,7 +2076,7 @@ def _abrir_modulo_consultas(page, origen: str):
     consultas_locator = page.locator(CONSULTAS_SELECTOR)
     if consultas_locator.count():
         try:
-            consultas_locator.first.click(timeout=1500)
+            consultas_locator.first.click(timeout=MENU_CLICK_TIMEOUT)
         except Exception as err:
             logger.warning(f"No se pudo hacer clic en 'Consultas': {err}")
     else:

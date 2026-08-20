@@ -1015,12 +1015,11 @@ def descargar_listados_facturas(
     sentido = _normalizar_sentido(sentido)
     origen = _origen_facturas(sentido)
     ruc_limpio = re.sub(r"\D", "", str(ruc or ""))
-    # Se agrega el RUC solo si la carpeta base no lo trae ya: el usuario puede
-    # tener configurada la descarga directamente sobre la carpeta del RUC, y
-    # concatenarlo otra vez creaba F:\<ruc>\<ruc>.
-    destino_ruc = Path(destino)
-    if ruc_limpio and destino_ruc.name != ruc_limpio:
-        destino_ruc = destino_ruc / ruc_limpio
+    # El RUC se agrega siempre, igual que en el modulo de Descarga de
+    # Comprobantes (`destino = base_descargas / ruc`). Si la carpeta base ya
+    # apunta al RUC queda anidado, y esta bien: las dos rutas deben coincidir
+    # para que lo descargado por un lado se encuentre desde el otro.
+    destino_ruc = Path(destino) / ruc_limpio if ruc_limpio else Path(destino)
 
     def _emit(msg: str) -> None:
         if progress:
