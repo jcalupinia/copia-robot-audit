@@ -15,6 +15,10 @@ set ICON_ARG=
 if exist "LogoAUDIT.ico" (
   set ICON_ARG=--icon "LogoAUDIT.ico"
 )
+REM La carpeta robot se agrega como DATOS (--add-data), asi que PyInstaller no
+REM analiza sus imports: lo que solo se usa ahi dentro hay que declararlo a mano.
+REM Sin esto el exe arranca bien y falla recien al abrir un PDF, con
+REM "No module named 'pdfplumber'" pese a estar en requirements.txt.
 pyinstaller --noconfirm --onefile --name "ROBOT_AUDIT_SRI" ^
   --noupx ^
   %ICON_ARG% ^
@@ -23,6 +27,14 @@ pyinstaller --noconfirm --onefile --name "ROBOT_AUDIT_SRI" ^
   --collect-all streamlit.elements ^
   --collect-all streamlit.components.v1 ^
   --collect-all playwright ^
+  --collect-all pdfplumber ^
+  --collect-all pdfminer ^
+  --collect-all fitz ^
+  --hidden-import pytesseract ^
+  --hidden-import openpyxl ^
+  --hidden-import pandas ^
+  --hidden-import requests ^
+  --hidden-import PIL ^
   --add-data "aplicacion.py;." ^
   --add-data "AUDIT_IA_sin_fondo_transparente_FINAL.png;." ^
   --add-data "licensing_client.py;." ^
