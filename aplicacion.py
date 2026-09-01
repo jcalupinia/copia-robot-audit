@@ -4907,8 +4907,8 @@ with tab1:
             st.warning(" Ingresa RUC y clave antes de continuar.")
         else:
             mes_fin_val = None
-            # El modo rapido solo existe en Recibidos; se lee de session_state
-            # porque la variable local no se define cuando origen es Emitidos.
+            # El checkbox es distinto en cada origen y su variable local solo
+            # existe en la rama que se dibujo, asi que se lee de session_state.
             modo_rapido_val = bool(
                 st.session_state.get("modo_rapido_recibidos")
                 if origen == "Recibidos"
@@ -4970,9 +4970,16 @@ with tab1:
                     punto_emision_val = punto_clean
                 else:
                     punto_emision_val = ""
-                formatos_final = formatos
-                if not any(fmt in formatos_final for fmt in ("PDF", "XML")):
-                    st.warning("Selecciona al menos un formato (PDF o XML).")
+                # En modo rapido no se descarga ningun comprobante, asi que
+                # exigir un formato no tiene sentido: se corre con la lista
+                # vacia, igual que en Recibidos.
+                formatos_final = [] if modo_rapido_val else formatos
+                if not modo_rapido_val and not any(
+                    fmt in formatos_final for fmt in ("PDF", "XML")
+                ):
+                    st.warning(
+                        "Selecciona al menos un formato (PDF o XML) o activa el modo rápido."
+                    )
                     st.stop()
                 estado_emitidos_norm = (
                     unicodedata.normalize("NFKD", estado_emitidos_val or "")
