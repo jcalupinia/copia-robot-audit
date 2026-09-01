@@ -5,6 +5,7 @@
 | Dato | Valor |
 |------|-------|
 | Versión del sistema | 2026.05.05.88 |
+| Última actualización del manual | Módulo rápido de reportes y Retenciones vs Facturas |
 | Empresa | Audit Consulting Group |
 | Modalidad | Web (Render) y Escritorio (.exe) |
 | Fecha de edición | _A completar_ |
@@ -558,7 +559,45 @@ Los filtros varían ligeramente según el origen elegido (Recibidos o Emitidos).
 | _Año_ | Numérico | Año a consultar. |
 | _Mes_ | Lista desplegable | Mes a consultar (cuando el modo lo requiere). |
 | _Día (0 = Todos)_ | Numérico | Día específico o `0` para todo el mes. |
+| _Modo rápido: solo reporte_ | Checkbox | Genera el Excel del período sin descargar ningún comprobante. |
 | _Formatos a descargar_ | Multiselect | "XML", "PDF" o ambos. |
+
+#### Modo rápido — solo reporte (sin PDF ni XML)
+
+**Propósito**: obtener el listado completo del período en un Excel, en segundos, sin descargar un archivo por cada comprobante.
+
+En vez de abrir cada fila para bajar su XML y su PDF, el sistema toma los datos que el propio portal ya publica en pantalla. Una consulta de 300 comprobantes pasa de varios minutos a unos pocos segundos.
+
+| Origen | De dónde toma los datos | Consultas al portal |
+|---|---|---|
+| **Recibidos** | Del archivo que ofrece el enlace "Descargar reporte" del portal | 1 por mes |
+| **Emitidos** | De la tabla en pantalla | 1 por día (el portal filtra por día) |
+
+El checkbox está ubicado **entre el modo de fecha y los formatos**, porque es la decisión de *qué querés obtener* antes que la de *en qué formato*:
+
+- Al marcarlo, la selección de formatos queda deshabilitada y vacía.
+- Al elegir XML o PDF, el modo rápido se desmarca solo.
+
+⚠️ **Qué NO hace**: no descarga comprobantes. Si necesitás los XML o los PDF —para respaldo, para el módulo de Consolidación o para el reporte de Retenciones vs Facturas— usá los formatos normales.
+
+**Dónde queda el Excel**:
+
+```
+[Carpeta base]/[RUC]/[Origen]/[Tipo]/[Año]/[Mes]/TXT/
+    recibidos_reporte_txt_[tipo]_[AAAAMM].xlsx
+```
+
+Si elegiste un rango de meses o el año completo, además se genera un **Excel consolidado** con todo el período en `[Año]/TXT/`.
+
+Las columnas son las mismas que publica el portal: comprobante, serie, RUC y razón social del emisor, clave de acceso, fechas de emisión y autorización, valor sin impuestos, IVA e importe total.
+
+```
+[CAPTURA 08b — Checkbox Modo rápido activo]
+Descripción de la captura:
+- Flecha 1: Checkbox "Modo rápido: solo reporte (sin descargar PDF ni XML)" marcado.
+- Flecha 2: Multiselect "Formatos a descargar" deshabilitado y vacío.
+- Flecha 3: Leyenda "Se generará un Excel con los comprobantes del período elegido".
+```
 
 #### Tipos de comprobante disponibles
 
@@ -714,6 +753,14 @@ Descripción de la captura:
 ### 7.2.1 Propósito del módulo
 
 Generar reportes Excel a partir de comprobantes que ya están descargados en una carpeta local, y consultar el historial de ejecuciones recientes con sus resultados.
+
+El módulo tiene tres reportes, cada uno en su propia tarjeta:
+
+| # | Reporte | Qué cruza |
+|---|---|---|
+| 1 | **Reporte por fechas** | Los comprobantes de una carpeta, filtrados por rango de fechas. |
+| 2 | **Notas de Crédito vs Facturas** | Cada NC contra la factura que modifica, con el valor neto. |
+| 3 | **Retenciones vs Facturas** | Cada retención contra la factura que le sirve de sustento, con los días transcurridos. |
 
 ### 7.2.2 Card "Reporte por fechas"
 
@@ -902,6 +949,117 @@ Descripción de la captura:
 - Flecha 4: Botón Generar reporte Valor Neto.
 - Flecha 5: Sección de progreso con mensajes en tiempo real.
 - Flecha 6: Botón Descargar reporte Valor Neto (Excel) tras el éxito.
+```
+
+---
+
+### 7.2.5 Card "Reporte Retenciones vs Facturas"
+
+**Propósito**: para cada Comprobante de Retención, ubicar la Factura que le sirve de sustento y generar un Excel que pone los datos de ambos lado a lado, cerrando con los **días transcurridos** entre la emisión de la factura y la de la retención.
+
+#### Los dos sentidos
+
+Lo primero que se elige es qué retenciones tenés, porque de eso depende dónde están las facturas:
+
+| Sentido | Qué pasó | Quién emitió la factura | Dónde se busca |
+|---|---|---|---|
+| **Emitidas** | Vos le retuviste a tu proveedor | El proveedor | **Recibidos** |
+| **Recibidas** | Te retuvieron sobre una venta | Vos | **Emitidos** |
+
+En los dos casos, quien emitió la factura es el **sujeto retenido** del comprobante. Esa es la clave del cruce.
+
+#### Cómo encuentra cada factura
+
+El comprobante de retención ya trae, para cada documento de sustento, el RUC de quien emitió la factura y su número. Con esos dos datos se busca en el listado del portal — no hace falta reconstruir claves de acceso.
+
+Además, la fecha de emisión que declara el propio comprobante indica **de qué mes es cada factura**, así que solo se consultan los días que hacen falta y no el período completo.
+
+⚠️ **El módulo consulta el portal siempre**: por eso el RUC y la clave del SRI son obligatorios. Debe ser el RUC del contribuyente auditado — el mismo en los dos sentidos.
+
+#### Campos
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| _¿Qué retenciones tienes?_ | Radio | "Emitidas" o "Recibidas" (ver tabla arriba). |
+| _Carpeta con Comprobantes de Retención ya descargados_ | Texto + Botón | Acepta PDF o XML. Puede ser el mes específico o cualquier nivel superior; se explora recursivamente. |
+| _RUC del contribuyente auditado_ | Texto | RUC dueño de la carpeta de descargas. |
+| _Clave del SRI_ | Texto (oculto) | Contraseña del mismo RUC. |
+
+#### Botones y acciones
+
+| Botón | Acción |
+|---|---|
+| **Seleccionar carpeta de Retenciones** | Abre selector de carpetas. |
+| **Generar reporte Retenciones vs Facturas** | Lee las retenciones, consulta el portal y genera el Excel. |
+| **⬇️ Descargar reporte Retenciones vs Facturas (Excel)** | (Aparece al finalizar) descarga el Excel generado. |
+
+#### Resultado en pantalla
+
+Al terminar se muestran cuatro tarjetas con los números de la corrida:
+
+| Tarjeta | Significado |
+|---|---|
+| **Retenciones leídas** | Comprobantes procesados de la carpeta. |
+| **Con factura** (verde) | Cruzaron contra una factura del portal. |
+| **Sin factura electrónica** (ámbar) | El mes se revisó y la factura no figura. Normalmente son facturas preimpresas. |
+| **Otro sustento** | El documento de sustento no es una factura (IFIS, notas de venta). No cruzan por definición. |
+
+La suma de las tres últimas es igual a la primera: **una fila por comprobante**.
+
+Debajo, el desplegable **"Ver detalle del proceso"** guarda el paso a paso completo. Está cerrado porque es información de diagnóstico, pero conviene abrirlo si algún número no cuadra.
+
+#### Estructura del Excel resultante
+
+El archivo `Retenciones_vs_Facturas_AAAAMMDD_HHMMSS.xlsx` tiene **dos hojas**.
+
+**Hoja 1 — "Retenciones vs Facturas"**: una fila por factura de sustento.
+
+| Bloque | Columnas |
+|---|---|
+| Retención | RUC y razón social del agente de retención, número, fecha, clave de acceso |
+| Sujeto retenido | RUC y razón social (es quien emitió la factura) |
+| Sustento | Tipo, número de factura, fecha declarada, ejercicio fiscal |
+| Impuestos | Base, porcentaje y valor retenido de IVA y de Renta |
+| Factura | Clave de acceso, nro. de autorización, fecha, subtotal, IVA, importe total, origen del dato |
+| Cierre | Estado, observación y **Días entre factura y retención** |
+
+**Hoja 2 — "Sustento no factura"**: los documentos que no son facturas, con la misma estructura. Van aparte para no ensuciar el cruce.
+
+#### Estados posibles por fila
+
+| Estado | Significado | Acción recomendada |
+|---|---|---|
+| `Factura encontrada` | Se ubicó la factura y se completaron sus importes. | Nada — todo bien. |
+| `Sin factura electronica` | El mes se consultó y la factura no figura. Casi siempre es una factura preimpresa: sustenta la retención igual, pero no es electrónica. | Verificar contra el papel. No hay nada que descargar. |
+| `Factura no encontrada` | No se indexó ninguna factura de ese mes. | Falta descargar ese mes — la columna "Fecha factura (segun retencion)" indica cuál. |
+| `Sustento no es factura` | El sustento es un documento IFIS, nota de venta u otro. | Es normal. Va en la hoja 2. |
+| `No se pudo leer el sustento` | No se reconoció el tipo en el PDF. | Formato de emisor no soportado — reportarlo con el archivo. |
+
+#### Sobre la columna "Origen datos factura"
+
+Dice de dónde salieron el subtotal, el IVA y el total:
+
+- `listado` — los confirmó el portal del SRI.
+- `retencion` — los declara el propio comprobante de retención. Ocurre cuando la factura no aparece en el portal; el esquema del SRI obliga a que la retención incluya esos importes, así que la fila se completa igual.
+
+#### Casos típicos
+
+**Caso A — retenciones emitidas**: las facturas están en Recibidos, que se consulta por mes. Es el sentido rápido: un par de consultas y listo.
+
+**Caso B — retenciones recibidas**: las facturas están en Emitidos, y ese módulo del portal filtra por día. Tarda más, en proporción a cuántas fechas distintas tengan las facturas.
+
+**Caso C — muchos sustentos que no son facturas**: es normal, sobre todo en retenciones recibidas de bancos y aseguradoras. Si de 97 comprobantes 79 van a la hoja 2, no es un error: son documentos IFIS que no figuran en el listado de facturas.
+
+```
+[CAPTURA 16b — Card Retenciones vs Facturas con resultado]
+Descripción de la captura:
+- Flecha 1: Insignia verde con el número 3 ("Reporte Retenciones vs Facturas").
+- Flecha 2: Radio "¿Qué retenciones tienes?" con los dos sentidos.
+- Flecha 3: Campo Carpeta con Comprobantes de Retención.
+- Flecha 4: Campos RUC y Clave del SRI.
+- Flecha 5: Las cuatro tarjetas de resultado (verde en "Con factura", ámbar en "Sin factura electrónica").
+- Flecha 6: Desplegable "Ver detalle del proceso" cerrado.
+- Flecha 7: Botón Descargar reporte (Excel).
 ```
 
 ---
@@ -1212,6 +1370,59 @@ El tour le mostrará paso a paso las funciones principales. Use los botones **An
 
 ---
 
+## 8.15 Cómo obtener solo el listado de un período, sin descargar comprobantes
+
+1. Vaya a la pestaña **Descarga de Comprobantes**.
+2. Complete el Paso 1 (Credenciales) con su RUC y clave del SRI.
+3. En el Paso 2 (Filtros) elija el origen, el tipo de comprobante y el período.
+4. Marque **"Modo rápido: solo reporte (sin descargar PDF ni XML)"**.
+   - La selección de formatos queda deshabilitada: es correcto.
+5. Presione **Iniciar descarga**.
+6. Al terminar, use el botón de descarga del Excel.
+
+El archivo queda además en `[Carpeta base]/[RUC]/[Origen]/[Tipo]/[Año]/[Mes]/TXT/`.
+
+⚠️ Este modo **no descarga comprobantes**. Si después necesita los XML o PDF, vuelva a ejecutar sin el modo rápido.
+
+---
+
+## 8.16 Cómo generar el reporte de Retenciones vs Facturas
+
+**Antes de empezar** necesita las retenciones descargadas. Si no las tiene:
+
+1. Pestaña **Descarga de Comprobantes** → Tipo **Comprobante de Retención**.
+2. Origen **Emitidos** o **Recibidos**, según cuáles necesite.
+3. Formato **PDF** (para meses antiguos es lo único disponible) o **XML**.
+
+**El reporte**:
+
+1. Vaya a **Reportes e Historial** → card **Reporte Retenciones vs Facturas**.
+2. Elija el sentido:
+   - *Emitidas* si usted le retuvo a su proveedor.
+   - *Recibidas* si le retuvieron sobre una venta.
+3. Indique la carpeta con los comprobantes de retención.
+4. Ingrese el **RUC del contribuyente auditado** y su clave del SRI.
+5. Presione **Generar reporte Retenciones vs Facturas**.
+6. Revise las cuatro tarjetas de resultado. La suma de las tres últimas debe dar la primera.
+7. Descargue el Excel.
+
+💡 Si la tarjeta ámbar ("Sin factura electrónica") tiene valores, abra el desplegable **"Ver detalle del proceso"**: ahí figura si el mes se revisó completo.
+
+---
+
+## 8.17 Qué hacer si una factura no aparece en el reporte de Retenciones
+
+Mire la columna **Estado** de esa fila:
+
+| Estado | Qué significa | Qué hacer |
+|---|---|---|
+| `Sin factura electronica` | El mes se consultó y la factura no está en el portal. | Casi siempre es una factura preimpresa. Verifíquela contra el papel; no hay nada que descargar. |
+| `Factura no encontrada` | No se indexó ninguna factura de ese mes. | Vuelva a generar el reporte. Si persiste, revise el detalle del proceso. |
+| `Sustento no es factura` | El sustento es un IFIS o una nota de venta. | Es normal. Esa fila está en la hoja 2 del Excel. |
+| `No se pudo leer el sustento` | No se reconoció el formato del PDF. | Reporte el archivo a soporte. |
+
+---
+
 # 9. TABLA DE MENSAJES DE ERROR Y SOLUCIÓN
 
 ## 9.1 Errores de autenticación
@@ -1325,6 +1536,56 @@ Para tareas locales (generación de reportes desde archivos ya descargados, cons
 ## 10.10 ¿Cómo solicito una licencia nueva?
 
 Contacte al administrador del sistema (ver sección **10. Soporte**). Le entregará un código de licencia que deberá ingresar en la pantalla de **Activación de licencia**.
+
+---
+
+## 10.11 ¿Cuál es la diferencia entre el modo rápido y una descarga normal?
+
+El modo rápido genera **solo el Excel del listado**, con los datos que el portal ya muestra en pantalla: comprobante, serie, RUC del emisor, clave de acceso, fechas, subtotal, IVA e importe total.
+
+La descarga normal baja **un archivo por comprobante** (XML, PDF o ambos) y además arma sus reportes.
+
+Use el modo rápido cuando necesite ver o cuadrar el período. Use la descarga normal cuando necesite los comprobantes en sí: para respaldo, para el módulo de Consolidación, o para el reporte de Retenciones vs Facturas.
+
+---
+
+## 10.12 En Retenciones vs Facturas, ¿qué RUC y clave debo poner?
+
+Siempre los del **contribuyente auditado** — el dueño de la carpeta de descargas. Es el mismo en los dos sentidos:
+
+- **Retenciones emitidas**: el RUC que emitió las retenciones.
+- **Retenciones recibidas**: el RUC al que le retuvieron, que es quien emitió las facturas de sustento.
+
+Nunca el del proveedor ni el del cliente.
+
+---
+
+## 10.13 ¿Por qué muchos sustentos salen como "no es factura"?
+
+Porque no todo comprobante de retención se sustenta en una factura. Los bancos y aseguradoras emiten **documentos IFIS**, y también existen notas de venta y liquidaciones de compra.
+
+Esos documentos son válidos como sustento pero **no figuran en el listado de facturas del portal**, así que no pueden cruzarse. Van a la hoja 2 del Excel para no ensuciar el cruce.
+
+Es habitual que sean mayoría en retenciones recibidas.
+
+---
+
+## 10.14 ¿Por qué el sentido "Recibidas" tarda más?
+
+Porque las facturas se buscan en **Emitidos**, y ese módulo del portal filtra por un solo día. El sistema consulta únicamente las fechas que las propias retenciones indican, pero aun así son varias consultas.
+
+En cambio "Emitidas" busca en **Recibidos**, donde una sola consulta resuelve el mes completo.
+
+---
+
+## 10.15 Una factura existe en el portal pero el reporte dice que no la encontró
+
+Revise la columna **Estado**:
+
+- Si dice `Sin factura electronica`, el mes **sí** se revisó y la factura no figura en el listado electrónico. Lo más probable es que sea una **factura preimpresa**: sustenta la retención igual, pero no es electrónica y por definición no aparece.
+- Si dice `Factura no encontrada`, no se indexó ninguna factura de ese mes. Vuelva a generar el reporte y revise el detalle del proceso.
+
+En ambos casos la fila conserva todos los datos de la retención, así que puede resolverla a mano.
 
 ---
 
