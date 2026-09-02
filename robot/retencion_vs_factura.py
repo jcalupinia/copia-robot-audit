@@ -2079,6 +2079,11 @@ def _fila_factura(
         "Subtotal factura": factura.get("total_sin_impuestos", ""),
         "IVA factura": factura.get("iva_factura", ""),
         "Importe total factura": factura.get("importe_total", ""),
+        # De donde salieron esas cifras. "xml" es el comprobante firmado que
+        # ya estaba descargado y manda sobre "listado", que es lo que publica
+        # el portal. Importa al leer la verificacion: contra el XML se compara
+        # el comprobante autorizado, contra el listado una tabla del portal.
+        "Origen datos factura": factura.get("origen", ""),
         "Estado": estado,
         "Numero retencion": retencion.get("numero", ""),
         "Fecha retencion": retencion.get("fecha_emision", ""),
