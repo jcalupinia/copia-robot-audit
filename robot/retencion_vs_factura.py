@@ -48,7 +48,7 @@ import re
 import threading
 import unicodedata
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
@@ -1396,6 +1396,217 @@ def _escribir_excel(filas_cruce: list[dict], filas_otros: list[dict], path: Path
     wb.save(path)
 
 
+def _preparar_indice_facturas(
+    *,
+    retenciones: list[dict],
+    carpeta_retenciones: Path,
+    carpetas_facturas: Optional[Iterable[str | Path]],
+    base_ruc: Optional[str | Path],
+    ruc: Optional[str],
+    clave: Optional[str],
+    destino_descargas: Optional[str | Path],
+    sentido: str,
+    resumen: dict,
+    emit: Callable[[str], None],
+    cancelado: Callable[[], bool],
+    mes_completo: bool = False,
+) -> Optional[dict]:
+    """Deja armado el indice de facturas contra el que se cruzan las retenciones.
+
+    Lo comparten los dos sentidos del reporte -- de la retencion a la factura y
+    al reves -- porque el trabajo previo es identico: deducir en que meses viven
+    las facturas, traerlas del portal si hay credenciales, sumar lo que ya haya
+    en disco e indexarlo.
+
+    `mes_completo` es la unica diferencia entre ambos. Yendo de la retencion a la
+    factura alcanza con los dias que las retenciones nombran. Yendo de la factura
+    a la retencion hay que barrer el mes entero: las facturas que NINGUNA
+    retencion nombra son justamente el hallazgo que se busca, y pedir solo los
+    dias nombrados las dejaria a todas fuera del reporte.
+
+    Devuelve None si el usuario cancelo.
+    """
+    origen_facturas = _origen_facturas(sentido)
+
+    # Meses en los que viven las facturas sustento. Salen del propio RIDE, asi
+    # que no hay que barrer un rango a ciegas.
+    # Solo los sustentos que SON facturas deciden que dias pedirle al portal.
+    # Incluir los IFIS y notas de venta agregaba fechas donde no hay ninguna
+    # factura que buscar, y de paso inflaba la cobertura del mes.
+    documentos_todos = [
+        doc for ret in retenciones for doc in ret.get("documentos", [])
+    ]
+    documentos_factura = [doc for doc in documentos_todos if _es_factura(doc)]
+    fechas_sustento = [_fecha_para_consulta(doc) for doc in documentos_factura]
+    periodos = sorted({(f.year, f.month) for f in fechas_sustento if f})
+    _descartados = len(documentos_todos) - len(documentos_factura)
+    if _descartados:
+        emit(
+            f"{len(documentos_factura)} de {len(documentos_todos)} sustento(s) son "
+            f"facturas; los otros {_descartados} (IFIS, notas de venta) no se "
+            "buscan en el portal."
+        )
+
+    # Fechas que se le piden al portal. Con `mes_completo` se piden todos los
+    # dias de cada mes involucrado, no solo los que las retenciones nombran.
+    fechas_a_pedir = fechas_sustento
+    if mes_completo and periodos:
+        fechas_a_pedir = [
+            datetime(anio, mes, dia)
+            for anio, mes in periodos
+            for dia in range(1, calendar.monthrange(anio, mes)[1] + 1)
+        ]
+
+    # Carpetas de facturas: explicitas, o deducidas de las fechas de sustento.
+    rutas = [Path(c).expanduser() for c in (carpetas_facturas or [])]
+
+    # Si hay credenciales, se trae el listado del portal. Una consulta por mes
+    # -no por factura- para minimizar la exposicion al captcha.
+    if ruc and clave:
+        if not periodos:
+            emit("No se pudo deducir el mes de ninguna factura sustento.")
+        else:
+            carpeta_descarga = Path(
+                destino_descargas
+                or (Path(carpeta_retenciones).parent / "_facturas_listado")
+            ).expanduser()
+            meses_txt = ", ".join(f"{_MESES[m]} {a}" for a, m in periodos)
+            emit(
+                f"Las retenciones apuntan a facturas de: {meses_txt}. "
+                f"Se consultara {origen_facturas} en el portal."
+            )
+            try:
+                resultados_descarga = descargar_listados_facturas(
+                    ruc=ruc,
+                    clave=clave,
+                    destino=carpeta_descarga,
+                    fechas=fechas_a_pedir,
+                    sentido=sentido,
+                    progress=emit,
+                )
+                # Se usan las rutas EXACTAS que devolvio la descarga en vez de
+                # deducir carpetas: el arbol de Emitidos intercala el estado de
+                # autorizacion, asi que adivinarlo termina en un indice vacio.
+                generados = []
+                for resultado_descarga in resultados_descarga:
+                    if not isinstance(resultado_descarga, dict):
+                        continue
+                    for campo in (
+                        "reporte_txt",
+                        "reporte_txt_rango",
+                        "reporte_txt_anual",
+                    ):
+                        valor = resultado_descarga.get(campo)
+                        if valor:
+                            generados.append(Path(valor))
+                    generados.extend(
+                        Path(v) for v in (resultado_descarga.get("reportes_txt_meses") or [])
+                    )
+                if generados:
+                    emit(f"El portal dejo {len(generados)} reporte(s) de facturas.")
+                    rutas.extend(generados)
+                else:
+                    emit(
+                        "La consulta al portal no genero ningun reporte de "
+                        "facturas. Se buscara igual en disco."
+                    )
+                    rutas.append(carpeta_descarga)
+            except Exception as err:
+                logger.warning(f"Fallo la consulta al portal: {err}")
+                resumen["portal_error"] = str(err)
+                # Una excepcion a mitad de camino no invalida los meses que ya
+                # se alcanzaron a escribir: se busca igual en la carpeta.
+                emit(
+                    f"No se pudo consultar el portal ({err}). Se usara lo que "
+                    "haya quedado descargado."
+                )
+                rutas.append(carpeta_descarga)
+        if cancelado():
+            return None
+    raiz = (
+        Path(base_ruc).expanduser()
+        if base_ruc
+        else inferir_base_ruc(carpeta_retenciones)
+    )
+    if raiz:
+        if not base_ruc:
+            emit(f"Carpeta del RUC deducida: {raiz}")
+        rutas.extend(rutas_facturas_sugeridas(raiz, fechas_a_pedir, sentido))
+    elif not rutas:
+        emit(
+            f"No se ubico la carpeta de facturas de {origen_facturas}. Indicala a mano o "
+            "usa una carpeta de retenciones que cuelgue de la carpeta del RUC."
+        )
+    if rutas:
+        emit(f"Indexando facturas de {origen_facturas} en {len(rutas)} carpeta(s)...")
+    # En sentido "recibidas" las facturas las emitio el propio contribuyente, y
+    # el listado de Emitidos no trae columna de RUC emisor -- ahi la columna de
+    # identificacion es la del receptor. Se toma del sujeto retenido, que en ese
+    # sentido es siempre el mismo, y si no de las credenciales.
+    ruc_emisor_default = ""
+    if sentido == SENTIDO_RECIBIDAS:
+        sujetos = {
+            re.sub(r"\D", "", str(r.get("identificacion_sujeto") or ""))
+            for r in retenciones
+        }
+        sujetos.discard("")
+        if len(sujetos) == 1:
+            ruc_emisor_default = sujetos.pop()
+        elif ruc:
+            ruc_emisor_default = re.sub(r"\D", "", str(ruc))
+        if len(sujetos) > 1:
+            emit(
+                f"Ojo: las retenciones nombran {len(sujetos)} sujetos retenidos "
+                "distintos. En retenciones recibidas se esperaria uno solo."
+            )
+        if ruc_emisor_default:
+            emit(f"Emisor de las facturas (sujeto retenido): {ruc_emisor_default}")
+
+    indice = construir_indice_facturas(rutas, ruc_emisor_default)
+    # Cada factura entra dos veces (por RUC+numero y por clave de acceso), asi
+    # que para contar y para los meses cubiertos se usa solo la primera forma.
+    facturas_unicas = [f for k, f in indice.items() if not k.startswith("clave|")]
+    emit(f"{len(facturas_unicas)} factura(s) de {origen_facturas} indexada(s).")
+
+    # Meses que el indice llego a cubrir. Sirve para distinguir dos situaciones
+    # que hoy se confundian: que falte descargar el mes, o que el mes se haya
+    # revisado y la factura igual no este -- caso tipico de una factura
+    # preimpresa, que sustenta la retencion pero no figura en el portal.
+    facturas_por_mes: dict[tuple[int, int], int] = {}
+    for factura_indexada in facturas_unicas:
+        fecha_ind = _parse_fecha(factura_indexada.get("fecha_emision"))
+        if fecha_ind:
+            periodo = (fecha_ind.year, fecha_ind.month)
+            facturas_por_mes[periodo] = facturas_por_mes.get(periodo, 0) + 1
+    if facturas_por_mes:
+        emit(
+            "Meses cubiertos: "
+            + ", ".join(
+                f"{_MESES[m]} {a} ({n})"
+                for (a, m), n in sorted(facturas_por_mes.items())
+            )
+        )
+    # Un mes pedido que vuelve sin una sola factura no es un resultado normal:
+    # significa que la consulta de ese mes no llego a devolver nada, y sin este
+    # aviso sus retenciones salen como "falta descargar el mes" sin mas pista.
+    meses_vacios = [per for per in periodos if per not in facturas_por_mes]
+    if meses_vacios:
+        resumen["meses_sin_datos"] = [f"{_MESES[m]} {a}" for a, m in meses_vacios]
+        emit(
+            "El portal no devolvio NINGUNA factura de: "
+            + ", ".join(resumen["meses_sin_datos"])
+            + ". Las retenciones de esos meses no van a cruzar."
+        )
+
+    return {
+        "indice": indice,
+        "facturas_unicas": facturas_unicas,
+        "facturas_por_mes": facturas_por_mes,
+        "periodos": periodos,
+        "documentos_factura": documentos_factura,
+    }
+
+
 def generar_reporte_retenciones(
     *,
     carpeta_retenciones: str | Path,
@@ -1478,161 +1689,24 @@ def generar_reporte_retenciones(
         resumen["message"] = "Cancelado por el usuario."
         return resumen
 
-    # Meses en los que viven las facturas sustento. Salen del propio RIDE, asi
-    # que no hay que barrer un rango a ciegas.
-    # Solo los sustentos que SON facturas deciden que dias pedirle al portal.
-    # Incluir los IFIS y notas de venta agregaba fechas donde no hay ninguna
-    # factura que buscar, y de paso inflaba la cobertura del mes.
-    documentos_todos = [
-        doc for ret in retenciones for doc in ret.get("documentos", [])
-    ]
-    documentos_factura = [doc for doc in documentos_todos if _es_factura(doc)]
-    fechas_sustento = [_fecha_para_consulta(doc) for doc in documentos_factura]
-    periodos = sorted({(f.year, f.month) for f in fechas_sustento if f})
-    _descartados = len(documentos_todos) - len(documentos_factura)
-    if _descartados:
-        _emit(
-            f"{len(documentos_factura)} de {len(documentos_todos)} sustento(s) son "
-            f"facturas; los otros {_descartados} (IFIS, notas de venta) no se "
-            "buscan en el portal."
-        )
-
-    # Carpetas de facturas: explicitas, o deducidas de las fechas de sustento.
-    rutas = [Path(c).expanduser() for c in (carpetas_facturas or [])]
-
-    # Si hay credenciales, se trae el listado del portal. Una consulta por mes
-    # -no por factura- para minimizar la exposicion al captcha.
-    if ruc and clave:
-        if not periodos:
-            _emit("No se pudo deducir el mes de ninguna factura sustento.")
-        else:
-            carpeta_descarga = Path(
-                destino_descargas or (carpeta.parent / "_facturas_listado")
-            ).expanduser()
-            meses_txt = ", ".join(f"{_MESES[m]} {a}" for a, m in periodos)
-            _emit(
-                f"Las retenciones apuntan a facturas de: {meses_txt}. "
-                f"Se consultara {origen_facturas} en el portal."
-            )
-            try:
-                resultados_descarga = descargar_listados_facturas(
-                    ruc=ruc,
-                    clave=clave,
-                    destino=carpeta_descarga,
-                    fechas=fechas_sustento,
-                    sentido=sentido,
-                    progress=progress,
-                )
-                # Se usan las rutas EXACTAS que devolvio la descarga en vez de
-                # deducir carpetas: el arbol de Emitidos intercala el estado de
-                # autorizacion, asi que adivinarlo termina en un indice vacio.
-                generados = []
-                for resultado_descarga in resultados_descarga:
-                    if not isinstance(resultado_descarga, dict):
-                        continue
-                    for campo in (
-                        "reporte_txt",
-                        "reporte_txt_rango",
-                        "reporte_txt_anual",
-                    ):
-                        valor = resultado_descarga.get(campo)
-                        if valor:
-                            generados.append(Path(valor))
-                    generados.extend(
-                        Path(v) for v in (resultado_descarga.get("reportes_txt_meses") or [])
-                    )
-                if generados:
-                    _emit(f"El portal dejo {len(generados)} reporte(s) de facturas.")
-                    rutas.extend(generados)
-                else:
-                    _emit(
-                        "La consulta al portal no genero ningun reporte de "
-                        "facturas. Se buscara igual en disco."
-                    )
-                    rutas.append(carpeta_descarga)
-            except Exception as err:
-                logger.warning(f"Fallo la consulta al portal: {err}")
-                resumen["portal_error"] = str(err)
-                # Una excepcion a mitad de camino no invalida los meses que ya
-                # se alcanzaron a escribir: se busca igual en la carpeta.
-                _emit(
-                    f"No se pudo consultar el portal ({err}). Se usara lo que "
-                    "haya quedado descargado."
-                )
-                rutas.append(carpeta_descarga)
-        if _cancelado():
-            resumen["message"] = "Cancelado por el usuario."
-            return resumen
-    raiz = Path(base_ruc).expanduser() if base_ruc else inferir_base_ruc(carpeta)
-    if raiz:
-        if not base_ruc:
-            _emit(f"Carpeta del RUC deducida: {raiz}")
-        rutas.extend(rutas_facturas_sugeridas(raiz, fechas_sustento, sentido))
-    elif not rutas:
-        _emit(
-            f"No se ubico la carpeta de facturas de {origen_facturas}. Indicala a mano o "
-            "usa una carpeta de retenciones que cuelgue de la carpeta del RUC."
-        )
-    if rutas:
-        _emit(f"Indexando facturas de {origen_facturas} en {len(rutas)} carpeta(s)...")
-    # En sentido "recibidas" las facturas las emitio el propio contribuyente, y
-    # el listado de Emitidos no trae columna de RUC emisor -- ahi la columna de
-    # identificacion es la del receptor. Se toma del sujeto retenido, que en ese
-    # sentido es siempre el mismo, y si no de las credenciales.
-    ruc_emisor_default = ""
-    if sentido == SENTIDO_RECIBIDAS:
-        sujetos = {
-            re.sub(r"\D", "", str(r.get("identificacion_sujeto") or ""))
-            for r in retenciones
-        }
-        sujetos.discard("")
-        if len(sujetos) == 1:
-            ruc_emisor_default = sujetos.pop()
-        elif ruc:
-            ruc_emisor_default = re.sub(r"\D", "", str(ruc))
-        if len(sujetos) > 1:
-            _emit(
-                f"Ojo: las retenciones nombran {len(sujetos)} sujetos retenidos "
-                "distintos. En retenciones recibidas se esperaria uno solo."
-            )
-        if ruc_emisor_default:
-            _emit(f"Emisor de las facturas (sujeto retenido): {ruc_emisor_default}")
-
-    indice = construir_indice_facturas(rutas, ruc_emisor_default)
-    # Cada factura entra dos veces (por RUC+numero y por clave de acceso), asi
-    # que para contar y para los meses cubiertos se usa solo la primera forma.
-    facturas_unicas = [f for k, f in indice.items() if not k.startswith("clave|")]
-    _emit(f"{len(facturas_unicas)} factura(s) de {origen_facturas} indexada(s).")
-
-    # Meses que el indice llego a cubrir. Sirve para distinguir dos situaciones
-    # que hoy se confundian: que falte descargar el mes, o que el mes se haya
-    # revisado y la factura igual no este -- caso tipico de una factura
-    # preimpresa, que sustenta la retencion pero no figura en el portal.
-    facturas_por_mes: dict[tuple[int, int], int] = {}
-    for factura_indexada in facturas_unicas:
-        fecha_ind = _parse_fecha(factura_indexada.get("fecha_emision"))
-        if fecha_ind:
-            periodo = (fecha_ind.year, fecha_ind.month)
-            facturas_por_mes[periodo] = facturas_por_mes.get(periodo, 0) + 1
-    if facturas_por_mes:
-        _emit(
-            "Meses cubiertos: "
-            + ", ".join(
-                f"{_MESES[m]} {a} ({n})"
-                for (a, m), n in sorted(facturas_por_mes.items())
-            )
-        )
-    # Un mes pedido que vuelve sin una sola factura no es un resultado normal:
-    # significa que la consulta de ese mes no llego a devolver nada, y sin este
-    # aviso sus retenciones salen como "falta descargar el mes" sin mas pista.
-    meses_vacios = [per for per in periodos if per not in facturas_por_mes]
-    if meses_vacios:
-        resumen["meses_sin_datos"] = [f"{_MESES[m]} {a}" for a, m in meses_vacios]
-        _emit(
-            "El portal no devolvio NINGUNA factura de: "
-            + ", ".join(resumen["meses_sin_datos"])
-            + ". Las retenciones de esos meses no van a cruzar."
-        )
+    preparado = _preparar_indice_facturas(
+        retenciones=retenciones,
+        carpeta_retenciones=carpeta,
+        carpetas_facturas=carpetas_facturas,
+        base_ruc=base_ruc,
+        ruc=ruc,
+        clave=clave,
+        destino_descargas=destino_descargas,
+        sentido=sentido,
+        resumen=resumen,
+        emit=_emit,
+        cancelado=_cancelado,
+    )
+    if preparado is None:
+        resumen["message"] = "Cancelado por el usuario."
+        return resumen
+    indice = preparado["indice"]
+    facturas_por_mes = preparado["facturas_por_mes"]
 
     filas_cruce: list[dict] = []
     filas_otros: list[dict] = []
@@ -1763,5 +1837,582 @@ def generar_reporte_retenciones(
     resumen["message"] = ", ".join(partes) + "."
     if not COLUMNAS_OPERACION:
         resumen["message"] += " Falta definir la operacion matematica."
+    _emit(resumen["message"])
+    return resumen
+
+
+# =============================================================================
+# DIRECCION INVERSA: DE LA FACTURA A LA RETENCION
+# =============================================================================
+# El cruce de arriba parte de la retencion y responde "de que factura salio
+# esto". Este parte de la factura y responde la pregunta opuesta: "a esta
+# factura, me la retuvieron?".
+#
+# No es el mismo reporte al reves. Alla las filas sin pareja eran un problema
+# del cruce; aca son EL hallazgo:
+#
+#   Ventas  (sentido "recibidas") -- factura emitida sin retencion recibida.
+#           El cliente no entrego el comprobante y ese credito tributario no se
+#           puede usar en la declaracion. Es plata.
+#   Compras (sentido "emitidas")  -- factura recibida sin retencion emitida.
+#           Si habia obligacion de retener, la responsabilidad es del comprador.
+#
+# CUIDADO AL LEER EL REPORTE
+# --------------------------
+# NO toda factura debe tener retencion: solo retienen los agentes de retencion,
+# y la factura no trae ningun campo que diga si la contraparte lo es. Por eso el
+# estado es "Sin retencion asociada" y nunca "Falta la retencion": lo primero es
+# un dato, lo segundo seria una acusacion que el reporte no puede sostener.
+#
+# POR QUE LAS RETENCIONES TIENEN QUE ESTAR DESCARGADAS
+# ----------------------------------------------------
+# El listado TXT del portal es una lista plana de comprobantes: trae clave de
+# acceso, fechas e importes, pero NO el documento sustento. O sea que del
+# listado de retenciones no se puede saber a que factura apunta cada una. Hay
+# que abrir el XML o el RIDE, que es lo que hace `cargar_retenciones`. Las
+# facturas, en cambio, si salen del listado: de ellas solo hace falta saber que
+# existen y cuanto suman.
+
+
+# La ley da 5 dias habiles para entregar el comprobante de retencion. Con un fin
+# de semana de por medio son 7 dias calendario, asi que 8 los cubre. Sirve para
+# avisar que las facturas del final del periodo todavia pueden recibir su
+# retencion despues del ultimo comprobante que hay descargado.
+DIAS_MARGEN_RETENCION = 8
+
+# Al comparar importes: dos centavos absorben el redondeo del emisor sin tapar
+# una diferencia real.
+TOLERANCIA_IMPORTE = 0.02
+
+NIVEL_CLAVE = "Clave de acceso"
+NIVEL_NUMERO_FECHA = "RUC + numero + fecha"
+NIVEL_NUMERO = "RUC + numero"
+
+
+def _indexar_retenciones(retenciones: list[dict]) -> dict[str, list[dict]]:
+    """Indexa las retenciones por la factura que dicen sustentar.
+
+    Mismas dos entradas que el indice de facturas, para que las llaves calcen:
+    por clave de acceso (la que declara `numAutDocSustento`) y por RUC del
+    emisor de la factura + numero. Quien emitio la factura es siempre el sujeto
+    retenido, en los dos sentidos.
+
+    El valor es una LISTA porque una misma factura puede aparecer en mas de una
+    retencion -- pasa cuando la primera se anula y se emite otra. Guardar solo
+    la ultima escondia justamente el caso que conviene mirar.
+    """
+    indice: dict[str, list[dict]] = {}
+    for retencion in retenciones:
+        for documento in retencion.get("documentos", []):
+            if not _es_factura(documento):
+                continue
+            par = {"retencion": retencion, "documento": documento}
+            entradas = []
+            clave_acceso = _clave_acceso_sustento(documento)
+            if clave_acceso and len(set(clave_acceso)) > 1:
+                entradas.append(f"clave|{clave_acceso}")
+            clave_num = _clave_match(
+                retencion.get("identificacion_sujeto"), documento.get("numero")
+            )
+            if clave_num:
+                entradas.append(clave_num)
+            for entrada in entradas:
+                indice.setdefault(entrada, []).append(par)
+    return indice
+
+
+def _comparar(valor_a: object, valor_b: object) -> Optional[bool]:
+    """True/False si ambos importes existen; None si falta alguno."""
+    a, b = _a_float(valor_a), _a_float(valor_b)
+    if a is None or b is None:
+        return None
+    return abs(a - b) <= TOLERANCIA_IMPORTE
+
+
+def _verificar_correspondencia(
+    retencion: dict, documento: dict, factura: dict, por_clave: bool
+) -> dict:
+    """Contrasta la retencion contra la factura para responder si son la misma.
+
+    Hay dos ejes independientes y conviene no mezclarlos:
+
+    IDENTIDAD -- por que se emparejaron. La clave de acceso es unica en todo el
+    pais, asi que si `numAutDocSustento` calza con la clave de la factura no hay
+    ambiguedad posible. Sin ella queda RUC + numero, que identifica la factura
+    dentro de un emisor pero podria repetirse entre anios; que ademas coincida
+    la fecha cierra ese hueco.
+
+    IMPORTES -- si ademas cuadran las cifras. El RIDE en PDF no imprime los
+    totales de la factura, asi que en las retenciones leidas de PDF los unicos
+    datos comparables son las bases de retencion. Y ahi hay una relacion fija
+    que el SRI impone: la retencion de IVA se calcula sobre el IVA de la factura
+    y la de Renta sobre su subtotal. Comparar eso vale mas que comparar el total
+    contra el total, porque no depende de que la retencion venga en XML.
+
+    Ojo con la base de Renta: puede ser MENOR que el subtotal cuando solo parte
+    de la factura esta sujeta a retencion. Eso es legitimo y no se marca como
+    discrepancia. Mayor que el subtotal si lo es: no se puede retener sobre mas
+    de lo que se facturo.
+    """
+    if por_clave:
+        nivel = NIVEL_CLAVE
+        nota_identidad = ""
+    else:
+        fecha_doc = _parse_fecha(documento.get("fecha_emision"))
+        fecha_fac = _parse_fecha(factura.get("fecha_emision"))
+        if fecha_doc and fecha_fac:
+            if fecha_doc.date() == fecha_fac.date():
+                nivel, nota_identidad = NIVEL_NUMERO_FECHA, ""
+            else:
+                nivel = NIVEL_NUMERO
+                nota_identidad = (
+                    f"La retencion declara la factura con fecha "
+                    f"{fecha_doc:%d/%m/%Y} y el SRI la tiene emitida el "
+                    f"{fecha_fac:%d/%m/%Y}."
+                )
+        else:
+            nivel = NIVEL_NUMERO
+            nota_identidad = "No se pudo comparar la fecha de emision."
+
+    iva_ret = _linea_por_impuesto(documento, "iva") or {}
+    renta_ret = _linea_por_impuesto(documento, "renta") or {}
+
+    detalles: list[str] = []
+    difiere = False
+    comparadas = 0
+
+    def _chequear(etiqueta: str, valor_ret: object, valor_fac: object) -> None:
+        nonlocal difiere, comparadas
+        veredicto = _comparar(valor_ret, valor_fac)
+        if veredicto is None:
+            return
+        comparadas += 1
+        if veredicto:
+            return
+        difiere = True
+        detalles.append(
+            f"{etiqueta}: {_a_float(valor_ret):.2f} vs {_a_float(valor_fac):.2f}"
+        )
+
+    # Lo que la retencion afirma de la factura contra lo que dice el SRI. Solo
+    # existe si la retencion vino en XML.
+    _chequear(
+        "importe total", documento.get("importe_total"), factura.get("importe_total")
+    )
+    _chequear(
+        "subtotal",
+        documento.get("total_sin_impuestos"),
+        factura.get("total_sin_impuestos"),
+    )
+    _chequear("IVA", documento.get("iva_factura"), factura.get("iva_factura"))
+
+    # Las bases de retencion contra la factura. Esto si esta siempre, venga la
+    # retencion de XML o de PDF.
+    _chequear(
+        "base ret. IVA vs IVA de la factura",
+        iva_ret.get("base"),
+        factura.get("iva_factura"),
+    )
+
+    base_renta = _a_float(renta_ret.get("base"))
+    subtotal = _a_float(factura.get("total_sin_impuestos"))
+    parcial = False
+    if base_renta is not None and subtotal is not None:
+        comparadas += 1
+        if base_renta > subtotal + TOLERANCIA_IMPORTE:
+            difiere = True
+            detalles.append(
+                f"base ret. Renta {base_renta:.2f} supera el subtotal {subtotal:.2f}"
+            )
+        elif base_renta < subtotal - TOLERANCIA_IMPORTE:
+            parcial = True
+            detalles.append(
+                f"se retuvo Renta sobre {base_renta:.2f} de un subtotal de "
+                f"{subtotal:.2f}"
+            )
+
+    if not comparadas:
+        veredicto = "Sin datos para verificar"
+    elif difiere:
+        veredicto = "Difiere"
+    elif parcial:
+        veredicto = "Coincide (base Renta parcial)"
+    else:
+        veredicto = "Coincide"
+
+    if nota_identidad:
+        detalles.insert(0, nota_identidad)
+
+    return {
+        "Nivel de coincidencia": nivel,
+        "Verificacion importes": veredicto,
+        "Detalle verificacion": " | ".join(detalles),
+    }
+
+
+def _fila_factura(
+    factura: dict,
+    par: Optional[dict],
+    verificacion: Optional[dict],
+    estado: str,
+    observacion: str,
+    n_retenciones: int = 0,
+) -> dict:
+    """Una fila del reporte: la factura primero, su retencion despues."""
+    retencion = (par or {}).get("retencion") or {}
+    documento = (par or {}).get("documento") or {}
+    iva = _linea_por_impuesto(documento, "iva") or {}
+    renta = _linea_por_impuesto(documento, "renta") or {}
+    verificacion = verificacion or {}
+
+    retenido = sum(
+        _a_float(linea.get("valor_retenido")) or 0.0
+        for linea in documento.get("lineas", [])
+    )
+
+    fila = {
+        "RUC emisor factura": factura.get("ruc_emisor", ""),
+        "Razon social emisor factura": factura.get("razon_social_emisor", ""),
+        "Numero factura": factura.get("numero", ""),
+        "Fecha factura": factura.get("fecha_emision", ""),
+        "Clave acceso factura": factura.get("clave_acceso", ""),
+        "Subtotal factura": factura.get("total_sin_impuestos", ""),
+        "IVA factura": factura.get("iva_factura", ""),
+        "Importe total factura": factura.get("importe_total", ""),
+        "Estado": estado,
+        "Numero retencion": retencion.get("numero", ""),
+        "Fecha retencion": retencion.get("fecha_emision", ""),
+        "Clave acceso retencion": retencion.get("clave_acceso", ""),
+        "RUC agente de retencion": retencion.get("ruc_emisor", ""),
+        "Razon social agente de retencion": retencion.get("razon_social_emisor", ""),
+        "Base retencion IVA": iva.get("base", ""),
+        "Porcentaje retencion IVA": iva.get("porcentaje", ""),
+        "Valor retenido IVA": iva.get("valor_retenido", ""),
+        "Base retencion Renta": renta.get("base", ""),
+        "Porcentaje retencion Renta": renta.get("porcentaje", ""),
+        "Valor retenido Renta": renta.get("valor_retenido", ""),
+        "Total retenido": round(retenido, 2) if par else "",
+        "Nivel de coincidencia": verificacion.get("Nivel de coincidencia", ""),
+        "Verificacion importes": verificacion.get("Verificacion importes", ""),
+        "Detalle verificacion": verificacion.get("Detalle verificacion", ""),
+        "Retenciones para esta factura": n_retenciones,
+        "Observacion": observacion,
+    }
+    fila.update(calcular_operacion(retencion, documento, factura))
+    return fila
+
+
+def _escribir_excel_facturas(
+    filas: list[dict], sin_retencion: list[dict], huerfanas: list[dict], path: Path
+) -> None:
+    """Tres hojas, cada una con un uso distinto.
+
+    La primera es la conciliacion completa en orden cronologico. La segunda es
+    el recorte accionable -- lo que se le reclama al cliente o se revisa con el
+    proveedor. La tercera avisa que el barrido quedo corto: retenciones cuya
+    factura no aparecio en ningun mes consultado.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    encabezado_fill = PatternFill("solid", fgColor="1F4E78")
+    encabezado_font = Font(color="FFFFFF", bold=True)
+
+    def _hoja(titulo: str, datos: list[dict], vacio: str) -> None:
+        ws = wb.create_sheet(titulo[:31])
+        if not datos:
+            ws.cell(row=1, column=1, value=vacio)
+            return
+        columnas = list(datos[0].keys())
+        for i, nombre in enumerate(columnas, start=1):
+            celda = ws.cell(row=1, column=i, value=nombre)
+            celda.fill = encabezado_fill
+            celda.font = encabezado_font
+            celda.alignment = Alignment(
+                horizontal="center", vertical="center", wrap_text=True
+            )
+        for r, fila in enumerate(datos, start=2):
+            for c, nombre in enumerate(columnas, start=1):
+                valor = fila.get(nombre, "")
+                celda = ws.cell(row=r, column=c, value=valor)
+                # Claves y RUC como texto: si no, Excel los pasa a notacion
+                # cientifica y les come digitos.
+                if any(t in nombre for t in ("Clave", "RUC", "Numero")):
+                    celda.number_format = "@"
+                elif isinstance(valor, float):
+                    celda.number_format = "#,##0.00"
+        for i, nombre in enumerate(columnas, start=1):
+            ancho = max(len(str(nombre)), *(len(str(f.get(nombre, ""))) for f in datos))
+            ws.column_dimensions[get_column_letter(i)].width = min(
+                max(ancho + 2, 12), 45
+            )
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+
+    _hoja("Facturas vs Retenciones", filas, "No se indexo ninguna factura.")
+    _hoja(
+        "Facturas sin retencion",
+        sin_retencion,
+        "Todas las facturas del periodo tienen retencion asociada.",
+    )
+    _hoja(
+        "Retenciones sin factura",
+        huerfanas,
+        "Todas las retenciones encontraron su factura.",
+    )
+    wb.remove(wb["Sheet"])
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+
+
+def generar_reporte_facturas(
+    *,
+    carpeta_retenciones: str | Path,
+    salida_excel: str | Path,
+    carpetas_facturas: Optional[Iterable[str | Path]] = None,
+    base_ruc: Optional[str | Path] = None,
+    ruc: Optional[str] = None,
+    clave: Optional[str] = None,
+    destino_descargas: Optional[str | Path] = None,
+    sentido: str = SENTIDO_EMITIDAS,
+    cancel_event: Optional[threading.Event] = None,
+    progress: Optional[Callable[[str], None]] = None,
+) -> dict:
+    """Reporte al reves: recorre las facturas y busca la retencion de cada una.
+
+    Los meses de facturas salen de las propias retenciones -- son los que sus
+    documentos sustento nombran -- pero se piden ENTEROS, no solo los dias
+    nombrados: las facturas que ninguna retencion menciona son el resultado que
+    se busca.
+
+    Devuelve un resumen: ok, total_facturas, con_retencion, sin_retencion,
+    sin_retencion_reciente, retenciones_sin_factura, con_discrepancia,
+    excel_path, message.
+    """
+
+    def _emit(msg: str) -> None:
+        if progress:
+            try:
+                progress(msg)
+            except Exception:
+                pass
+        logger.info(msg)
+
+    def _cancelado() -> bool:
+        return bool(cancel_event and cancel_event.is_set())
+
+    resumen = {
+        "ok": False,
+        "total_retenciones": 0,
+        "total_facturas": 0,
+        "con_retencion": 0,
+        "sin_retencion": 0,
+        # Facturas del final del periodo cuya retencion todavia podria emitirse:
+        # no se pueden dar por no retenidas.
+        "sin_retencion_reciente": 0,
+        # Retenciones cuya factura no aparecio en ningun mes consultado.
+        "retenciones_sin_factura": 0,
+        "con_discrepancia": 0,
+        "coincidencia_clave": 0,
+        "meses_sin_datos": [],
+        "portal_error": "",
+        "excel_path": "",
+        "message": "",
+    }
+
+    sentido = _normalizar_sentido(sentido)
+    origen_facturas = _origen_facturas(sentido)
+    resumen["sentido"] = sentido
+
+    carpeta = Path(carpeta_retenciones).expanduser()
+    if not carpeta.is_dir():
+        resumen["message"] = f"La carpeta de retenciones no existe: {carpeta}"
+        return resumen
+
+    relacion = "ventas" if sentido == SENTIDO_RECIBIDAS else "compras"
+    _emit(f"Facturas de {origen_facturas} ({relacion}) contra retenciones {sentido}.")
+    _emit("Leyendo comprobantes de retencion...")
+    retenciones = cargar_retenciones(carpeta)
+    resumen["total_retenciones"] = len(retenciones)
+    if not retenciones:
+        resumen["message"] = (
+            "No se encontraron comprobantes de retencion legibles en la carpeta. "
+            "Sin ellos no hay contra que cruzar las facturas."
+        )
+        return resumen
+    _emit(f"{len(retenciones)} retencion(es) leida(s).")
+
+    if _cancelado():
+        resumen["message"] = "Cancelado por el usuario."
+        return resumen
+
+    preparado = _preparar_indice_facturas(
+        retenciones=retenciones,
+        carpeta_retenciones=carpeta,
+        carpetas_facturas=carpetas_facturas,
+        base_ruc=base_ruc,
+        ruc=ruc,
+        clave=clave,
+        destino_descargas=destino_descargas,
+        sentido=sentido,
+        resumen=resumen,
+        emit=_emit,
+        cancelado=_cancelado,
+        mes_completo=True,
+    )
+    if preparado is None:
+        resumen["message"] = "Cancelado por el usuario."
+        return resumen
+
+    facturas = preparado["facturas_unicas"]
+    resumen["total_facturas"] = len(facturas)
+    if not facturas:
+        resumen["message"] = (
+            f"No se indexo ninguna factura de {origen_facturas}. Sin facturas no "
+            "hay nada que recorrer: revisa las credenciales o la carpeta."
+        )
+        return resumen
+
+    indice_ret = _indexar_retenciones(retenciones)
+
+    # Hasta que fecha se puede afirmar que una factura no fue retenida. Mas alla
+    # de ese corte la retencion simplemente puede no haberse emitido todavia, o
+    # estar en el mes siguiente sin descargar.
+    fechas_ret = [_parse_fecha(r.get("fecha_emision")) for r in retenciones]
+    fechas_ret = [f for f in fechas_ret if f]
+    ultima_retencion = max(fechas_ret) if fechas_ret else None
+    corte_confiable = None
+    if ultima_retencion:
+        corte_confiable = ultima_retencion - timedelta(days=DIAS_MARGEN_RETENCION)
+        _emit(
+            f"La retencion mas nueva de la carpeta es del "
+            f"{ultima_retencion:%d/%m/%Y}. Las facturas posteriores al "
+            f"{corte_confiable:%d/%m/%Y} todavia podrian recibir la suya."
+        )
+
+    filas: list[dict] = []
+    emparejados: set[int] = set()
+
+    def _orden(factura: dict):
+        return (
+            _parse_fecha(factura.get("fecha_emision")) or datetime.min,
+            str(factura.get("numero", "")),
+        )
+
+    for factura in sorted(facturas, key=_orden):
+        if _cancelado():
+            resumen["message"] = "Cancelado por el usuario."
+            return resumen
+
+        clave_acceso = re.sub(r"\D", "", str(factura.get("clave_acceso") or ""))
+        pares = []
+        por_clave = False
+        if len(clave_acceso) == 49:
+            pares = indice_ret.get(f"clave|{clave_acceso}", [])
+            por_clave = bool(pares)
+        if not pares:
+            pares = indice_ret.get(
+                _clave_match(factura.get("ruc_emisor"), factura.get("numero")), []
+            )
+
+        if not pares:
+            resumen["sin_retencion"] += 1
+            fecha_fac = _parse_fecha(factura.get("fecha_emision"))
+            reciente = bool(corte_confiable and fecha_fac and fecha_fac > corte_confiable)
+            if reciente:
+                resumen["sin_retencion_reciente"] += 1
+                observacion = (
+                    f"Sin retencion, pero la factura es posterior al "
+                    f"{corte_confiable:%d/%m/%Y} y la ultima retencion descargada "
+                    f"es del {ultima_retencion:%d/%m/%Y}. Todavia esta dentro del "
+                    "plazo para emitirla: descarga las retenciones del mes "
+                    "siguiente antes de darla por no retenida."
+                )
+            else:
+                observacion = (
+                    "Ninguna de las retenciones de la carpeta nombra esta factura. "
+                    "Puede ser correcto: solo los agentes de retencion retienen."
+                )
+            filas.append(
+                _fila_factura(factura, None, None, "Sin retencion asociada", observacion)
+            )
+            continue
+
+        resumen["con_retencion"] += 1
+        for par in pares:
+            emparejados.add(id(par["documento"]))
+            verificacion = _verificar_correspondencia(
+                par["retencion"], par["documento"], factura, por_clave
+            )
+            if verificacion["Nivel de coincidencia"] == NIVEL_CLAVE:
+                resumen["coincidencia_clave"] += 1
+            if verificacion["Verificacion importes"] == "Difiere":
+                resumen["con_discrepancia"] += 1
+            observacion = ""
+            if len(pares) > 1:
+                observacion = (
+                    f"Esta factura aparece en {len(pares)} retenciones. Revisa si "
+                    "alguna fue anulada y reemplazada."
+                )
+            filas.append(
+                _fila_factura(
+                    factura,
+                    par,
+                    verificacion,
+                    "Con retencion",
+                    observacion,
+                    n_retenciones=len(pares),
+                )
+            )
+
+    # Retenciones que apuntan a una factura que no aparecio. Es el sintoma de que
+    # el barrido de meses quedo corto, o de una factura no electronica.
+    huerfanas: list[dict] = []
+    for retencion in retenciones:
+        for documento in retencion.get("documentos", []):
+            if not _es_factura(documento) or id(documento) in emparejados:
+                continue
+            resumen["retenciones_sin_factura"] += 1
+            fecha_doc = _parse_fecha(documento.get("fecha_emision"))
+            del_mes = (
+                preparado["facturas_por_mes"].get((fecha_doc.year, fecha_doc.month), 0)
+                if fecha_doc
+                else 0
+            )
+            huerfanas.append(
+                _construir_fila(
+                    retencion,
+                    documento,
+                    None,
+                    "Factura no encontrada",
+                    _observacion_no_encontrada(
+                        retencion, documento, origen_facturas, del_mes
+                    ),
+                )
+            )
+
+    sin_retencion = [f for f in filas if f["Estado"] == "Sin retencion asociada"]
+
+    salida = Path(salida_excel).expanduser()
+    _emit("Escribiendo Excel...")
+    _escribir_excel_facturas(filas, sin_retencion, huerfanas, salida)
+
+    resumen["ok"] = True
+    resumen["excel_path"] = str(salida)
+    partes = [
+        f"{resumen['con_retencion']} factura(s) con retencion",
+        f"{resumen['sin_retencion']} sin retencion asociada",
+    ]
+    if resumen["sin_retencion_reciente"]:
+        partes.append(f"{resumen['sin_retencion_reciente']} de ellas todavia en plazo")
+    if resumen["con_discrepancia"]:
+        partes.append(f"{resumen['con_discrepancia']} con importes que no cuadran")
+    if resumen["retenciones_sin_factura"]:
+        partes.append(
+            f"{resumen['retenciones_sin_factura']} retencion(es) sin factura en el periodo"
+        )
+    resumen["message"] = ", ".join(partes) + "."
     _emit(resumen["message"])
     return resumen

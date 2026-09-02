@@ -5777,10 +5777,32 @@ with tab2:
         "Las facturas se consultan en el portal del SRI",
     ):
         st.markdown(
-            "Genera un Excel que cruza cada **Comprobante de Retención** con "
-            "la **Factura** que le sirve de sustento.\n\n"
+            "Genera un Excel que cruza **Comprobantes de Retención** contra "
+            "las **Facturas** que les sirven de sustento.\n\n"
             "Solo hacen falta las retenciones descargadas: el sistema deduce "
             "de ellas qué facturas buscar y las consulta en el portal."
+        )
+
+        # Las dos preguntas opuestas que se pueden hacer sobre el mismo par de
+        # comprobantes. No es el mismo reporte al reves: cambia cual es el
+        # hallazgo. Yendo de la retencion a la factura, una fila sin pareja es
+        # un problema del cruce; yendo de la factura a la retencion, ES el
+        # resultado que se busca.
+        _ret_direccion_label = st.radio(
+            "¿Qué quieres averiguar?",
+            [
+                "De qué factura salió cada retención",
+                "A qué facturas no les hicieron retención",
+            ],
+            key="ret_vs_fact_direccion",
+            help=(
+                "La primera parte de las retenciones y busca su factura. La "
+                "segunda recorre todas las facturas del período y marca las "
+                "que ninguna retención nombra."
+            ),
+        )
+        _ret_direccion = (
+            "inverso" if _ret_direccion_label.startswith("A qué") else "directo"
         )
 
         _ret_sentido_label = st.radio(
@@ -5799,11 +5821,28 @@ with tab2:
         _ret_sentido = (
             "recibidas" if _ret_sentido_label.startswith("Recibidas") else "emitidas"
         )
+        # El costo de la consulta depende de las dos elecciones. Emitidos
+        # filtra por UN dia, asi que barrer el mes entero -lo que exige la
+        # direccion inversa- son ~30 consultas en vez de las pocas fechas que
+        # las retenciones nombran.
         if _ret_sentido == "recibidas":
+            if _ret_direccion == "inverso":
+                st.warning(
+                    "Las facturas se buscarán en **Emitidos**, que filtra por "
+                    "día. Para poder decir qué facturas NO tienen retención hay "
+                    "que revisar el mes completo, o sea ~30 consultas por mes. "
+                    "Es la combinación más lenta: puede tomar varios minutos."
+                )
+            else:
+                st.caption(
+                    "Las facturas se buscarán en **Emitidos**. Ese módulo del "
+                    "portal filtra por día, así que la consulta va día por día "
+                    "y tarda más que en Recibidos."
+                )
+        elif _ret_direccion == "inverso":
             st.caption(
-                "Las facturas se buscarán en **Emitidos**. Ese módulo del portal "
-                "filtra por día, así que la consulta va día por día y tarda "
-                "más que en Recibidos."
+                "Las facturas se buscarán en **Recibidos**, que resuelve el mes "
+                "entero en una sola consulta."
             )
 
         if "ret_vs_fact_carpeta_input" not in st.session_state:
@@ -5860,16 +5899,33 @@ with tab2:
             "las facturas de sustento."
         )
 
-        st.info(
-            "ℹ️ Cada fila lleva los datos de la retención junto a los de su "
-            "factura (clave de acceso, fecha, subtotal, IVA e importe total), "
-            "y cierra con **Días entre factura y retención**.\n\n"
-            "Los sustentos que no son facturas — documentos IFIS, notas de "
-            "venta — van a una hoja aparte, no se mezclan con el cruce."
-        )
+        if _ret_direccion == "directo":
+            st.info(
+                "ℹ️ Cada fila lleva los datos de la retención junto a los de su "
+                "factura (clave de acceso, fecha, subtotal, IVA e importe "
+                "total), y cierra con **Días entre factura y retención**.\n\n"
+                "Los sustentos que no son facturas — documentos IFIS, notas de "
+                "venta — van a una hoja aparte, no se mezclan con el cruce."
+            )
+        else:
+            st.info(
+                "ℹ️ Una fila por **factura** del período, con su retención al "
+                "lado si la tiene. Cada emparejamiento trae **Nivel de "
+                "coincidencia** (cómo se identificó la factura) y "
+                "**Verificación importes** (si las bases de retención cuadran "
+                "con el IVA y el subtotal de la factura).\n\n"
+                "El Excel trae tres hojas: la conciliación completa, solo las "
+                "facturas sin retención, y las retenciones cuya factura no "
+                "apareció en el período.\n\n"
+                "**Sin retención no significa que falte:** solo los agentes de "
+                "retención retienen, y la factura no dice si tu contraparte lo "
+                "es."
+            )
 
         if st.button(
-            "Generar reporte Retenciones vs Facturas",
+            "Generar reporte Retenciones vs Facturas"
+            if _ret_direccion == "directo"
+            else "Generar reporte Facturas vs Retenciones",
             key="btn_ret_vs_fact_run",
             use_container_width=True,
         ):
@@ -5891,13 +5947,18 @@ with tab2:
             else:
                 _ret_out_dir = Path(_ret_clean).expanduser()
                 _ret_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                _ret_excel = _ret_out_dir / f"Retenciones_vs_Facturas_{_ret_ts}.xlsx"
+                _ret_excel = _ret_out_dir / (
+                    f"Retenciones_vs_Facturas_{_ret_ts}.xlsx"
+                    if _ret_direccion == "directo"
+                    else f"Facturas_vs_Retenciones_{_ret_ts}.xlsx"
+                )
 
                 # Importacion perezosa: si el modulo quedo desactualizado en
                 # esta instalacion, se avisa donde mirar en vez de tumbar la
                 # pagina entera con un ImportError.
                 try:
                     from robot.retencion_vs_factura import (
+                        generar_reporte_facturas,
                         generar_reporte_retenciones,
                     )
                 except ImportError as _imp_err:
@@ -5905,12 +5966,18 @@ with tab2:
 
                     st.error(
                         "El módulo `robot/retencion_vs_factura.py` de esta "
-                        "instalación no tiene `generar_reporte_retenciones`. "
-                        "Suele pasar cuando el archivo quedó de una versión "
+                        "instalación no tiene las funciones de reporte. Suele "
+                        "pasar cuando el archivo quedó de una versión "
                         f"anterior.\n\n**Archivo en uso:** `{_mod_ret.__file__}`"
                         f"\n\n**Detalle:** {_imp_err}"
                     )
                     st.stop()
+
+                _ret_funcion = (
+                    generar_reporte_retenciones
+                    if _ret_direccion == "directo"
+                    else generar_reporte_facturas
+                )
 
                 _ret_msgs: list[str] = []
 
@@ -5918,9 +5985,13 @@ with tab2:
                 # st.status se renderiza como la palabra "check" encimada sobre
                 # el label cuando la fuente de iconos no carga. El detalle del
                 # proceso se muestra despues, dentro de un desplegable.
-                with st.spinner("Procesando Retenciones vs Facturas..."):
+                with st.spinner(
+                    "Procesando Retenciones vs Facturas..."
+                    if _ret_direccion == "directo"
+                    else "Procesando Facturas vs Retenciones..."
+                ):
                     try:
-                        _resultado_ret = generar_reporte_retenciones(
+                        _resultado_ret = _ret_funcion(
                             carpeta_retenciones=_ret_clean,
                             salida_excel=_ret_excel,
                             sentido=_ret_sentido,
@@ -5932,12 +6003,16 @@ with tab2:
                             ),
                             progress=_ret_msgs.append,
                         )
+                        # La direccion se guarda con el resultado: es lo que
+                        # decide que tarjetas y avisos se pintan mas abajo.
+                        _resultado_ret["direccion"] = _ret_direccion
                         st.session_state["ret_vs_fact_result"] = _resultado_ret
                     except Exception as exc:
                         _resultado_ret = {
                             "ok": False,
                             "message": str(exc),
                             "excel_path": "",
+                            "direccion": _ret_direccion,
                         }
                         st.session_state["ret_vs_fact_result"] = _resultado_ret
                 # El resumen final ya viaja como ultimo mensaje de progreso, asi
@@ -5950,18 +6025,34 @@ with tab2:
             st.markdown("##### Reporte generado")
 
             # Los cuatro numeros que resumen la corrida. Verde en los que
-            # cruzaron y ambar en los que no son electronicos; los otros dos
-            # quedan neutros para que el ojo vaya a los que importan.
-            _rvf_tarjetas = [
-                ("Retenciones leídas", _ret_result.get("total_retenciones", 0), ""),
-                ("Con factura", _ret_result.get("con_factura", 0), " is-ok"),
-                (
-                    "Sin factura electrónica",
-                    _ret_result.get("sin_factura_electronica", 0),
-                    " is-warn",
-                ),
-                ("Otro sustento", _ret_result.get("no_facturas", 0), ""),
-            ]
+            # cruzaron y ambar en los que no; los otros dos quedan neutros para
+            # que el ojo vaya a los que importan.
+            if _ret_result.get("direccion") == "inverso":
+                _rvf_tarjetas = [
+                    ("Facturas revisadas", _ret_result.get("total_facturas", 0), ""),
+                    ("Con retención", _ret_result.get("con_retencion", 0), " is-ok"),
+                    (
+                        "Sin retención",
+                        _ret_result.get("sin_retencion", 0),
+                        " is-warn",
+                    ),
+                    (
+                        "Todavía en plazo",
+                        _ret_result.get("sin_retencion_reciente", 0),
+                        "",
+                    ),
+                ]
+            else:
+                _rvf_tarjetas = [
+                    ("Retenciones leídas", _ret_result.get("total_retenciones", 0), ""),
+                    ("Con factura", _ret_result.get("con_factura", 0), " is-ok"),
+                    (
+                        "Sin factura electrónica",
+                        _ret_result.get("sin_factura_electronica", 0),
+                        " is-warn",
+                    ),
+                    ("Otro sustento", _ret_result.get("no_facturas", 0), ""),
+                ]
             st.markdown(
                 '<div class="rvf-stats">'
                 + "".join(
@@ -5974,6 +6065,44 @@ with tab2:
                 + "</div>",
                 unsafe_allow_html=True,
             )
+
+            # Pegado a las tarjetas: explica el numero ambar del reporte
+            # inverso antes de que se lea como una acusacion.
+            if _ret_result.get("direccion") == "inverso" and _ret_result.get(
+                "sin_retencion"
+            ):
+                st.warning(
+                    f"{_ret_result['sin_retencion']} factura(s) sin retención "
+                    "asociada. **Eso no significa que falte una retención**: "
+                    "solo los agentes de retención retienen, y la factura no "
+                    "trae ningún campo que diga si tu contraparte lo es. Es la "
+                    "hoja **Facturas sin retención** del Excel."
+                )
+            if _ret_result.get("sin_retencion_reciente"):
+                st.info(
+                    f"ℹ️ De esas, {_ret_result['sin_retencion_reciente']} son "
+                    "**posteriores a la última retención descargada** y todavía "
+                    "están dentro del plazo legal para emitirla. No las des por "
+                    "no retenidas: descarga las retenciones del mes siguiente y "
+                    "vuelve a generar el reporte. La columna 'Observacion' dice "
+                    "cuáles son."
+                )
+            if _ret_result.get("con_discrepancia"):
+                st.error(
+                    f"⚠️ {_ret_result['con_discrepancia']} emparejamiento(s) con "
+                    "**importes que no cuadran**: la base sobre la que se "
+                    "calculó la retención no coincide con el IVA o el subtotal "
+                    "de la factura. Filtra el Excel por "
+                    "`Verificacion importes = Difiere`; la columna "
+                    "'Detalle verificacion' dice qué cifra falla."
+                )
+            if _ret_result.get("retenciones_sin_factura"):
+                st.warning(
+                    f"{_ret_result['retenciones_sin_factura']} retención(es) "
+                    "apuntan a una factura que no apareció en los meses "
+                    "consultados. Suele ser una factura de un mes anterior o no "
+                    "electrónica. Están en la hoja **Retenciones sin factura**."
+                )
 
             # Va pegado a las tarjetas y no al final: explica el numero ambar.
             if _ret_result.get("sin_factura_electronica"):
@@ -6026,7 +6155,9 @@ with tab2:
             if _ret_path.is_file():
                 with open(_ret_path, "rb") as _f:
                     st.download_button(
-                        "⬇️ Descargar reporte Retenciones vs Facturas (Excel)",
+                        "⬇️ Descargar reporte Facturas vs Retenciones (Excel)"
+                        if _ret_result.get("direccion") == "inverso"
+                        else "⬇️ Descargar reporte Retenciones vs Facturas (Excel)",
                         data=_f.read(),
                         file_name=_ret_path.name,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
