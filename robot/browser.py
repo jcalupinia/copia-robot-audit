@@ -2015,11 +2015,16 @@ def _abrir_modulo_consultas(page, origen: str):
                 logger.warning(f"Reintentando acceso directo al formulario ({intento + 1}/3): {err}")
         raise RuntimeError(f"No se pudo abrir el formulario de {origen.lower()}: {ultimo_error}")
 
-    # El menu del portal es PrimeFaces sobre Angular y anima al abrirse: los
-    # 1500 ms originales expiraban con el elemento todavia "not stable", justo
-    # cuando el clic empezaba. Al fallar el panel no se abre, el modulo queda
-    # sin cargar y la consulta siguiente lee una tabla vieja o vacia.
-    MENU_CLICK_TIMEOUT = 8000
+    # El menu es PrimeFaces sobre Angular y anima al abrirse: con los 1500 ms
+    # originales el clic expiraba con el elemento todavia "not stable". En los
+    # logs la animacion tardaba ~1.5-2 s, asi que 3 s la cubren con margen.
+    #
+    # No conviene subirlo mas: cuando un clic NO puede funcionar -- el panel
+    # tapa al de abajo, el item no esta -- se paga el timeout entero y despues
+    # igual se cae a _goto_form(), que navega por URL y no falla. Con cuatro
+    # clics encadenados, un timeout largo se traduce en decenas de segundos
+    # por cada dia consultado.
+    MENU_CLICK_TIMEOUT = 3000
 
     def _ensure_menu_visible():
         try:
@@ -2059,8 +2064,17 @@ def _abrir_modulo_consultas(page, origen: str):
         return page
 
     _ensure_menu_visible()
-    _expand_panel(FACTURACION_MENU_SELECTOR, "el panel de Facturación Electrónica")
-    _expand_panel(MODULO_PRODUCCION_SELECTOR, "el panel Producción")
+    # Si el primer panel no abre, los clics siguientes estan condenados: el
+    # panel cerrado intercepta los eventos del que va debajo. Se corta ahi y se
+    # entra por URL en vez de encadenar timeouts que igual terminan en lo mismo.
+    if not _expand_panel(FACTURACION_MENU_SELECTOR, "el panel de Facturación Electrónica"):
+        logger.info("Menu no disponible: se entra al formulario por URL directa.")
+        _goto_form()
+        return page
+    if not _expand_panel(MODULO_PRODUCCION_SELECTOR, "el panel Producción"):
+        logger.info("Submenu no disponible: se entra al formulario por URL directa.")
+        _goto_form()
+        return page
 
     def _en_formulario():
         try:
