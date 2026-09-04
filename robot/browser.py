@@ -1976,6 +1976,34 @@ def _cerrar_modal_encuesta(page) -> bool:
     return False
 
 
+def _recargar_formulario_directo(page, origen: str) -> bool:
+    """Vuelve al formulario JSF por URL directa y devuelve si quedo listo.
+
+    Es la version barata de `_abrir_modulo_consultas`. Cuando lo unico que se
+    necesita es una vista JSF fresca -- y la sesion sigue viva en las cookies --
+    no hace falta la vuelta por Keycloak ni los cuatro clics del menu Angular:
+    un `goto` al formulario basta y cuesta segundos en vez de decenas.
+
+    La confirmacion es `form#frmPrincipal` en el DOM, que es la senal real de
+    que el formulario se puede usar; `networkidle` no sirve aca porque en
+    PrimeFaces casi nunca se alcanza y se termina pagando el timeout entero.
+    """
+    destino_url = RECUPERAR_COMPROBANTES_URL if origen == "Emitidos" else RECIBIDOS_DIRECT_URL
+    goto_timeout = 8000 if origen == "Emitidos" else 15000
+    espera_form = 4000 if origen == "Emitidos" else 8000
+    for intento in range(2):
+        try:
+            page.goto(destino_url, wait_until="domcontentloaded", timeout=goto_timeout)
+            page.wait_for_selector("form#frmPrincipal", timeout=espera_form)
+            return True
+        except Exception as err:
+            logger.warning(
+                f"Recarga directa del formulario de {origen.lower()} "
+                f"({intento + 1}/2): {err}"
+            )
+    return False
+
+
 def _abrir_modulo_consultas(page, origen: str):
     """Cierra popups, abre el panel izquierdo y navega al formulario correspondiente."""
     _cerrar_modal_encuesta(page)

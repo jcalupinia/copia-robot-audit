@@ -214,6 +214,7 @@ from robot.browser import (
     _parse_emitido_comprobante,
     _portal_indisponible,
     _primer_texto,
+    _recargar_formulario_directo,
     _rellenar_input_por_label,
     _resolver_autenticacion_persistente,
     _resolver_destino_unico,
@@ -1613,18 +1614,42 @@ def descargar_sri(
                     "Se reabrira el modulo antes de continuar con el siguiente dia."
                 )
                 _notificar_usuario_accion(mensaje)
-                try:
-                    page.goto(PORTAL_HOME, wait_until="domcontentloaded", timeout=15000)
-                    page.wait_for_load_state("domcontentloaded", timeout=3000)
-                except Exception as err:
-                    logger.warning(f"No se pudo volver al menu principal antes del reinicio de Emitidos: {err}")
-                if EMITIDOS_RESET_PAUSE_MS > 0:
+                # Se cronometra cada paso porque el reinicio es el sospechoso
+                # numero uno cuando el salto entre dias se siente lento, y sin
+                # estos numeros no se sabe cual de los cuatro pasos cuesta.
+                tiempos = {}
+                # Lo que cura la degradacion del formulario es una vista JSF
+                # nueva, y para eso alcanza con recargar el formulario por URL.
+                # El camino largo -- Keycloak (PORTAL_HOME es un endpoint de
+                # login OIDC que ademas arranca el SPA Angular) mas los clics
+                # del menu -- queda de respaldo, solo si la recarga falla.
+                t0 = time.time()
+                recargo = _recargar_formulario_directo(page, origen)
+                tiempos["recarga"] = time.time() - t0
+                if recargo:
+                    modulo_page = page
+                else:
+                    t0 = time.time()
                     try:
-                        page.wait_for_timeout(EMITIDOS_RESET_PAUSE_MS)
-                    except Exception:
-                        pass
-                modulo_page = _abrir_modulo_consultas(page, origen)
+                        page.goto(PORTAL_HOME, wait_until="domcontentloaded", timeout=15000)
+                        page.wait_for_load_state("domcontentloaded", timeout=3000)
+                    except Exception as err:
+                        logger.warning(f"No se pudo volver al menu principal antes del reinicio de Emitidos: {err}")
+                    if EMITIDOS_RESET_PAUSE_MS > 0:
+                        try:
+                            page.wait_for_timeout(EMITIDOS_RESET_PAUSE_MS)
+                        except Exception:
+                            pass
+                    modulo_page = _abrir_modulo_consultas(page, origen)
+                    tiempos["respaldo"] = time.time() - t0
+                t0 = time.time()
                 _resolver_captcha(modulo_page, f"{origen.lower()}_Modulo_Reinicio")
+                tiempos["captcha"] = time.time() - t0
+                logger.info(
+                    "[reinicio Emitidos] "
+                    + "  ".join(f"{k}={v:.1f}s" for k, v in tiempos.items())
+                    + f"  TOTAL={sum(tiempos.values()):.1f}s"
+                )
 
             def _emitidos_por_mes(mes_actual: int, dia_actual: int):
                 nonlocal aviso_recorte
@@ -1702,6 +1727,7 @@ def descargar_sri(
                     )
                     _page_param = _resume_page_start if _aplica_resume_fino else 1
                     _row_param = _resume_row_start if _aplica_resume_fino else 0
+                    _t_dia = time.time()
                     resultado_dia = _flujo_emitidos(
                         modulo_page,
                         destino_objetivo,
@@ -1718,6 +1744,13 @@ def descargar_sri(
                         current_month=int(mes_actual),
                         current_day=int(dia_iter),
                         modo_rapido=modo_rapido,
+                    )
+                    # Separa el costo del dia en si (consulta + lectura de la
+                    # tabla) del costo del reinicio, que se cronometra aparte.
+                    logger.info(
+                        f"[dia Emitidos] {fecha_actual} tomo "
+                        f"{time.time() - _t_dia:.1f}s "
+                        f"({resultado_dia.get('n_registros', 0)} registros)"
                     )
                     detalle_dias.append(
                         {
@@ -1762,8 +1795,26 @@ def descargar_sri(
                         idx_dia < len(dias_consultar) - 1
                         or (mes_fin_val and int(mes_fin_val) > int(mes_actual) and dia_actual in (0, None))
                     )
-                    if hay_mas_trabajo and n_registros_dia >= EMITIDOS_RESET_AFTER_DAY_DOCS:
+                    # El reinicio existe porque el formulario se degrada tras
+                    # descargar cientos de archivos, y cuesta caro: recarga el
+                    # portal, pausa fija, reabre el modulo y revisa el captcha.
+                    # En modo rapido no se descarga nada -- se lee la tabla y se
+                    # pasa de hoja -- asi que esa degradacion no aplica y el
+                    # reinicio solo agrega segundos por cada dia consultado.
+                    if hay_mas_trabajo and not modo_rapido and (
+                        n_registros_dia >= EMITIDOS_RESET_AFTER_DAY_DOCS
+                    ):
                         _reiniciar_emitidos_para_siguiente_dia(fecha_actual, n_registros_dia)
+                    elif hay_mas_trabajo and modo_rapido and n_registros_dia == 0:
+                        # Red de seguridad: si el formulario igual se degradara,
+                        # el sintoma es un dia que vuelve vacio. Se reinicia
+                        # antes de seguir para no arrastrar ceros en silencio
+                        # por el resto del periodo.
+                        logger.info(
+                            f"[modo rapido] {fecha_actual} no devolvio comprobantes; "
+                            "se reabre el modulo por las dudas antes del siguiente dia."
+                        )
+                        _reiniciar_emitidos_para_siguiente_dia(fecha_actual, 0)
                 if dia_actual in (0, None):
                     resultado_mes = dict(resultado_mes or {})
                     resultado_mes["n_registros"] = total_regs
