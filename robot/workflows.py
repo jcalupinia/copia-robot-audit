@@ -262,18 +262,28 @@ def _build_download_verification(
     descargados_xml: set,
     esperados_pdf: set,
     descargados_pdf: set,
+    motivo_incompleto: str = "",
 ) -> dict:
     faltantes_xml = max(0, len(esperados_xml) - len(descargados_xml))
     faltantes_pdf = max(0, len(esperados_pdf) - len(descargados_pdf))
-    descarga_completa = faltantes_xml == 0 and faltantes_pdf == 0
+    # Los conjuntos de "esperados" se llenan DENTRO del bucle de filas, asi que
+    # solo saben de lo que se alcanzo a procesar: un dia que se corta a la
+    # mitad se compara consigo mismo y da completo. `motivo_incompleto` trae la
+    # unica evidencia externa que hay -- hojas sin recorrer, dia abandonado --
+    # y sin ella un dia truncado se reportaba como OK.
+    descarga_completa = (
+        faltantes_xml == 0 and faltantes_pdf == 0 and not motivo_incompleto
+    )
     partes = [f"Filas detectadas: {int(registros_esperados or 0)}"]
     if esperados_xml:
         partes.append(f"XML {len(descargados_xml)}/{len(esperados_xml)}")
     if esperados_pdf:
         partes.append(f"PDF {len(descargados_pdf)}/{len(esperados_pdf)}")
     mensaje = " | ".join(partes)
-    if not descarga_completa:
+    if faltantes_xml or faltantes_pdf:
         mensaje += f" | Faltantes XML: {faltantes_xml}, PDF: {faltantes_pdf}"
+    if motivo_incompleto:
+        mensaje += f" | {motivo_incompleto}"
     return {
         "registros_esperados": int(registros_esperados or 0),
         "esperados_xml": len(esperados_xml),
@@ -283,6 +293,7 @@ def _build_download_verification(
         "faltantes_xml": faltantes_xml,
         "faltantes_pdf": faltantes_pdf,
         "descarga_completa": descarga_completa,
+        "motivo_incompleto": motivo_incompleto,
         "mensaje_verificacion": mensaje,
     }
 
@@ -2361,6 +2372,8 @@ def _flujo_emitidos(
     esperados_pdf = set()
     descargados_xml = set()
     descargados_pdf = set()
+    # Evidencia externa de que el dia quedo corto. Vacio = nada que objetar.
+    motivo_incompleto = ""
 
     info_base = {
         "carpeta_tipo": str(carpeta_tipo),
@@ -3027,6 +3040,10 @@ def _flujo_emitidos(
             logger.info(f"Pag {pagina} completa: {total_filas} filas en {duracion_pagina:.2f}s")
 
             if _abort_row_loop:
+                motivo_incompleto = (
+                    f"Dia abandonado en la hoja {pagina}: "
+                    "no se pudo recuperar el formulario"
+                )
                 # Recuperacion fallida en el row loop — abandonamos el dia
                 # entero. El caller capturara la excepcion o el resultado
                 # vacio y el checkpoint ya fue guardado en el momento del
@@ -3036,16 +3053,24 @@ def _flujo_emitidos(
                 )
                 break
 
-            boton_siguiente = page.locator("span.ui-paginator-next:not(.ui-state-disabled)")
-            if boton_siguiente.count():
-                boton_siguiente.first.click()
-                try:
-                    page.wait_for_load_state("networkidle", timeout=1000)
-                except Exception:
-                    pass
-                time.sleep(0.2)
+            # Emitidos pagina con <a>, no con <span>: el selector viejo
+            # (`span.ui-paginator-next`) no encontraba nada y el bucle de
+            # descarga se cortaba SIEMPRE en la hoja 1, perdiendo el resto del
+            # dia sin avisar. Recibidos si usa <span>, por eso alli nunca se
+            # noto. `_pasar_pagina` prueba los dos y ademas confirma que la
+            # tabla cambio, en vez de clickear a ciegas.
+            _, _total_paginas = _paginas_totales(page)
+            if _pasar_pagina(page, tabla_emitidos):
                 pagina += 1
                 continue
+            if _total_paginas and pagina < _total_paginas:
+                motivo_incompleto = (
+                    f"Se recorrieron {pagina} de {_total_paginas} hoja(s)"
+                )
+                logger.warning(
+                    f"{fecha_emision}: se descargaron {pagina} de {_total_paginas} "
+                    f"hoja(s). Quedan comprobantes sin bajar."
+                )
             break
         info_base["n_xml"] = n_xml
         info_base["n_pdf"] = n_pdf
@@ -3120,6 +3145,7 @@ def _flujo_emitidos(
             descargados_xml,
             esperados_pdf,
             descargados_pdf,
+            motivo_incompleto=motivo_incompleto,
         )
     )
     if not info_base.get("descarga_completa", True):
