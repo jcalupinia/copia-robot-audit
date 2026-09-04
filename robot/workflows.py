@@ -2375,6 +2375,12 @@ def _flujo_emitidos(
     descargados_pdf = set()
     # Evidencia externa de que el dia quedo corto. Vacio = nada que objetar.
     motivo_incompleto = ""
+    # Filas que la tabla mostro pero que el bucle descarto. Sin contarlas, un
+    # dia con filas salteadas se compara consigo mismo y da completo: en Marzo
+    # el 08 tenia 43 filas en la tabla, se procesaron 31 y salio "OK".
+    saltadas_sin_celdas = 0
+    saltadas_otro_tipo = 0
+    saltadas_sin_pdf = 0
 
     info_base = {
         "carpeta_tipo": str(carpeta_tipo),
@@ -2628,6 +2634,7 @@ def _flujo_emitidos(
                     textos_celdas = []
                 total_celdas = len(textos_celdas)
                 if total_celdas < 2:
+                    saltadas_sin_celdas += 1
                     continue
 
                 def _txt(i: int) -> str:
@@ -2636,8 +2643,10 @@ def _flujo_emitidos(
                 tipo_serie_texto = _txt(1)
                 tipo_detectado = _extraer_tipo_documento(tipo_serie_texto)
                 if tipo_detectado and not _coincide_tipo_documental(tipo_visible or tipo, tipo_detectado):
-                    print(
-                        f"[WARN] Se omitio una fila de Emitidos porque corresponde a '{tipo_detectado}' y no a '{tipo_visible or tipo}'."
+                    saltadas_otro_tipo += 1
+                    logger.warning(
+                        f"[fila saltada] pag {pagina} fila {idx + 1}: es "
+                        f"'{tipo_detectado}' y se pidio '{tipo_visible or tipo}'."
                     )
                     continue
                 clave_texto = _buscar_clave_en_textos(textos_celdas)
@@ -2865,6 +2874,11 @@ def _flujo_emitidos(
                     if not link_pdf.count():
                         link_pdf = fila.locator("a[title*='pdf' i], button[title*='pdf' i]")
                     if not link_pdf.count():
+                        saltadas_sin_pdf += 1
+                        logger.warning(
+                            f"[fila saltada] pag {pagina} fila {idx + 1} "
+                            f"({nombre_base_pdf}): la fila no expone enlace de PDF."
+                        )
                         continue
 
                     destino_pdf = pdf_dir / f"{nombre_base_pdf}.pdf"
@@ -3177,6 +3191,21 @@ def _flujo_emitidos(
             "estado": "sin_resultados",
             "n_registros": 0,
         })
+    # Una fila que la tabla mostro y el bucle descarto es una falta, aunque
+    # todo lo que se intento haya salido bien. Las filas sin celdas son ruido
+    # estructural de la tabla, no comprobantes, asi que no cuentan.
+    _saltadas = saltadas_otro_tipo + saltadas_sin_pdf
+    if _saltadas:
+        _detalle = []
+        if saltadas_otro_tipo:
+            _detalle.append(f"{saltadas_otro_tipo} de otro tipo documental")
+        if saltadas_sin_pdf:
+            _detalle.append(f"{saltadas_sin_pdf} sin enlace de PDF")
+        _aviso = f"{_saltadas} fila(s) salteada(s): " + ", ".join(_detalle)
+        motivo_incompleto = (
+            f"{motivo_incompleto} | {_aviso}" if motivo_incompleto else _aviso
+        )
+    info_base["filas_salteadas"] = _saltadas
     info_base.update(
         _build_download_verification(
             registros_esperados or len(df),
