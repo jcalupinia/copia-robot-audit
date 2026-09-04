@@ -36,6 +36,7 @@ from robot.config import (
     OVERLAY_SELECTORS,
     PORTAL_INDISPONIBLE_MENSAJE,
     RECIBIDOS_DIRECT_URL,
+    DOM_READ_TIMEOUT_MS,
     FILL_TIMEOUT_MS,
     RECUPERAR_COMPROBANTES_URL,
 )
@@ -1126,8 +1127,10 @@ def _guardar_pdf_desde_jsf(page, link_locator, base_destino: Path) -> Optional[P
     Ejecuta directamente mojarra.jsfcljs (JSF) para disparar la descarga del PDF.
     Evita depender del click visual del boton/imagen.
     """
+    # Acotado: este link se lee una vez por fila y puede quedar detached si el
+    # portal devolvio el navegador al home. Sin tope serian 30 s por fila.
     try:
-        link_id = link_locator.get_attribute("id")
+        link_id = link_locator.get_attribute("id", timeout=DOM_READ_TIMEOUT_MS)
     except Exception:
         link_id = None
     if not link_id:
@@ -1205,14 +1208,18 @@ def _guardar_pdf_desde_jsf(page, link_locator, base_destino: Path) -> Optional[P
 
 
 def _descargar_pdf_recibidos_post(page, link_locator, base_destino: Path) -> Optional[Path]:
+    # Acotado: este link se lee una vez por fila y puede quedar detached si el
+    # portal devolvio el navegador al home. Sin tope serian 30 s por fila.
     try:
-        link_id = link_locator.get_attribute("id")
+        link_id = link_locator.get_attribute("id", timeout=DOM_READ_TIMEOUT_MS)
     except Exception:
         link_id = None
     if not link_id:
         return None
     try:
-        view_state = page.locator("input[name='javax.faces.ViewState']").first.get_attribute("value")
+        view_state = page.locator("input[name='javax.faces.ViewState']").first.get_attribute(
+            "value", timeout=DOM_READ_TIMEOUT_MS
+        )
     except Exception:
         view_state = None
     if not view_state:
@@ -1296,14 +1303,18 @@ def _descargar_pdf_recibidos_post(page, link_locator, base_destino: Path) -> Opt
 
 
 def _descargar_pdf_emitidos_post(page, link_locator, base_destino: Path) -> Optional[Path]:
+    # Acotado: este link se lee una vez por fila y puede quedar detached si el
+    # portal devolvio el navegador al home. Sin tope serian 30 s por fila.
     try:
-        link_id = link_locator.get_attribute("id")
+        link_id = link_locator.get_attribute("id", timeout=DOM_READ_TIMEOUT_MS)
     except Exception:
         link_id = None
     if not link_id:
         return None
     try:
-        view_state = page.locator("input[name='javax.faces.ViewState']").first.get_attribute("value")
+        view_state = page.locator("input[name='javax.faces.ViewState']").first.get_attribute(
+            "value", timeout=DOM_READ_TIMEOUT_MS
+        )
     except Exception:
         view_state = None
     if not view_state:

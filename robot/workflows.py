@@ -1668,10 +1668,11 @@ def _flujo_recibidos(
                         lote_contador += 1
                         if lote_contador >= lote_size or idx == total_filas - 1:
                             duracion_lote = time.perf_counter() - lote_inicio
-                            print(
-                                f"[INFO] Pag {pagina} lote {((idx // lote_size) + 1)}: "
+                            logger.info(
+                                f"[lote] Pag {pagina} lote {((idx // lote_size) + 1)}: "
                                 f"{lote_contador} filas, XML {lote_xml_ok}, PDF {lote_pdf_ok}, "
-                                f"{duracion_lote:.2f}s"
+                                f"{duracion_lote:.2f}s "
+                                f"({duracion_lote / max(1, lote_contador):.2f}s por fila)"
                             )
                             lote_inicio = time.perf_counter()
                             lote_contador = 0
@@ -2990,10 +2991,11 @@ def _flujo_emitidos(
                 lote_contador += 1
                 if lote_contador >= lote_size or idx == total_filas - 1:
                     duracion_lote = time.perf_counter() - lote_inicio
-                    print(
-                        f"[INFO] Pag {pagina} lote {((idx // lote_size) + 1)}: "
+                    logger.info(
+                        f"[lote] Pag {pagina} lote {((idx // lote_size) + 1)}: "
                         f"{lote_contador} filas, XML {lote_xml_ok}, PDF {lote_pdf_ok}, "
-                        f"{duracion_lote:.2f}s"
+                        f"{duracion_lote:.2f}s "
+                        f"({duracion_lote / max(1, lote_contador):.2f}s por fila)"
                     )
                     lote_inicio = time.perf_counter()
                     lote_contador = 0
