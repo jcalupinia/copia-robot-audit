@@ -73,6 +73,7 @@ from robot.comprobante_types import (
 )
 from robot.config import (
     DOM_READ_TIMEOUT_MS,
+    FILA_LENTA_S,
     FILL_TIMEOUT_MS,
     DOWNLOAD_TIMEOUT,
     ESTADOS_EMITIDOS_MAP,
@@ -2520,6 +2521,12 @@ def _flujo_emitidos(
             lote_contador = 0
             lote_xml_ok = 0
             lote_pdf_ok = 0
+            # Desglose del lote: el promedio por fila dice que hay un problema,
+            # no cual. Estos tres dicen si el tiempo se va en leer la fila, en
+            # el XML por SOAP o en el PDF.
+            lote_t_fila = 0.0
+            lote_t_xml = 0.0
+            lote_t_pdf = 0.0
             # Si estamos resumiendo en esta pagina, calculamos el indice
             # desde donde empezar (skip las filas previas ya procesadas).
             _skip_until_this_page = (
@@ -2609,6 +2616,8 @@ def _flujo_emitidos(
                         )
                         break
 
+                _t_fila = time.perf_counter()
+                _t_paso = _t_fila
                 fila = filas.nth(idx)
                 celdas = fila.locator("td")
                 # OPTIMIZACION: 1 round-trip CDP en vez de 9. all_inner_texts()
@@ -2810,6 +2819,10 @@ def _flujo_emitidos(
                         logger.warning(f"No se pudo descargar XML/PDF para '{nombre_base_pdf}': {err}")
                     continue
 
+                _d_fila = time.perf_counter() - _t_paso
+                lote_t_fila += _d_fila
+                _t_paso = time.perf_counter()
+
                 if descargar_xml_para_reporte and not omitir_soap_xml:
                     if clave_texto:
                         for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
@@ -2842,6 +2855,10 @@ def _flujo_emitidos(
                                     pass
                     else:
                         logger.warning(f"La fila '{nombre_base_pdf}' no tiene clave de acceso para solicitar el XML.")
+
+                _d_xml = time.perf_counter() - _t_paso
+                lote_t_xml += _d_xml
+                _t_paso = time.perf_counter()
 
                 if descargar_pdf:
                     link_pdf = fila.locator("a[id$=':lnkPdf']")
@@ -3001,6 +3018,18 @@ def _flujo_emitidos(
                     else:
                         logger.warning(f"No se pudo descargar PDF para '{nombre_base_pdf}': no se obtuvo archivo.")
 
+                _d_pdf = time.perf_counter() - _t_paso
+                lote_t_pdf += _d_pdf
+                _d_total = time.perf_counter() - _t_fila
+                if _d_total >= FILA_LENTA_S:
+                    # El promedio del lote esconde los picos. Una fila que se
+                    # va sola es la que hay que mirar, y el desglose dice si
+                    # fue el XML por SOAP o el PDF.
+                    logger.warning(
+                        f"[fila lenta] pag {pagina} fila {idx + 1}: {_d_total:.1f}s "
+                        f"(leer {_d_fila:.1f}s  XML {_d_xml:.1f}s  PDF {_d_pdf:.1f}s)"
+                    )
+
                 lote_contador += 1
                 if lote_contador >= lote_size or idx == total_filas - 1:
                     duracion_lote = time.perf_counter() - lote_inicio
@@ -3008,12 +3037,22 @@ def _flujo_emitidos(
                         f"[lote] Pag {pagina} lote {((idx // lote_size) + 1)}: "
                         f"{lote_contador} filas, XML {lote_xml_ok}, PDF {lote_pdf_ok}, "
                         f"{duracion_lote:.2f}s "
-                        f"({duracion_lote / max(1, lote_contador):.2f}s por fila)"
+                        f"({duracion_lote / max(1, lote_contador):.2f}s por fila)  "
+                        f"|  leer fila {lote_t_fila:.1f}s  "
+                        f"XML {lote_t_xml:.1f}s  PDF {lote_t_pdf:.1f}s  "
+                        # Hay filas que se descartan antes de cerrar el
+                        # cronometro (sin celdas, de otro tipo, sin link de
+                        # PDF). Su tiempo cae aca, asi el desglose siempre
+                        # suma el total del lote en vez de quedarse corto.
+                        f"otros {max(0.0, duracion_lote - lote_t_fila - lote_t_xml - lote_t_pdf):.1f}s"
                     )
                     lote_inicio = time.perf_counter()
                     lote_contador = 0
                     lote_xml_ok = 0
                     lote_pdf_ok = 0
+                    lote_t_fila = 0.0
+                    lote_t_xml = 0.0
+                    lote_t_pdf = 0.0
                     # === FIX C: persistir checkpoint con granularidad pag+fila
                     # despues de cerrar cada lote (10 filas). Si el navegador
                     # se cierra ahora, el resume retomara exactamente desde

@@ -328,6 +328,10 @@ FILL_TIMEOUT_MS = int(os.getenv("SRI_FILL_TIMEOUT_MS", "2000"))
 # esperaban esos 30 s por cada dia vacio.
 DOM_READ_TIMEOUT_MS = int(os.getenv("SRI_DOM_READ_TIMEOUT_MS", "2000"))
 
+# A partir de cuantos segundos una fila se considera lenta y se loguea sola con
+# su desglose. El promedio por lote dice que hay un problema; el pico dice cual.
+FILA_LENTA_S = float(os.getenv("SRI_FILA_LENTA_S", "3"))
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 
