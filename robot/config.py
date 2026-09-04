@@ -322,6 +322,12 @@ CONSULTAS_SELECTOR = (
 # que igual funciona. Un campo sano se llena en milisegundos.
 FILL_TIMEOUT_MS = int(os.getenv("SRI_FILL_TIMEOUT_MS", "2000"))
 
+# Tope para leer HTML de un elemento. Mismo problema que arriba: `inner_html()`
+# sin `timeout` espera 30 s a que el elemento aparezca. Cuando un dia no tiene
+# comprobantes, la tabla de resultados no se renderiza nunca, asi que se
+# esperaban esos 30 s por cada dia vacio.
+DOM_READ_TIMEOUT_MS = int(os.getenv("SRI_DOM_READ_TIMEOUT_MS", "2000"))
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 

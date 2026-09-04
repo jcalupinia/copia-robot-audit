@@ -72,6 +72,7 @@ from robot.comprobante_types import (
     _slug_tipo,
 )
 from robot.config import (
+    DOM_READ_TIMEOUT_MS,
     FILL_TIMEOUT_MS,
     DOWNLOAD_TIMEOUT,
     ESTADOS_EMITIDOS_MAP,
@@ -1800,9 +1801,9 @@ def _huella_tabla(page, tabla=None) -> str:
     # Se mira solo la tabla: page.content() serializa el DOM entero y es caro
     # de mas para esto, sobre todo con cientos de filas.
     html = ""
-    if tabla is not None:
+    if tabla is not None and tabla.count():
         try:
-            html = tabla.inner_html()
+            html = tabla.inner_html(timeout=DOM_READ_TIMEOUT_MS)
         except Exception:
             html = ""
     if not html:
@@ -1917,9 +1918,12 @@ def _filas_tabla_emitidos(page, tabla, tipo_visible, tipo, fecha_emision, es_rec
         # arrastraba filas de la cabecera, los filtros y los dialogos ocultos:
         # se contaban 55 filas en una hoja de 50 y ensuciaban el dedupe.
         html = ""
-        if tabla is not None:
+        # `count()` no espera: resuelve contra el DOM actual. Preguntar primero
+        # evita que `inner_html()` se quede esperando 30 s por una tabla que no
+        # existe, que es justo lo que pasa en un dia sin comprobantes.
+        if tabla is not None and tabla.count():
             try:
-                html = tabla.inner_html()
+                html = tabla.inner_html(timeout=DOM_READ_TIMEOUT_MS)
             except Exception:
                 html = ""
         if not html:
