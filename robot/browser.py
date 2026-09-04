@@ -36,6 +36,7 @@ from robot.config import (
     OVERLAY_SELECTORS,
     PORTAL_INDISPONIBLE_MENSAJE,
     RECIBIDOS_DIRECT_URL,
+    FILL_TIMEOUT_MS,
     RECUPERAR_COMPROBANTES_URL,
 )
 from robot.data_formatters import _parse_decimal
@@ -1603,8 +1604,8 @@ def _rellenar_input_por_label(page, etiquetas, valor: str, selectores_extra=None
         try:
             loc = page.get_by_label(etiqueta, exact=False)
             if loc.count():
-                loc.first.fill("")
-                loc.first.fill(texto)
+                loc.first.fill("", timeout=FILL_TIMEOUT_MS)
+                loc.first.fill(texto, timeout=FILL_TIMEOUT_MS)
                 return True
         except Exception:
             continue
@@ -1623,8 +1624,8 @@ def _rellenar_input_por_label(page, etiquetas, valor: str, selectores_extra=None
         try:
             loc = page.locator(selector)
             if loc.count():
-                loc.first.fill("")
-                loc.first.fill(texto)
+                loc.first.fill("", timeout=FILL_TIMEOUT_MS)
+                loc.first.fill(texto, timeout=FILL_TIMEOUT_MS)
                 return True
         except Exception:
             continue
@@ -2295,8 +2296,8 @@ def _recuperar_formulario_emitidos(
         try:
             fecha_loc = page.locator("input#frmPrincipal\\:calendarFechaDesde_input")
             if fecha_loc.count():
-                fecha_loc.first.fill("")
-                fecha_loc.first.fill(fecha_emision)
+                fecha_loc.first.fill("", timeout=FILL_TIMEOUT_MS)
+                fecha_loc.first.fill(fecha_emision, timeout=FILL_TIMEOUT_MS)
         except Exception as err:
             logger.warning(f"recuperar: no se pudo set fecha='{fecha_emision}': {err}")
     if establecimiento:
@@ -2310,8 +2311,8 @@ def _recuperar_formulario_emitidos(
         try:
             pto_loc = page.locator("input#frmPrincipal\\:txtPuntoEmision")
             if pto_loc.count():
-                pto_loc.first.fill("")
-                pto_loc.first.fill(punto_emision)
+                pto_loc.first.fill("", timeout=FILL_TIMEOUT_MS)
+                pto_loc.first.fill(punto_emision, timeout=FILL_TIMEOUT_MS)
         except Exception:
             pass
 

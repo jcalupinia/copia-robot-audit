@@ -72,6 +72,7 @@ from robot.comprobante_types import (
     _slug_tipo,
 )
 from robot.config import (
+    FILL_TIMEOUT_MS,
     DOWNLOAD_TIMEOUT,
     ESTADOS_EMITIDOS_MAP,
     MANUAL_CONSULTA_RECIBIDOS,
@@ -2055,6 +2056,11 @@ def _flujo_emitidos(
     except Exception:
         pass
 
+    # Cronometro por fase: sin esto no se distingue un formulario lento de un
+    # timeout que se paga entero y se traga en silencio.
+    _fases = {}
+    _t_fase = time.time()
+
     if not _seleccionar_en_select(
         page,
         "select#frmPrincipal\:cmbTipoComprobante",
@@ -2102,15 +2108,24 @@ def _flujo_emitidos(
         try:
             fecha_loc = page.locator(fecha_selector)
             if fecha_loc.count():
-                fecha_loc.first.fill("")
-                fecha_loc.first.fill(fecha_emision)
+                # `fill()` sin timeout usa el default de Playwright: 30 s. El
+                # input del calendario de PrimeFaces a veces queda readonly, y
+                # entonces se esperaban esos 30 s enteros -- una vez por dia
+                # consultado -- antes de caer al fallback, que igual funciona.
+                # Con 2 s alcanza de sobra cuando el campo esta sano.
+                fecha_loc.first.fill("", timeout=FILL_TIMEOUT_MS)
+                fecha_loc.first.fill(fecha_emision, timeout=FILL_TIMEOUT_MS)
                 try:
                     fecha_loc.first.dispatch_event("input")
                     fecha_loc.first.dispatch_event("change")
                 except Exception:
                     pass
                 fecha_ok = True
-        except Exception:
+        except Exception as err:
+            logger.warning(
+                f"El campo de fecha no acepto escritura directa ({err}); "
+                "se usa el camino por etiqueta."
+            )
             fecha_ok = False
         if not fecha_ok:
             if not _rellenar_input_por_label(
@@ -2158,10 +2173,14 @@ def _flujo_emitidos(
         try:
             punto_loc = page.locator(punto_selector)
             if punto_loc.count():
-                punto_loc.first.fill("")
-                punto_loc.first.fill(punto_valor)
+                punto_loc.first.fill("", timeout=FILL_TIMEOUT_MS)
+                punto_loc.first.fill(punto_valor, timeout=FILL_TIMEOUT_MS)
                 punto_ok = True
-        except Exception:
+        except Exception as err:
+            logger.warning(
+                f"El punto de emision no acepto escritura directa ({err}); "
+                "se usa el camino por etiqueta."
+            )
             punto_ok = False
         if not punto_ok:
             if not _rellenar_input_por_label(
@@ -2199,6 +2218,9 @@ def _flujo_emitidos(
     if descargar_pdf:
         pdf_dir.mkdir(parents=True, exist_ok=True)
 
+    _fases["filtros"] = time.time() - _t_fase
+    _t_fase = time.time()
+
     if not _click_consultar_emitidos(page):
         try:
             page.keyboard.press("Enter")
@@ -2225,6 +2247,13 @@ def _flujo_emitidos(
                 tabla_emitidos.wait_for(state="visible", timeout=1000)
             except Exception:
                 pass
+
+    _fases["consulta"] = time.time() - _t_fase
+    logger.info(
+        f"[fases Emitidos] {fecha_emision or 's/f'}  "
+        + "  ".join(f"{k}={v:.1f}s" for k, v in _fases.items())
+        + f"  TOTAL={sum(_fases.values()):.1f}s"
+    )
 
     if modo_rapido:
         # A diferencia de Recibidos, Emitidos filtra por UN dia, asi que este

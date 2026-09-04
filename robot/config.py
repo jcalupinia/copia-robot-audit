@@ -316,6 +316,12 @@ CONSULTAS_SELECTOR = (
     "xpath=//span[contains(@class,'ui-menuitem-text') and "
     "normalize-space()='Consultas']/ancestor::a[1]"
 )
+# Tope para escribir en un input del formulario. Playwright, sin `timeout`,
+# usa 30 s: si el campo esta readonly -- el calendario de PrimeFaces lo queda
+# a ratos -- se pagaban 30 s por cada dia consultado antes de caer al fallback,
+# que igual funciona. Un campo sano se llena en milisegundos.
+FILL_TIMEOUT_MS = int(os.getenv("SRI_FILL_TIMEOUT_MS", "2000"))
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 
