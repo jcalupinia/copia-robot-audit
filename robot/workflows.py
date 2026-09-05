@@ -2919,6 +2919,13 @@ def _flujo_emitidos(
                         continue
 
                     destino_pdf = pdf_dir / f"{nombre_base_pdf}.pdf"
+                    # Si el comprobante ya esta en disco no se vuelve a pedir.
+                    # Todas las rutas de descarga pasan por
+                    # `_resolver_destino_unico`, que ante un archivo existente
+                    # crea "<nombre>_1.pdf": sin esta guardia, reintentar un dia
+                    # duplicaria lo ya bajado y ensuciaria el conteo. Ademas
+                    # hace que reintentar un dia incompleto salga casi gratis.
+                    _pdf_ya_estaba = destino_pdf.exists()
                     link_id = None
                     try:
                         link_id = link_pdf.first.get_attribute("id")
@@ -2927,6 +2934,13 @@ def _flujo_emitidos(
                     resultado_pdf = None
                     for intento_pdf in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
                         resultado_pdf = None
+                        if _pdf_ya_estaba:
+                            resultado_pdf = destino_pdf
+                            logger.info(
+                                f"[ya estaba] pag {pagina} fila {idx + 1}: "
+                                f"{destino_pdf.name}"
+                            )
+                            break
                         if link_id and view_state:
                             resultado_pdf = _descargar_pdf_emitidos_post_con_viewstate(
                                 page, link_id, view_state, destino_pdf,

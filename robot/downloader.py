@@ -317,6 +317,7 @@ from robot.config import (
     DEVTOOLS,
     DOC_LABELS,
     DOWNLOAD_TIMEOUT,
+    EMITIDOS_REINTENTOS_DIA,
     EMITIDOS_RESET_AFTER_DAY_DOCS,
     EMITIDOS_RESET_PAUSE_MS,
     ESTADOS_EMITIDOS_MAP,
@@ -1606,6 +1607,9 @@ def descargar_sri(
             modulo_page = _abrir_modulo_consultas(page, origen)
             _resolver_captcha(modulo_page, f"{origen.lower()}_Modulo")
             destino_objetivo = destino_emitidos
+            # Dias que siguieron incompletos despues de los reintentos. Se
+            # resumen al final para no tener que leer el log entero.
+            dias_incompletos: list[str] = []
 
             def _reiniciar_emitidos_para_siguiente_dia(fecha_actual: str, total_docs_dia: int) -> None:
                 nonlocal modulo_page
@@ -1752,6 +1756,47 @@ def descargar_sri(
                         f"{time.time() - _t_dia:.1f}s "
                         f"({resultado_dia.get('n_registros', 0)} registros)"
                     )
+                    # Detectar que un dia quedo corto no sirve de nada si no se
+                    # vuelve a intentar: hasta ahora se seguia al dia siguiente
+                    # y esos comprobantes no se recuperaban nunca. Reintentar
+                    # es barato porque lo ya bajado se saltea por nombre de
+                    # archivo, asi que solo se pide lo que falta.
+                    for _reintento in range(1, EMITIDOS_REINTENTOS_DIA + 1):
+                        if resultado_dia.get("descarga_completa", True):
+                            break
+                        logger.warning(
+                            f"[reintento {_reintento}/{EMITIDOS_REINTENTOS_DIA}] "
+                            f"{fecha_actual} quedo incompleto: "
+                            f"{resultado_dia.get('mensaje_verificacion')}"
+                        )
+                        _reiniciar_emitidos_para_siguiente_dia(fecha_actual, 0)
+                        _t_reintento = time.time()
+                        resultado_dia = _flujo_emitidos(
+                            modulo_page,
+                            destino_objetivo,
+                            fecha_actual,
+                            tipo,
+                            estado_emitidos,
+                            establecimiento,
+                            punto_emision,
+                            formatos,
+                            ruc_emisor=ruc,
+                            checkpoint_path=checkpoint_path_str or None,
+                            resume_page=1,
+                            resume_row_index=0,
+                            current_month=int(mes_actual),
+                            current_day=int(dia_iter),
+                            modo_rapido=modo_rapido,
+                        )
+                        logger.info(
+                            f"[dia Emitidos] {fecha_actual} reintento "
+                            f"{_reintento} tomo {time.time() - _t_reintento:.1f}s "
+                            f"({resultado_dia.get('n_registros', 0)} registros)"
+                        )
+                    if not resultado_dia.get("descarga_completa", True):
+                        dias_incompletos.append(
+                            f"{fecha_actual}: {resultado_dia.get('mensaje_verificacion')}"
+                        )
                     detalle_dias.append(
                         {
                             "dia": dia_iter,
@@ -1824,6 +1869,22 @@ def descargar_sri(
                     resultado_mes["mensaje"] = f"Procesados {len(dias_consultar)} días del mes"
                     resultado_mes["detalles_dias"] = detalle_dias
                     resultado_mes.update(_merge_download_verification(resultados_verificacion))
+                    # Resumen al cierre: sin esto hay que leer el log entero
+                    # para enterarse de que faltaron comprobantes.
+                    resultado_mes["dias_incompletos"] = list(dias_incompletos)
+                    if dias_incompletos:
+                        logger.warning(
+                            f"[resumen] {len(dias_incompletos)} dia(s) quedaron "
+                            f"incompletos tras {EMITIDOS_REINTENTOS_DIA} reintento(s):"
+                        )
+                        for _linea in dias_incompletos:
+                            logger.warning(f"  - {_linea}")
+                        _notificar_usuario_accion(
+                            f"[AVISO] {len(dias_incompletos)} dia(s) quedaron incompletos. "
+                            "Revisa el detalle en el log antes de dar el periodo por cerrado."
+                        )
+                    else:
+                        logger.info("[resumen] todos los dias se descargaron completos.")
                     estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
                     estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
                     estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"

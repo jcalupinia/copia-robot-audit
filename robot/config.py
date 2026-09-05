@@ -332,6 +332,11 @@ DOM_READ_TIMEOUT_MS = int(os.getenv("SRI_DOM_READ_TIMEOUT_MS", "2000"))
 # su desglose. El promedio por lote dice que hay un problema; el pico dice cual.
 FILA_LENTA_S = float(os.getenv("SRI_FILA_LENTA_S", "3"))
 
+# Cuantas veces se reintenta un dia de Emitidos que quedo incompleto. El
+# reintento es barato: lo que ya esta en disco se saltea por nombre de archivo,
+# asi que solo se vuelve a pedir lo que falta. 0 desactiva el reintento.
+EMITIDOS_REINTENTOS_DIA = int(os.getenv("SRI_EMITIDOS_REINTENTOS_DIA", "2"))
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 
