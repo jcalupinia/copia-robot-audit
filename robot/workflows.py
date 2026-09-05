@@ -1842,6 +1842,40 @@ _SEL_SIGUIENTE = (
 )
 
 
+def _esperar_tabla_estable(page, tabla, timeout_ms: int = 8000) -> int:
+    """Espera a que la tabla deje de cambiar y devuelve su cantidad de filas.
+
+    Leerla apenas responde el Consultar es una carrera contra el AJAX de JSF:
+    la misma consulta daba 43 filas en una corrida y 31 en la siguiente, y un
+    dia con 41 comprobantes llego a reportarse como "0 registros". El conteo se
+    tomaba con la tabla a medio renderizar -- o todavia con las filas del dia
+    anterior -- y lo que no estaba en ese instante se perdia en silencio.
+
+    Se considera estable cuando dos lecturas seguidas dan el mismo numero. El
+    cero solo se acepta si PrimeFaces ya puso su fila de "sin resultados", o si
+    se agoto la espera: asi un dia realmente vacio no cuesta el timeout entero
+    pero uno lento tampoco se da por vacio antes de tiempo.
+    """
+    limite = time.time() + timeout_ms / 1000
+    previo = -1
+    while time.time() < limite:
+        try:
+            actual = tabla.count() and tabla.locator("tr").count()
+        except Exception:
+            actual = 0
+        if actual and actual == previo:
+            return actual
+        if not actual:
+            try:
+                if page.locator("tr.ui-datatable-empty-message").count():
+                    return 0
+            except Exception:
+                pass
+        previo = actual
+        time.sleep(0.12)
+    return max(0, previo)
+
+
 def _paginas_totales(page) -> tuple[int, int]:
     """Lee el indicador "(X of Y)" del paginador. (0, 0) si no esta."""
     try:
@@ -2252,10 +2286,10 @@ def _flujo_emitidos(
 
     tabla_emitidos = page.locator("#frmPrincipal\\:tablaCompEmitidos_data")
     es_rechazado = False
-    try:
-        tabla_emitidos.wait_for(state="visible", timeout=1000)
-    except Exception:
-        pass
+    # No alcanza con que la tabla sea visible: hay que esperar a que termine de
+    # llenarse. Contarla antes daba numeros distintos entre corridas del mismo
+    # dia, y dias con comprobantes reportados como vacios.
+    _esperar_tabla_estable(page, tabla_emitidos)
     if not tabla_emitidos.count():
         tabla_emitidos = page.locator("#frmPrincipal\\:tablaCompRechazados_data")
         if tabla_emitidos.count():
@@ -2500,7 +2534,9 @@ def _flujo_emitidos(
             page_inicio = time.perf_counter()
             view_state = _obtener_viewstate_actual()
             filas = tabla_emitidos.locator("tr")
-            total_filas = filas.count()
+            # Cada hoja nueva vuelve por AJAX: se espera a que se asiente antes
+            # de contar, o se recorre una tabla a medio dibujar.
+            total_filas = _esperar_tabla_estable(page, tabla_emitidos)
             # Esperar a que PrimeFaces termine de hidratar los <a> de PDF
             # de TODAS las filas. Sin esto, la ultima fila puede tener el
             # <tr> pero no su link, y la descarga se pierde de forma
@@ -2612,9 +2648,10 @@ def _flujo_emitidos(
                         _abort_row_loop = True
                         break
                     # Recuperacion OK: re-fetch filas y total porque el DOM
-                    # cambio tras el Consultar.
+                    # cambio tras el Consultar. Es el momento donde mas importa
+                    # esperar: la tabla se acaba de regenerar entera.
                     filas = tabla_emitidos.locator("tr")
-                    total_filas = filas.count()
+                    total_filas = _esperar_tabla_estable(page, tabla_emitidos)
                     if idx >= total_filas:
                         logger.warning(
                             f"Tras recuperar, total_filas={total_filas} < idx={idx}. "
