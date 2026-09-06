@@ -74,6 +74,7 @@ from robot.comprobante_types import (
 from robot.config import (
     DOM_READ_TIMEOUT_MS,
     FILA_LENTA_S,
+    TABLA_ESTABLE_LECTURAS,
     TABLA_VACIA_MS,
     FILL_TIMEOUT_MS,
     DOWNLOAD_TIMEOUT,
@@ -1863,14 +1864,25 @@ def _esperar_tabla_estable(page, tabla, timeout_ms: int = 8000) -> int:
     # dibujan su primera fila en menos de 1 s, asi que con este margen un dia
     # lento no se da por vacio y uno vacio no cuesta el timeout completo.
     limite_vacio = time.time() + TABLA_VACIA_MS / 1000
+    # Dos lecturas iguales seguidas no alcanzan: la tabla se dibuja de a tramos
+    # y si el render se frena un instante, ese numero parcial parece estable.
+    # El 13/03 tenia 44 filas en una sola hoja -- "(1 of 1)" en el portal -- y
+    # se leian 22 en las tres corridas. Se exige que el conteo se sostenga
+    # varias lecturas seguidas, y cualquier crecimiento reinicia la cuenta.
+    estables_necesarias = max(2, TABLA_ESTABLE_LECTURAS)
     previo = -1
+    repeticiones = 0
     while time.time() < limite:
         try:
             actual = tabla.count() and tabla.locator("tr").count()
         except Exception:
             actual = 0
         if actual and actual == previo:
-            return actual
+            repeticiones += 1
+            if repeticiones >= estables_necesarias:
+                return actual
+        else:
+            repeticiones = 1 if actual else 0
         if not actual:
             try:
                 if page.locator("tr.ui-datatable-empty-message").count():
@@ -2545,6 +2557,15 @@ def _flujo_emitidos(
             # Cada hoja nueva vuelve por AJAX: se espera a que se asiente antes
             # de contar, o se recorre una tabla a medio dibujar.
             total_filas = _esperar_tabla_estable(page, tabla_emitidos)
+            # Lo que dice el portal, al lado de lo que contamos. Si vuelven a
+            # discrepar -- 22 leidas contra una hoja que el portal declara
+            # unica y completa -- queda registrado en vez de deducirse.
+            _pag_actual, _pag_total = _paginas_totales(page)
+            logger.info(
+                f"[tabla] {fecha_emision} pag {pagina}: {total_filas} fila(s) leidas"
+                + (f"; el portal dice hoja {_pag_actual} de {_pag_total}"
+                   if _pag_total else "; el portal no muestra paginador")
+            )
             # Esperar a que PrimeFaces termine de hidratar los <a> de PDF
             # de TODAS las filas. Sin esto, la ultima fila puede tener el
             # <tr> pero no su link, y la descarga se pierde de forma

@@ -342,6 +342,11 @@ EMITIDOS_REINTENTOS_DIA = int(os.getenv("SRI_EMITIDOS_REINTENTOS_DIA", "2"))
 # dia lento sin pagar el timeout completo en cada dia realmente sin datos.
 TABLA_VACIA_MS = int(os.getenv("SRI_TABLA_VACIA_MS", "2000"))
 
+# Cuantas lecturas seguidas deben coincidir para dar la tabla por completa. Con
+# dos alcanzaba para que un render entrecortado pareciera estable: se leian 22
+# filas de un dia que tenia 44 en una sola hoja. Cada lectura son ~120 ms.
+TABLA_ESTABLE_LECTURAS = int(os.getenv("SRI_TABLA_ESTABLE_LECTURAS", "4"))
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 
