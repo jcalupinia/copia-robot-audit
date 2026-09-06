@@ -347,6 +347,13 @@ TABLA_VACIA_MS = int(os.getenv("SRI_TABLA_VACIA_MS", "2000"))
 # filas de un dia que tenia 44 en una sola hoja. Cada lectura son ~120 ms.
 TABLA_ESTABLE_LECTURAS = int(os.getenv("SRI_TABLA_ESTABLE_LECTURAS", "4"))
 
+# Si se borran los reportes diarios despues de armar el mensual. Se borraban
+# siempre, y por eso el reporte del 29/03 desaparecio: entro al mensual y se
+# elimino, mientras los otros trece dias sobrevivieron solo porque el glob del
+# mensual no los encontraba. Se conservan por defecto: sirven para cuadrar el
+# mes dia por dia y para rearmar el mensual sin volver a descargar.
+BORRAR_REPORTES_DIARIOS = os.getenv("SRI_BORRAR_REPORTES_DIARIOS", "0") == "1"
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 

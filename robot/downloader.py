@@ -317,6 +317,7 @@ from robot.config import (
     DEVTOOLS,
     DOC_LABELS,
     DOWNLOAD_TIMEOUT,
+    BORRAR_REPORTES_DIARIOS,
     EMITIDOS_REINTENTOS_DIA,
     EMITIDOS_RESET_AFTER_DAY_DOCS,
     EMITIDOS_RESET_PAUSE_MS,
@@ -1980,7 +1981,8 @@ def descargar_sri(
                                 xml_files_mes = _xml_files_por_tipo(carpeta_mes, _prefijo_tipo(tipo_visible or tipo)[2])
                                 construir_reporte(carpeta_mes, xml_report_path, estado_default_reporte, xml_files=xml_files_mes)
                                 resultado_mes["reporte_xml"] = str(xml_report_path)
-                                _delete_report_files(reportes_xml_dia)
+                                if BORRAR_REPORTES_DIARIOS:
+                                    _delete_report_files(reportes_xml_dia)
                             except Exception as err:
                                 logger.warning(f"No se pudo construir el reporte XML mensual de emitidos: {err}")
                     if descargar_pdf_mes:
@@ -2028,7 +2030,8 @@ def descargar_sri(
                             elif _guardar_reporte_pdf_excel(filas_pdf, pdf_report_path):
                                 resultado_mes["reporte_pdf"] = str(pdf_report_path)
                             if resultado_mes.get("reporte_pdf"):
-                                _delete_report_files(reportes_dia)
+                                if BORRAR_REPORTES_DIARIOS:
+                                    _delete_report_files(reportes_dia)
                 return resultado_mes
 
             mes_fin_val = None

@@ -1896,6 +1896,61 @@ def _esperar_tabla_estable(page, tabla, timeout_ms: int = 8000) -> int:
     return max(0, previo)
 
 
+def _claves_del_dia(tabla, fecha_emision: str) -> tuple[int, int]:
+    """Cuenta cuantas claves de la tabla pertenecen al dia consultado.
+
+    La clave de acceso del SRI empieza con la fecha de emision en ddmmaaaa, asi
+    que cada fila declara a que dia pertenece. Sirve para detectar que se esta
+    mirando la tabla del dia ANTERIOR: el Consultar todavia no refresco el DOM
+    y el conteo, aunque estable, corresponde a otra consulta.
+
+    Devuelve (del_dia, total). (0, 0) si no hay claves para juzgar.
+    """
+    prefijo = re.sub(r"[^0-9]", "", fecha_emision or "")
+    if len(prefijo) != 8:
+        return 0, 0
+    try:
+        html = tabla.inner_html(timeout=DOM_READ_TIMEOUT_MS)
+    except Exception:
+        return 0, 0
+    claves = re.findall(r"\d{49}", html)
+    if not claves:
+        return 0, 0
+    return sum(1 for c in claves if c.startswith(prefijo)), len(claves)
+
+
+def _esperar_tabla_del_dia(page, tabla, fecha_emision: str, timeout_ms: int = 8000) -> int:
+    """Espera a que la tabla se asiente Y sea la del dia pedido.
+
+    Esperar a que el conteo se estabilice no alcanza: la tabla del dia anterior
+    tambien esta quieta. En la corrida de Marzo dos comprobantes se bajaron dos
+    veces, con la fecha de un dia en la clave y la del siguiente en el nombre,
+    porque la consulta leyo el DOM antes de que el Consultar lo refrescara.
+    """
+    limite = time.time() + timeout_ms / 1000
+    filas = _esperar_tabla_estable(page, tabla, timeout_ms=timeout_ms)
+    while time.time() < limite:
+        if not filas:
+            return 0
+        del_dia, total = _claves_del_dia(tabla, fecha_emision)
+        # Sin claves no hay nada que objetar: se acepta lo que se conto.
+        if not total or del_dia == total:
+            return filas
+        logger.warning(
+            f"[tabla vieja] {fecha_emision}: {total - del_dia} de {total} fila(s) "
+            "son de otro dia; el Consultar todavia no refresco. Se reintenta."
+        )
+        time.sleep(0.4)
+        filas = _esperar_tabla_estable(page, tabla, timeout_ms=2000)
+    del_dia, total = _claves_del_dia(tabla, fecha_emision)
+    if total and del_dia != total:
+        logger.warning(
+            f"[tabla vieja] {fecha_emision}: se sigue leyendo {total - del_dia} "
+            f"fila(s) de otro dia despues de esperar {timeout_ms} ms."
+        )
+    return filas
+
+
 def _paginas_totales(page) -> tuple[int, int]:
     """Lee el indicador "(X of Y)" del paginador. (0, 0) si no esta."""
     try:
@@ -2309,7 +2364,7 @@ def _flujo_emitidos(
     # No alcanza con que la tabla sea visible: hay que esperar a que termine de
     # llenarse. Contarla antes daba numeros distintos entre corridas del mismo
     # dia, y dias con comprobantes reportados como vacios.
-    _esperar_tabla_estable(page, tabla_emitidos)
+    _esperar_tabla_del_dia(page, tabla_emitidos, fecha_emision)
     if not tabla_emitidos.count():
         tabla_emitidos = page.locator("#frmPrincipal\\:tablaCompRechazados_data")
         if tabla_emitidos.count():
@@ -2556,7 +2611,7 @@ def _flujo_emitidos(
             filas = tabla_emitidos.locator("tr")
             # Cada hoja nueva vuelve por AJAX: se espera a que se asiente antes
             # de contar, o se recorre una tabla a medio dibujar.
-            total_filas = _esperar_tabla_estable(page, tabla_emitidos)
+            total_filas = _esperar_tabla_del_dia(page, tabla_emitidos, fecha_emision)
             # Lo que dice el portal, al lado de lo que contamos. Si vuelven a
             # discrepar -- 22 leidas contra una hoja que el portal declara
             # unica y completa -- queda registrado en vez de deducirse.
@@ -2689,7 +2744,9 @@ def _flujo_emitidos(
                     # cambio tras el Consultar. Es el momento donde mas importa
                     # esperar: la tabla se acaba de regenerar entera.
                     filas = tabla_emitidos.locator("tr")
-                    total_filas = _esperar_tabla_estable(page, tabla_emitidos)
+                    total_filas = _esperar_tabla_del_dia(
+                        page, tabla_emitidos, fecha_emision
+                    )
                     if idx >= total_filas:
                         logger.warning(
                             f"Tras recuperar, total_filas={total_filas} < idx={idx}. "
