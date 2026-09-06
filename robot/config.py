@@ -337,6 +337,11 @@ FILA_LENTA_S = float(os.getenv("SRI_FILA_LENTA_S", "3"))
 # asi que solo se vuelve a pedir lo que falta. 0 desactiva el reintento.
 EMITIDOS_REINTENTOS_DIA = int(os.getenv("SRI_EMITIDOS_REINTENTOS_DIA", "2"))
 
+# Cuanto se espera antes de dar una tabla por vacia. Un dia con comprobantes
+# dibuja su primera fila en menos de 1 s; este margen evita declarar vacio un
+# dia lento sin pagar el timeout completo en cada dia realmente sin datos.
+TABLA_VACIA_MS = int(os.getenv("SRI_TABLA_VACIA_MS", "2000"))
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 

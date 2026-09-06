@@ -74,6 +74,7 @@ from robot.comprobante_types import (
 from robot.config import (
     DOM_READ_TIMEOUT_MS,
     FILA_LENTA_S,
+    TABLA_VACIA_MS,
     FILL_TIMEOUT_MS,
     DOWNLOAD_TIMEOUT,
     ESTADOS_EMITIDOS_MAP,
@@ -1857,6 +1858,11 @@ def _esperar_tabla_estable(page, tabla, timeout_ms: int = 8000) -> int:
     pero uno lento tampoco se da por vacio antes de tiempo.
     """
     limite = time.time() + timeout_ms / 1000
+    # El cero necesita su propia paciencia, mas corta. Esperar los 8 s enteros
+    # por cada dia sin comprobantes costaba 8.5 s por dia; los dias con datos
+    # dibujan su primera fila en menos de 1 s, asi que con este margen un dia
+    # lento no se da por vacio y uno vacio no cuesta el timeout completo.
+    limite_vacio = time.time() + TABLA_VACIA_MS / 1000
     previo = -1
     while time.time() < limite:
         try:
@@ -1871,6 +1877,8 @@ def _esperar_tabla_estable(page, tabla, timeout_ms: int = 8000) -> int:
                     return 0
             except Exception:
                 pass
+            if previo == 0 and time.time() >= limite_vacio:
+                return 0
         previo = actual
         time.sleep(0.12)
     return max(0, previo)
@@ -2576,8 +2584,9 @@ def _flujo_emitidos(
             )
             if _skip_until_this_page > 0:
                 logger.info(
-                    f"_flujo_emitidos: salteando filas 0..{_skip_until_this_page - 1} "
-                    f"de pag {pagina} (resume)."
+                    f"_flujo_emitidos: las filas 0..{_skip_until_this_page - 1} de "
+                    f"pag {pagina} ya venian del intento anterior; se reprocesan "
+                    "desde disco para que entren al reporte."
                 )
             # Flag para abortar el row loop y forzar break del while-page-loop
             # (se setea si la recuperacion falla 3 veces y debemos abandonar
@@ -2585,9 +2594,17 @@ def _flujo_emitidos(
             _abort_row_loop = False
             for idx in range(total_filas):
                 _check_cancel("emitidos_fila")
-                # SKIP filas anteriores al checkpoint (resume only on first page)
+                # Antes se salteaban las filas previas al checkpoint. Ya no:
+                # ahorraban casi nada -- el PDF y el XML ya en disco se
+                # reutilizan y la fila resuelve en milisegundos -- pero su fila
+                # NUNCA llegaba al reporte. Por eso el 28/03 quedo con 51 PDF
+                # en la carpeta y solo 43 filas en el Excel. Se reprocesan para
+                # que el reporte describa lo que hay en disco.
                 if idx < _skip_until_this_page:
-                    continue
+                    logger.info(
+                        f"[reproceso] pag {pagina} fila {idx + 1}: ya venia del "
+                        "intento anterior; se rearma su fila del reporte."
+                    )
 
                 # === FIX A+B: detectar "fui al home del SRI" antes de tocar
                 # los links de la fila. Sin esta guardia, cuando el portal
@@ -2870,7 +2887,17 @@ def _flujo_emitidos(
                 _t_paso = time.perf_counter()
 
                 if descargar_xml_para_reporte and not omitir_soap_xml:
-                    if clave_texto:
+                    # Igual que con el PDF: si el XML ya se bajo antes, se
+                    # reutiliza en vez de volver a pegarle al WS del SRI. Sin
+                    # esto, reprocesar una fila costaba una llamada SOAP.
+                    _xml_previo = xml_dir / f"{nombre_base_pdf}.xml"
+                    if _xml_previo.exists():
+                        xml_path_report = _xml_previo
+                        if descargar_xml:
+                            n_xml += 1
+                            descargados_xml.add(row_id)
+                        lote_xml_ok += 1
+                    elif clave_texto:
                         for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
                             try:
                                 resultado_xml = _descargar_xml_emitido_por_clave(
