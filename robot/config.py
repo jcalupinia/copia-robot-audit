@@ -354,6 +354,12 @@ TABLA_ESTABLE_LECTURAS = int(os.getenv("SRI_TABLA_ESTABLE_LECTURAS", "4"))
 # mes dia por dia y para rearmar el mensual sin volver a descargar.
 BORRAR_REPORTES_DIARIOS = os.getenv("SRI_BORRAR_REPORTES_DIARIOS", "0") == "1"
 
+# Tope para clickear el enlace de PDF de una fila. Sin timeout explicito
+# Playwright espera 30 s a que el elemento sea "actionable", y cuando el SRI
+# tapa el formulario con su encuesta el enlace nunca lo es: se pagaban esos 30 s
+# en cada camino de descarga y la fila llegaba a colgarse minutos.
+CLICK_PDF_TIMEOUT_MS = int(os.getenv("SRI_CLICK_PDF_TIMEOUT_MS", "5000"))
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 

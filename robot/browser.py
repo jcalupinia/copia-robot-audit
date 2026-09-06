@@ -36,6 +36,7 @@ from robot.config import (
     OVERLAY_SELECTORS,
     PORTAL_INDISPONIBLE_MENSAJE,
     RECIBIDOS_DIRECT_URL,
+    CLICK_PDF_TIMEOUT_MS,
     DOM_READ_TIMEOUT_MS,
     FILL_TIMEOUT_MS,
     RECUPERAR_COMPROBANTES_URL,
@@ -1068,7 +1069,7 @@ def _guardar_pdf_desde_enlace(page, link_locator, base_destino: Path) -> Optiona
             link_locator.scroll_into_view_if_needed(timeout=500)
         except Exception:
             pass
-        link_locator.click(no_wait_after=True)
+        link_locator.click(no_wait_after=True, timeout=CLICK_PDF_TIMEOUT_MS)
 
     errores = []
 
@@ -1529,7 +1530,7 @@ def _guardar_xml_desde_enlace(page, link_locator, base_destino: Path) -> Optiona
             link_locator.scroll_into_view_if_needed(timeout=500)
         except Exception:
             pass
-        link_locator.click(no_wait_after=True)
+        link_locator.click(no_wait_after=True, timeout=CLICK_PDF_TIMEOUT_MS)
 
     errores = []
 
@@ -1863,6 +1864,48 @@ def _resolver_autenticacion_persistente(page) -> bool:
         )
     except Exception:
         pass
+    return False
+
+
+# Lo que el SRI puede montar encima del formulario sin avisar. Se filtra por
+# `:visible` porque varios de estos viven ocultos en el DOM de forma permanente:
+# contarlos sin el filtro daria positivo en todas las filas.
+_SEL_MODAL_BLOQUEANTE = (
+    "[role='dialog']:visible",
+    ".ui-dialog:visible",
+    "div.modal.show:visible",
+    ".p-dialog:visible",
+    ".mat-dialog-container:visible",
+)
+
+
+def _quitar_modal_si_estorba(page) -> bool:
+    """Cierra un modal que haya aparecido encima del formulario.
+
+    Pensado para llamarse por fila, asi que primero hace una comprobacion
+    barata: `count()` resuelve contra el DOM actual y no espera. Solo si hay
+    algo se paga `_cerrar_modal_encuesta`, que arranca con una pausa fija y
+    recorre una lista larga de selectores.
+
+    Sin esto, la encuesta de satisfaccion del SRI aparecia a mitad de una
+    descarga y tapaba el enlace del PDF: cada click esperaba su timeout de
+    actionability, la fila se colgaba minutos y el navegador terminaba cerrado.
+    """
+    for selector in _SEL_MODAL_BLOQUEANTE:
+        try:
+            if not page.locator(selector).count():
+                continue
+        except Exception:
+            continue
+        logger.warning(
+            f"Aparecio un dialogo sobre el formulario ({selector}); "
+            "se cierra antes de seguir con la fila."
+        )
+        if _cerrar_modal_encuesta(page):
+            logger.info("Dialogo cerrado; se continua la descarga.")
+            return True
+        logger.warning("No se pudo cerrar el dialogo con los selectores conocidos.")
+        return False
     return False
 
 

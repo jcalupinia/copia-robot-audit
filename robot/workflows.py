@@ -43,6 +43,7 @@ from robot.browser import (
     _obtener_form_base_emitidos,
     _obtener_source_detalle_emitido,
     _obtener_view_state,
+    _quitar_modal_si_estorba,
     _recuperar_formulario_emitidos,
     _rellenar_input_por_label,
     _resolver_destino_unico,
@@ -3012,6 +3013,11 @@ def _flujo_emitidos(
                 _t_paso = time.perf_counter()
 
                 if descargar_pdf:
+                    # El SRI puede montar su encuesta encima del formulario en
+                    # cualquier momento. Comprobarlo aca cuesta un count() por
+                    # fila; no comprobarlo costaba minutos de clicks colgados y
+                    # el navegador cerrado a mitad del dia.
+                    _quitar_modal_si_estorba(page)
                     link_pdf = fila.locator("a[id$=':lnkPdf']")
                     if not link_pdf.count():
                         link_pdf = fila.locator("a[title*='pdf' i], button[title*='pdf' i]")
