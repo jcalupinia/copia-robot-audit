@@ -1939,7 +1939,13 @@ def descargar_sri(
                         )
                         return resultado_mes
 
-                    sufijos_dia = [f"{anio:04d}{mes_actual:02d}{int(d):02d}" for d in dias_consultar]
+                    # Emitidos nombra el reporte diario con `fecha_slug`, que
+                    # sale de limpiar "06/03/2026" -> "06032026" (ddmmaaaa).
+                    # El sufijo se armaba aaaammdd, asi que el glob no
+                    # encontraba NINGUN reporte diario en disco y el mensual
+                    # dependia solo de la lista en memoria. Recibidos si usa
+                    # aaaammdd en los dos lados, por eso alli nunca fallo.
+                    sufijos_dia = [f"{int(d):02d}{mes_actual:02d}{anio:04d}" for d in dias_consultar]
                     reportes_xml_dia = _collect_existing_reports(
                         carpeta_mes / "XML",
                         "emitidos_reporte_xml",
