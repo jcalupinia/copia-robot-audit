@@ -75,6 +75,7 @@ from robot.comprobante_types import (
 from robot.config import (
     DOM_READ_TIMEOUT_MS,
     FILA_LENTA_S,
+    PDF_OBJETIVO_S,
     TABLA_ESTABLE_LECTURAS,
     TABLA_VACIA_MS,
     FILL_TIMEOUT_MS,
@@ -1845,6 +1846,27 @@ _SEL_SIGUIENTE = (
 )
 
 
+def _resumen_tiempos_pdf(tiempos: list, etiqueta: str) -> str:
+    """Arma el resumen de cuanto tardo bajar cada PDF.
+
+    El promedio solo no sirve: unos pocos picos del portal lo mueven entero.
+    Con la mediana y el p90 al lado se ve si el dia fue parejo o si hubo cola.
+    """
+    if not tiempos:
+        return ""
+    orden = sorted(tiempos)
+    n = len(orden)
+    mediana = orden[n // 2] if n % 2 else (orden[n // 2 - 1] + orden[n // 2]) / 2
+    p90 = orden[min(n - 1, int(n * 0.90))]
+    sobre = sum(1 for t in orden if t > PDF_OBJETIVO_S)
+    return (
+        f"[tiempos PDF] {etiqueta}: {n} descarga(s)  "
+        f"mediana {mediana:.2f}s  promedio {sum(orden)/n:.2f}s  "
+        f"p90 {p90:.2f}s  max {orden[-1]:.2f}s  "
+        f"| {sobre} sobre {PDF_OBJETIVO_S:.1f}s ({100*sobre/n:.0f}%)"
+    )
+
+
 def _esperar_tabla_estable(page, tabla, timeout_ms: int = 8000) -> int:
     """Espera a que la tabla deje de cambiar y devuelve su cantidad de filas.
 
@@ -2485,6 +2507,9 @@ def _flujo_emitidos(
     descargados_pdf = set()
     # Evidencia externa de que el dia quedo corto. Vacio = nada que objetar.
     motivo_incompleto = ""
+    # Cuanto tardo cada PDF que se bajo de verdad. Los reutilizados desde disco
+    # no entran: resuelven en milisegundos y falsearian el promedio hacia abajo.
+    tiempos_pdf = []
     # Filas que la tabla mostro pero que el bucle descarto. Sin contarlas, un
     # dia con filas salteadas se compara consigo mismo y da completo: en Marzo
     # el 08 tenia 43 filas en la tabla, se procesaron 31 y salio "OK".
@@ -3013,6 +3038,7 @@ def _flujo_emitidos(
                 _t_paso = time.perf_counter()
 
                 if descargar_pdf:
+                    _pdf_ya_estaba = False
                     # El SRI puede montar su encuesta encima del formulario en
                     # cualquier momento. Comprobarlo aca cuesta un count() por
                     # fila; no comprobarlo costaba minutos de clicks colgados y
@@ -3196,6 +3222,8 @@ def _flujo_emitidos(
 
                 _d_pdf = time.perf_counter() - _t_paso
                 lote_t_pdf += _d_pdf
+                if descargar_pdf and not _pdf_ya_estaba and _d_pdf > 0:
+                    tiempos_pdf.append(_d_pdf)
                 _d_total = time.perf_counter() - _t_fila
                 if _d_total >= FILA_LENTA_S:
                     # El promedio del lote esconde los picos. Una fila que se
@@ -3378,6 +3406,10 @@ def _flujo_emitidos(
             motivo_incompleto=motivo_incompleto,
         )
     )
+    _resumen_pdf = _resumen_tiempos_pdf(tiempos_pdf, fecha_emision or "el dia")
+    if _resumen_pdf:
+        logger.info(_resumen_pdf)
+        info_base["tiempos_pdf"] = list(tiempos_pdf)
     if not info_base.get("descarga_completa", True):
         logger.warning(f"Verificacion de Emitidos incompleta: {info_base.get('mensaje_verificacion')}")
     else:

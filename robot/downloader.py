@@ -233,6 +233,7 @@ from robot.browser import (
 from robot.workflows import (
     _flujo_recibidos,
     _flujo_emitidos,
+    _resumen_tiempos_pdf,
     _xml_files_por_tipo,
     _build_download_verification,
     _build_download_row_id,
@@ -1700,6 +1701,8 @@ def descargar_sri(
                 formatos_norm = [(fmt or "").strip().upper() for fmt in (formatos or []) if isinstance(fmt, str)]
                 descargar_pdf_mes = "PDF" in formatos_norm
                 reportes_dia = []
+                # Tiempos de descarga de todos los dias, para el resumen del mes.
+                tiempos_pdf_mes = []
                 reportes_pdf_generados = []
                 reportes_xml_generados = []
                 resultado_mes = None
@@ -1805,6 +1808,7 @@ def descargar_sri(
                             "n_registros": resultado_dia.get("n_registros", 0),
                         }
                     )
+                    tiempos_pdf_mes.extend(resultado_dia.get("tiempos_pdf") or [])
                     total_regs += resultado_dia.get("n_registros", 0)
                     total_xml += resultado_dia.get("n_xml", 0)
                     total_pdf += resultado_dia.get("n_pdf", 0)
@@ -1886,6 +1890,12 @@ def descargar_sri(
                         )
                     else:
                         logger.info("[resumen] todos los dias se descargaron completos.")
+                    _resumen_mes = _resumen_tiempos_pdf(
+                        tiempos_pdf_mes, f"{_mes_a_texto(mes_actual)} {anio}"
+                    )
+                    if _resumen_mes:
+                        logger.info(_resumen_mes)
+                        resultado_mes["tiempo_pdf_total_s"] = round(sum(tiempos_pdf_mes), 1)
                     estado_nombre = (ESTADOS_EMITIDOS_MAP.get(estado_emitidos, estado_emitidos) or "Sin Estado").strip() or "Sin Estado"
                     estado_normalizado = unicodedata.normalize("NFKD", estado_nombre).encode("ascii", "ignore").decode("ascii")
                     estado_slug = re.sub(r"[^A-Za-z0-9]+", "_", estado_normalizado).strip("_") or "Sin_Estado"

@@ -360,6 +360,11 @@ BORRAR_REPORTES_DIARIOS = os.getenv("SRI_BORRAR_REPORTES_DIARIOS", "0") == "1"
 # en cada camino de descarga y la fila llegaba a colgarse minutos.
 CLICK_PDF_TIMEOUT_MS = int(os.getenv("SRI_CLICK_PDF_TIMEOUT_MS", "5000"))
 
+# Cuanto deberia tardar bajar un PDF. No corta nada: es la referencia contra la
+# que se compara el resumen de tiempos al cerrar cada dia, para notar de una
+# mirada si el portal se puso lento.
+PDF_OBJETIVO_S = float(os.getenv("SRI_PDF_OBJETIVO_S", "1.5"))
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 
