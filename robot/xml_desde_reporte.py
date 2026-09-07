@@ -69,9 +69,9 @@ CARPETA_XSD = Path(__file__).resolve().parent.parent / "FichaTecnica"
 
 # codDoc -> (nombre, subcarpeta del XSD, archivo)
 TIPOS = {
-    "01": ("factura", "XML y XSD Factura/XML y XSD Factura", "factura_V1.1.0.xsd"),
-    "04": ("nota de credito", "XML y XSD Nota de Crédito/XML y XSD Nota de Crédito", "NotaCredito_V1.1.0.xsd"),
-    "05": ("nota de debito", "XML y XSD Nota de Débito/XML y XSD Nota de Débito", "NotaDebito_V1.0.0.xsd"),
+    "01": ("factura", "XML y XSD Factura", "factura_V1.1.0.xsd"),
+    "04": ("nota de credito", "XML y XSD Nota de Crédito", "NotaCredito_V1.1.0.xsd"),
+    "05": ("nota de debito", "XML y XSD Nota de Débito", "NotaDebito_V1.0.0.xsd"),
 }
 
 # Tipos que el modulo reconoce pero todavia no reconstruye, con el motivo.
@@ -547,19 +547,63 @@ def _ruta_xsd(cod_doc: str) -> Optional[Path]:
     return ruta if ruta.exists() else None
 
 
-def validar_contra_xsd(xml_bytes: bytes, cod_doc: str) -> tuple[bool, str]:
-    """Valida contra el XSD oficial. Sin lxml devuelve (True, aviso)."""
+_NS_DSIG = "http://www.w3.org/2000/09/xmldsig#"
+_NS_XSD = "http://www.w3.org/2001/XMLSchema"
+_esquemas_cache: dict = {}
+
+
+def _cargar_esquema(ruta: Path):
+    """Compila el XSD del SRI quitando la declaracion de la firma.
+
+    Los esquemas del SRI declaran `<xs:element ref="ds:Signature">` apuntando al
+    esquema de firma de la W3C, que no viene en la ficha tecnica: sin el,
+    `lxml` no puede compilar nada y toda validacion queda en NO_VALIDADO.
+
+    La firma es opcional en el esquema y nuestro XML nunca la lleva -- es
+    justamente lo unico que no se puede reconstruir -- asi que quitar esa
+    declaracion no afloja la validacion de ningun campo que si emitimos. El
+    resto del esquema se valida completo.
+    """
+    clave = str(ruta)
+    if clave in _esquemas_cache:
+        return _esquemas_cache[clave]
+    arbol = _lxml_etree.parse(str(ruta))
+    for nodo in arbol.iter(f"{{{_NS_XSD}}}element"):
+        ref = nodo.get("ref") or ""
+        if ref.endswith(":Signature") or _NS_DSIG in ref:
+            nodo.getparent().remove(nodo)
+    esquema = _lxml_etree.XMLSchema(arbol)
+    _esquemas_cache[clave] = esquema
+    return esquema
+
+
+# Resultados posibles de la validacion. "No se pudo validar" es su propio
+# estado: darlo por valido es la clase de OK silencioso que esconde problemas.
+VALIDO = "valido"
+INVALIDO = "invalido"
+NO_VALIDADO = "no validado"
+
+
+def validar_contra_xsd(xml_bytes: bytes, cod_doc: str) -> tuple[str, str]:
+    """Valida contra el XSD oficial del SRI.
+
+    Devuelve (estado, detalle). Si falta lxml o el esquema, el estado es
+    NO_VALIDADO: no se afirma que el XML este bien, solo que no se comprobo.
+    """
     if _lxml_etree is None:
-        return True, "lxml no esta instalado: no se valido contra el XSD"
+        return NO_VALIDADO, "lxml no esta instalado"
     ruta = _ruta_xsd(cod_doc)
     if ruta is None:
-        return True, f"no se encontro el XSD para codDoc {cod_doc}"
+        return NO_VALIDADO, f"no se encontro el XSD para codDoc {cod_doc}"
     try:
-        esquema = _lxml_etree.XMLSchema(_lxml_etree.parse(str(ruta)))
-        esquema.assertValid(_lxml_etree.fromstring(xml_bytes))
-        return True, ""
+        esquema = _cargar_esquema(ruta)
     except Exception as err:
-        return False, str(err).replace("\n", " ")[:300]
+        return NO_VALIDADO, f"no se pudo cargar el XSD: {str(err)[:200]}"
+    try:
+        esquema.assertValid(_lxml_etree.fromstring(xml_bytes))
+        return VALIDO, ""
+    except Exception as err:
+        return INVALIDO, str(err).replace("\n", " ")[:300]
 
 
 def _escribir_xml(raiz: ET.Element, destino: Path) -> bytes:
@@ -615,6 +659,7 @@ def generar_xml_desde_reporte(
         "generados": 0,
         "fallidos": 0,
         "invalidos": 0,
+        "no_validados": 0,
         "por_tipo": {},
         "no_soportados": {},
         "destino": str(destino),
@@ -718,12 +763,15 @@ def generar_xml_desde_reporte(
             salida = destino / nombre_tipo.replace(" ", "_") / _nombre_archivo(fila, cod_doc)
             contenido = _escribir_xml(raiz, salida)
 
-            valido, detalle_xsd = (True, "")
+            estado_xsd, detalle_xsd = (NO_VALIDADO, "validacion desactivada")
             if validar:
-                valido, detalle_xsd = validar_contra_xsd(contenido, cod_doc)
-            if not valido:
+                estado_xsd, detalle_xsd = validar_contra_xsd(contenido, cod_doc)
+            if estado_xsd == INVALIDO:
                 resumen["invalidos"] += 1
                 avisos.append(f"no valida contra el XSD: {detalle_xsd}")
+            elif estado_xsd == NO_VALIDADO:
+                resumen["no_validados"] += 1
+                avisos.append(f"no se pudo validar contra el XSD: {detalle_xsd}")
 
             resumen["generados"] += 1
             resumen["por_tipo"][nombre_tipo] = resumen["por_tipo"].get(nombre_tipo, 0) + 1
@@ -733,7 +781,7 @@ def generar_xml_desde_reporte(
                     "Fila": indice + 2,
                     "Clave de acceso": clave_txt,
                     "Tipo": nombre_tipo,
-                    "Resultado": "generado" if valido else "generado (no valida XSD)",
+                    "Resultado": f"generado ({estado_xsd})",
                     "Archivo": str(salida),
                     "Campos del reporte": cobertura.cuenta(DIRECTO),
                     "Campos deducidos": cobertura.cuenta(DEDUCIDO),
@@ -760,6 +808,11 @@ def generar_xml_desde_reporte(
         )
         + (f" {resumen['fallidos']} sin generar." if resumen["fallidos"] else "")
         + (f" {resumen['invalidos']} no validan contra el XSD." if resumen["invalidos"] else "")
+        + (
+            f" {resumen['no_validados']} no se pudieron validar."
+            if resumen["no_validados"]
+            else ""
+        )
     )
     _avisar(resumen["message"])
     return resumen
@@ -773,6 +826,7 @@ def _escribir_informe(filas: list[dict], resumen: dict, path: Path) -> None:
         ("XML generados", resumen["generados"]),
         ("Sin generar", resumen["fallidos"]),
         ("No validan contra el XSD", resumen["invalidos"]),
+        ("No se pudieron validar", resumen["no_validados"]),
     ]
     for tipo, cantidad in sorted(resumen["por_tipo"].items()):
         generales.append((f"  de tipo {tipo}", cantidad))

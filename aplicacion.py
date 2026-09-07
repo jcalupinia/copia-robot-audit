@@ -6289,8 +6289,11 @@ with tab2:
                 ),
                 (
                     "Sin generar",
-                    _xml_result.get("fallidos", 0),
-                    " is-warn" if _xml_result.get("fallidos") else "",
+                    _xml_result.get("fallidos", 0)
+                    + _xml_result.get("no_validados", 0),
+                    " is-warn"
+                    if (_xml_result.get("fallidos") or _xml_result.get("no_validados"))
+                    else "",
                 ),
             ]
             st.markdown(
@@ -6324,10 +6327,22 @@ with tab2:
             for _tipo, _motivo in (_xml_result.get("no_soportados") or {}).items():
                 st.warning(f"**{_tipo}:** no se reconstruy\u00f3 porque {_motivo}.")
             if _xml_result.get("invalidos"):
+                st.error(
+                    f"⚠️ {_xml_result['invalidos']} XML **no validan "
+                    "contra el esquema oficial del SRI**. La causa más "
+                    "común es que el reporte venga de una versión "
+                    "anterior del robot, que dejaba vacía la "
+                    "identificación del comprador, que es un campo "
+                    "obligatorio. Vuelve a descargar el mes con la versión "
+                    "actual y repite la reconstrucción. El informe de "
+                    "cobertura dice cuál falla y por qué."
+                )
+            if _xml_result.get("no_validados"):
                 st.warning(
-                    f"{_xml_result['invalidos']} XML no validan contra el "
-                    "esquema oficial del SRI. El informe de cobertura dice "
-                    "cu\u00e1l y por qu\u00e9."
+                    f"{_xml_result['no_validados']} XML **no se pudieron "
+                    "comprobar** contra el esquema del SRI. No es que estén "
+                    "mal: es que no se pudo validar. El informe de cobertura "
+                    "dice el motivo."
                 )
 
             if _xml_log:
