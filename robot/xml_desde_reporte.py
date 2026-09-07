@@ -611,6 +611,7 @@ def generar_xml_desde_reporte(
     resumen = {
         "ok": False,
         "total_filas": 0,
+        "repetidos": 0,
         "generados": 0,
         "fallidos": 0,
         "invalidos": 0,
@@ -621,6 +622,11 @@ def generar_xml_desde_reporte(
         "message": "",
     }
     filas_informe: list[dict] = []
+    # Un mismo comprobante puede venir en el reporte diario y en el mensual del
+    # mismo mes. Sin esto se procesaria dos veces: el archivo se sobrescribe --
+    # el nombre es la clave de acceso -- pero los conteos y el informe saldrian
+    # inflados, que es peor que perder tiempo.
+    claves_vistas: set[str] = set()
 
     rutas = [Path(r) for r in reportes]
     existentes = [r for r in rutas if r.exists()]
@@ -644,6 +650,12 @@ def generar_xml_desde_reporte(
         for indice, fila in df.iterrows():
             resumen["total_filas"] += 1
             clave_txt = _columna(fila, "Clave de Acceso", "claveAcceso")
+            clave_norm = re.sub(r"\D", "", clave_txt)
+            if clave_norm and clave_norm in claves_vistas:
+                resumen["repetidos"] += 1
+                continue
+            if clave_norm:
+                claves_vistas.add(clave_norm)
             clave = descomponer_clave_acceso(clave_txt)
             cod_doc = clave.get("codDoc") or _codigo_de_etiqueta(
                 _columna(fila, "Código del Documento")
@@ -741,6 +753,11 @@ def generar_xml_desde_reporte(
     resumen["ok"] = resumen["generados"] > 0
     resumen["message"] = (
         f"{resumen['generados']} XML generados de {resumen['total_filas']} fila(s)."
+        + (
+            f" {resumen['repetidos']} fila(s) repetidas entre reportes, omitidas."
+            if resumen["repetidos"]
+            else ""
+        )
         + (f" {resumen['fallidos']} sin generar." if resumen["fallidos"] else "")
         + (f" {resumen['invalidos']} no validan contra el XSD." if resumen["invalidos"] else "")
     )
@@ -752,6 +769,7 @@ def _escribir_informe(filas: list[dict], resumen: dict, path: Path) -> None:
     """Dos hojas: el resumen para decidir, el detalle para auditar."""
     generales = [
         ("Filas leidas", resumen["total_filas"]),
+        ("Repetidas entre reportes", resumen["repetidos"]),
         ("XML generados", resumen["generados"]),
         ("Sin generar", resumen["fallidos"]),
         ("No validan contra el XSD", resumen["invalidos"]),

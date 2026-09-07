@@ -6171,6 +6171,188 @@ with tab2:
                     for _m in _ret_log:
                         st.write(_m)
 
+    # =====================================================================
+    # MODULO AISLADO: reconstruccion de XML a partir del reporte de Emitidos.
+    # El WS del SRI deja de servir los comprobantes emitidos al mes, asi que
+    # pasado ese plazo el reporte es lo unico que queda. Este modulo hace el
+    # camino inverso. El XML resultante NO lleva firma: sirve para cargar a un
+    # sistema contable, no para sustentar nada ante el SRI.
+    # =====================================================================
+    with _group_card(
+        4,
+        "Reconstruir XML desde el reporte",
+        "Solo Emitidos \u2014 los XML salen sin firma digital",
+    ):
+        st.markdown(
+            "Genera un **XML por comprobante** a partir del Excel que este "
+            "mismo robot produce al descargar **Emitidos**. Sirve cuando el "
+            "web service del SRI ya no entrega los XML, cosa que pasa al mes "
+            "de autorizados."
+        )
+        st.warning(
+            "**Los XML salen sin firma digital.** La firma se calcula con tu "
+            "clave privada sobre los bytes exactos del original, as\u00ed que no "
+            "hay forma de reponerla. Estos archivos **no sustituyen al "
+            "comprobante autorizado** ni sirven para sustentar cr\u00e9dito "
+            "tributario: son para cargar a un sistema contable, conciliar o "
+            "auditar. Cada XML sale marcado como reconstruido."
+        )
+
+        _xml_carpeta = st.text_input(
+            "Carpeta con los reportes de Emitidos",
+            key="xml_rep_carpeta",
+            placeholder="F:\\1729109106001\\AUTORIZADO\\Factura\\2026\\Marzo",
+            help=(
+                "La carpeta del mes descargado. Se buscan dentro los Excel "
+                "emitidos_reporte_pdf_*.xlsx, incluidas las subcarpetas."
+            ),
+        )
+        _xml_destino = st.text_input(
+            "Carpeta donde dejar los XML",
+            key="xml_rep_destino",
+            placeholder="Se crea XML_reconstruido dentro de la carpeta anterior",
+            help="Si lo dejas vac\u00edo se usa una subcarpeta de la carpeta de reportes.",
+        )
+
+        if st.button(
+            "Reconstruir XML desde el reporte",
+            key="btn_xml_rep_run",
+            use_container_width=True,
+        ):
+            _xml_base = str(_xml_carpeta or "").strip()
+            if not _xml_base or not Path(_xml_base).expanduser().is_dir():
+                st.error(
+                    "La carpeta indicada no existe. Selecciona la carpeta del "
+                    "mes que descargaste en Emitidos."
+                )
+            else:
+                _xml_dir = Path(_xml_base).expanduser()
+                # Se busca en profundidad porque el reporte vive en la subcarpeta
+                # PDF del mes, no en la raiz que suele elegir el usuario.
+                _xml_reportes = sorted(
+                    r
+                    for r in _xml_dir.rglob("emitidos_reporte_pdf_*.xlsx")
+                    if not r.name.startswith("~$")
+                )
+                if not _xml_reportes:
+                    st.error(
+                        "No se encontr\u00f3 ning\u00fan emitidos_reporte_pdf_*.xlsx en "
+                        "esa carpeta ni en sus subcarpetas. Revisa que sea una "
+                        "descarga de **Emitidos** con formato PDF."
+                    )
+                else:
+                    _xml_salida = (
+                        Path(str(_xml_destino).strip()).expanduser()
+                        if str(_xml_destino or "").strip()
+                        else _xml_dir / "XML_reconstruido"
+                    )
+                    _xml_informe = _xml_salida / "informe_cobertura.xlsx"
+
+                    try:
+                        from robot.xml_desde_reporte import generar_xml_desde_reporte
+                    except ImportError as _imp_err:
+                        st.error(
+                            "No se pudo cargar robot/xml_desde_reporte.py.\n\n"
+                            f"**Detalle:** {_imp_err}"
+                        )
+                        st.stop()
+
+                    _xml_msgs: list[str] = []
+                    with st.spinner(
+                        f"Reconstruyendo XML de {len(_xml_reportes)} reporte(s)..."
+                    ):
+                        try:
+                            _res_xml = generar_xml_desde_reporte(
+                                reportes=_xml_reportes,
+                                destino=_xml_salida,
+                                informe_cobertura=_xml_informe,
+                                progress=_xml_msgs.append,
+                            )
+                            st.session_state["xml_rep_result"] = _res_xml
+                        except Exception as exc:
+                            st.session_state["xml_rep_result"] = {
+                                "ok": False,
+                                "message": f"Error al reconstruir: {exc}",
+                            }
+                        st.session_state["xml_rep_log"] = _xml_msgs
+
+        _xml_result = st.session_state.get("xml_rep_result")
+        _xml_log = st.session_state.get("xml_rep_log") or []
+        if isinstance(_xml_result, dict) and _xml_result.get("ok"):
+            _xml_tarjetas = [
+                ("Comprobantes le\u00eddos", _xml_result.get("total_filas", 0), ""),
+                ("XML generados", _xml_result.get("generados", 0), " is-ok"),
+                (
+                    "No validan contra el XSD",
+                    _xml_result.get("invalidos", 0),
+                    " is-warn" if _xml_result.get("invalidos") else "",
+                ),
+                (
+                    "Sin generar",
+                    _xml_result.get("fallidos", 0),
+                    " is-warn" if _xml_result.get("fallidos") else "",
+                ),
+            ]
+            st.markdown(
+                '<div class="rvf-stats">'
+                + "".join(
+                    f'<div class="rvf-stat{_clase}">'
+                    f'<span class="rvf-label">{_titulo}</span>'
+                    f'<span class="rvf-value">{_valor}</span>'
+                    "</div>"
+                    for _titulo, _valor, _clase in _xml_tarjetas
+                )
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+
+            st.success(
+                f"XML en {_xml_result.get('destino', '')}, separados por tipo "
+                "de comprobante."
+            )
+            # La carpeta suele traer los reportes diarios Y el mensual, que
+            # repiten los mismos comprobantes. Se omiten, pero conviene decirlo
+            # para que el numero de "leidos" no parezca un error.
+            if _xml_result.get("repetidos"):
+                st.info(
+                    f"{_xml_result['repetidos']} fila(s) estaban repetidas entre "
+                    "el reporte mensual y los diarios. Se omitieron: cada "
+                    "comprobante genera un solo XML."
+                )
+            # Los tipos que el modulo reconoce pero no reconstruye se dicen con
+            # su motivo: es peor que el usuario crea que se generaron.
+            for _tipo, _motivo in (_xml_result.get("no_soportados") or {}).items():
+                st.warning(f"**{_tipo}:** no se reconstruy\u00f3 porque {_motivo}.")
+            if _xml_result.get("invalidos"):
+                st.warning(
+                    f"{_xml_result['invalidos']} XML no validan contra el "
+                    "esquema oficial del SRI. El informe de cobertura dice "
+                    "cu\u00e1l y por qu\u00e9."
+                )
+
+            if _xml_log:
+                with st.expander("Ver detalle del proceso", expanded=False):
+                    for _m in _xml_log:
+                        st.write(_m)
+
+            _xml_inf = Path(_xml_result.get("informe_cobertura", ""))
+            if _xml_inf.is_file():
+                with open(_xml_inf, "rb") as _f:
+                    st.download_button(
+                        "\u2b07\ufe0f Descargar informe de cobertura (Excel)",
+                        data=_f.read(),
+                        file_name=_xml_inf.name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_download_xml_cobertura",
+                        use_container_width=True,
+                    )
+        elif isinstance(_xml_result, dict) and not _xml_result.get("ok"):
+            st.error(_xml_result.get("message", "No se pudo reconstruir."))
+            if _xml_log:
+                with st.expander("Ver detalle del proceso", expanded=False):
+                    for _m in _xml_log:
+                        st.write(_m)
+
     st.markdown('<h3 class="historial-title">Historial de ejecuciones recientes</h3>', unsafe_allow_html=True)
     historial = obtener_historial(DEVICE_FINGERPRINT)
     historial_raw = historial.copy()
