@@ -1777,6 +1777,10 @@ def _extraer_datos_xml_retencion_emitido(xml_path: Path) -> dict:
 
 def _codigo_tipo_identificacion_desde_numero(identificacion: str, default: str = "No Disponible") -> str:
     digits = re.sub(r"\D+", "", identificacion or "")
+    # Consumidor final tambien son 13 digitos, asi que hay que mirarlo antes de
+    # concluir que es un RUC.
+    if digits == "9" * 13:
+        return _label_tipo_ident_emitidos_nota_credito("07")
     if len(digits) == 13:
         return _label_tipo_ident_emitidos_nota_credito("04")
     if len(digits) == 10:
@@ -3282,6 +3286,28 @@ def _valor_reporte_presente(valor) -> bool:
     return token not in {"nodisponible", "na", "n/a", "none", "null", "sindato", "nohaydato"}
 
 
+# Campos con forma conocida. El combinador toma el primer valor no vacio, y el
+# extractor por layout va primero: un valor suyo equivocado le ganaba a uno
+# correcto del legacy. Paso en las 495 facturas de Marzo, donde
+# `identificacionComprador` quedo con "Fecha 06/03/2026 Placa / Matricula: Guia"
+# -- la linea de abajo en el RIDE -- mientras el legacy tenia el RUC bien.
+_FORMA_ESPERADA_REPORTE = {
+    # Cedula, RUC o pasaporte: sin espacios ni puntuacion de frase. El pasaporte
+    # puede traer letras, por eso no se exige que sean solo digitos.
+    "identificacionComprador": re.compile(r"[A-Za-z0-9\-]{5,20}"),
+}
+
+
+def _valor_reporte_utilizable(col: str, valor) -> bool:
+    """Si el valor esta presente Y tiene la forma que ese campo deberia tener."""
+    if not _valor_reporte_presente(valor):
+        return False
+    forma = _FORMA_ESPERADA_REPORTE.get(col)
+    if forma is None:
+        return True
+    return bool(forma.fullmatch(str(valor).strip()))
+
+
 def _combinar_datos_reporte_emitidos(*fuentes: dict | None) -> dict:
     datos = {col: "" for col in PDF_REPORT_COLUMNS}
     for fuente in fuentes:
@@ -3289,7 +3315,7 @@ def _combinar_datos_reporte_emitidos(*fuentes: dict | None) -> dict:
             continue
         for col in PDF_REPORT_COLUMNS:
             nuevo = fuente.get(col)
-            if not _valor_reporte_presente(nuevo):
+            if not _valor_reporte_utilizable(col, nuevo):
                 continue
             if not _valor_reporte_presente(datos.get(col)):
                 datos[col] = nuevo
