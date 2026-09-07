@@ -20,12 +20,21 @@ original.
 
 Alcance
 -------
-Solo EMITIDOS. Factura esta validada contra datos reales; nota de credito y
-nota de debito comparten 37 de sus 38 columnas con factura y estan
-implementadas, pero todavia sin contrastar contra un reporte real de ese tipo.
-Retencion queda afuera a proposito: su reporte sale sin los campos de
-identificacion porque el extractor de retenciones esta roto, y reconstruir
-sobre eso seria inventar.
+Solo EMITIDOS.
+
+- Factura: validada contra 495 comprobantes reales.
+- Nota de credito y nota de debito: validadas contra sus XSD con filas
+  construidas a partir de las columnas reales del reporte. Comparten casi todo
+  con la factura pero no todo: la nota de credito nombra los codigos del
+  detalle `codigoInterno`/`codigoAdicional`, y la nota de debito no lleva
+  detalle de items sino un bloque `motivos`, y llama `impuestos` a lo que la
+  factura llama `totalConImpuestos`.
+- Retencion: queda afuera. El XSD exige `codigoRetencion` en cada impuesto y
+  ese codigo no aparece en el RIDE -- el comprobante imprime el nombre del
+  impuesto y el porcentaje, nada mas -- asi que no llega al reporte. Un 2% de
+  Renta corresponde a varios codigos distintos: deducirlo seria inventar un
+  dato que despues se lee como cierto. Todo lo demas de la retencion (bases,
+  porcentajes, valores, sustento) si esta y sirve como tabla.
 """
 
 from __future__ import annotations
@@ -78,9 +87,10 @@ TIPOS = {
 TIPOS_NO_SOPORTADOS = {
     "07": (
         "comprobante de retencion",
-        "el reporte de retenciones emitidas sale sin rucEmisor, claveAcceso ni "
-        "fechaEmision porque el extractor de retenciones esta roto: no hay de "
-        "donde reconstruir",
+        "el XSD exige `codigoRetencion` en cada impuesto y ese codigo no se "
+        "imprime en el RIDE: el comprobante solo muestra el nombre del impuesto "
+        "y el porcentaje. Con un 2% de Renta hay varios codigos posibles, asi "
+        "que deducirlo seria inventar un dato que despues se lee como cierto",
     ),
     "06": ("guia de remision", "el robot no genera reporte de guias en Emitidos"),
     "03": ("liquidacion de compra", "la ficha tecnica del repo no trae su XSD"),
@@ -345,9 +355,20 @@ def _info_tributaria(raiz: ET.Element, fila: pd.Series, clave: dict,
     _sub(info, "dirMatriz", _columna(fila, "Dirección Matriz", "direccionMatrizEmisor"), cobertura, DIRECTO, True)
 
 
-def _total_con_impuestos(padre: ET.Element, fila: pd.Series, cobertura: Cobertura) -> None:
-    """Arma totalConImpuestos desde las bases y el monto de IVA del reporte."""
-    contenedor = ET.SubElement(padre, "totalConImpuestos")
+def _total_con_impuestos(
+    padre: ET.Element,
+    fila: pd.Series,
+    cobertura: Cobertura,
+    etiqueta: str = "totalConImpuestos",
+    hijo: str = "totalImpuesto",
+    con_tarifa: bool = False,
+) -> None:
+    """Arma el bloque de impuestos desde las bases y el IVA del reporte.
+
+    La nota de debito no lo llama `totalConImpuestos` sino `impuestos`, y su
+    `impuesto` exige `tarifa`. Se parametriza en vez de duplicar la funcion.
+    """
+    contenedor = ET.SubElement(padre, etiqueta)
     tarifa = _columna(fila, "Tarifas IVA")
     codigo_pct = codigo_porcentaje_iva(tarifa)
     base_gravada = _numero(_columna(fila, "Base Gravada"))
@@ -355,27 +376,32 @@ def _total_con_impuestos(padre: ET.Element, fila: pd.Series, cobertura: Cobertur
     monto_iva = _numero(_columna(fila, "Monto IVA"))
 
     def _bloque(cod_pct: str, base: float, valor: float) -> None:
-        nodo = ET.SubElement(contenedor, "totalImpuesto")
+        nodo = ET.SubElement(contenedor, hijo)
         ET.SubElement(nodo, "codigo").text = _COD_IVA
         ET.SubElement(nodo, "codigoPorcentaje").text = cod_pct
+        if con_tarifa:
+            ET.SubElement(nodo, "tarifa").text = _dec(_tarifa_numerica(tarifa))
         ET.SubElement(nodo, "baseImponible").text = _dec(base)
         ET.SubElement(nodo, "valor").text = _dec(valor)
 
     if base_gravada > 0 and codigo_pct not in ("", "0"):
         _bloque(codigo_pct, base_gravada, monto_iva)
-        cobertura.anota("totalConImpuestos", DIRECTO)
+        cobertura.anota(etiqueta, DIRECTO)
     if base_no_gravada > 0:
         _bloque("0", base_no_gravada, 0.0)
-        cobertura.anota("totalConImpuestos", DIRECTO)
+        cobertura.anota(etiqueta, DIRECTO)
     if not len(contenedor):
         # Sin bases utilizables: se declara el total sin impuestos a tarifa 0
         # para no dejar el bloque vacio, que el XSD no admite.
         _bloque(codigo_pct or "0", _numero(_columna(fila, "Total Sin Impuestos")), monto_iva)
-        cobertura.anota("totalConImpuestos", DEDUCIDO)
+        cobertura.anota(etiqueta, DEDUCIDO)
 
 
 def _detalles(padre: ET.Element, fila: pd.Series, cobertura: Cobertura,
-              avisos: list[str]) -> int:
+              avisos: list[str], cod_principal: str = "codigoPrincipal",
+              cod_auxiliar: str = "codigoAuxiliar") -> int:
+    """El detalle de la nota de credito llama a los codigos `codigoInterno` y
+    `codigoAdicional`; el resto de la secuencia es igual a la factura."""
     contenedor = ET.SubElement(padre, "detalles")
     items = parsear_descripciones(_columna(fila, "Descripciones"))
     if not items:
@@ -396,9 +422,9 @@ def _detalles(padre: ET.Element, fila: pd.Series, cobertura: Cobertura,
 
     for item in items:
         nodo = ET.SubElement(contenedor, "detalle")
-        ET.SubElement(nodo, "codigoPrincipal").text = item["codigoPrincipal"]
+        ET.SubElement(nodo, cod_principal).text = item["codigoPrincipal"]
         if item["codigoAuxiliar"] and item["codigoAuxiliar"].upper() != "S/N":
-            ET.SubElement(nodo, "codigoAuxiliar").text = item["codigoAuxiliar"]
+            ET.SubElement(nodo, cod_auxiliar).text = item["codigoAuxiliar"]
         ET.SubElement(nodo, "descripcion").text = item["descripcion"] or "SIN DESCRIPCION"
         ET.SubElement(nodo, "cantidad").text = _dec(item["cantidad"], 6)
         ET.SubElement(nodo, "precioUnitario").text = _dec(item["precioUnitario"], 6)
@@ -525,11 +551,27 @@ def construir_nota(fila: pd.Series, es_credito: bool) -> tuple[ET.Element, Cober
         _total_con_impuestos(info, fila, cobertura)
         _sub(info, "motivo", _columna(fila, "Motivo"), cobertura)
     else:
-        _total_con_impuestos(info, fila, cobertura)
+        # La nota de debito lo llama `impuestos` y su impuesto exige `tarifa`.
+        _total_con_impuestos(
+            info, fila, cobertura, etiqueta="impuestos", hijo="impuesto",
+            con_tarifa=True,
+        )
         _sub(info, "valorTotal", _dec(_columna(fila, "Importe Total")), cobertura, DIRECTO, True)
 
     if es_credito:
-        _detalles(raiz, fila, cobertura, avisos)
+        _detalles(
+            raiz, fila, cobertura, avisos,
+            cod_principal="codigoInterno", cod_auxiliar="codigoAdicional",
+        )
+    else:
+        # La nota de debito no lleva detalle de items sino un bloque `motivos`
+        # con la razon del cargo y su valor, y es obligatorio.
+        motivos = ET.SubElement(raiz, "motivos")
+        nodo = ET.SubElement(motivos, "motivo")
+        razon = _columna(fila, "Motivo") or "Cargo adicional"
+        ET.SubElement(nodo, "razon").text = razon
+        ET.SubElement(nodo, "valor").text = _dec(_columna(fila, "Importe Total"))
+        cobertura.anota("motivos", DIRECTO if _columna(fila, "Motivo") else DEDUCIDO)
     _info_adicional(raiz, fila, cobertura)
     return raiz, cobertura, avisos
 
