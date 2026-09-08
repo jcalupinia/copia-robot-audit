@@ -48,6 +48,16 @@ from xml.etree import ElementTree as ET
 import pandas as pd
 
 from robot._logging import get_logger
+from robot.pdf_extraction import (
+    _extraer_datos_pdf_factura_emitido,
+    _extraer_datos_pdf_nota_credito_emitido,
+    _extraer_datos_pdf_nota_debito_emitido,
+)
+from robot.reporting import (
+    _guardar_reporte_pdf_factura_emitidos_excel,
+    _guardar_reporte_pdf_nota_credito_emitidos_excel,
+    _guardar_reporte_pdf_nota_debito_emitidos_excel,
+)
 
 logger = get_logger(__name__)
 
@@ -887,3 +897,116 @@ def _escribir_informe(filas: list[dict], resumen: dict, path: Path) -> None:
             writer, sheet_name="Resumen", index=False
         )
         pd.DataFrame(filas).to_excel(writer, sheet_name="Detalle por comprobante", index=False)
+
+
+# --------------------------------------------------------------------------- #
+# Reporte a partir de los PDF
+# --------------------------------------------------------------------------- #
+# Cada tipo tiene su extractor y su armador de Excel. Son los mismos que usa el
+# robot durante la descarga, asi que el reporte que sale de aca es identico al
+# que se habria escrito en su momento.
+_FUENTES_PDF: dict[str, tuple] = {
+    "factura": (
+        _extraer_datos_pdf_factura_emitido,
+        _guardar_reporte_pdf_factura_emitidos_excel,
+    ),
+    "nota_de_credito": (
+        _extraer_datos_pdf_nota_credito_emitido,
+        _guardar_reporte_pdf_nota_credito_emitidos_excel,
+    ),
+    "nota_de_debito": (
+        _extraer_datos_pdf_nota_debito_emitido,
+        _guardar_reporte_pdf_nota_debito_emitidos_excel,
+    ),
+}
+
+
+def _tipo_desde_nombre_pdf(ruta: Path) -> str:
+    """Deduce el tipo por el prefijo con que el robot nombra cada PDF.
+
+    Los archivos se llaman `<tipo>__<aaaammdd>__<resto>.pdf`, p. ej.
+    `factura__20260306__Factura_001-050-000001319_<clave>.pdf`.
+    """
+    nombre = ruta.name.lower()
+    for tipo in _FUENTES_PDF:
+        if nombre.startswith(f"{tipo}__"):
+            return tipo
+    return ""
+
+
+def construir_reportes_desde_pdfs(
+    carpeta: str | Path,
+    destino: str | Path,
+    progress: Optional[Callable[[str], None]] = None,
+) -> dict:
+    """Arma los reportes de Emitidos leyendo los PDF de una carpeta.
+
+    El `emitidos_reporte_pdf_*.xlsx` solo se escribe si la descarga incluyo el
+    formato PDF. Quien conserva los PDF pero no ese Excel tiene igual todos los
+    datos -- salen justamente de ahi -- y sin esto no habia forma de usarlos.
+
+    Devuelve un resumen con los reportes escritos, cuantos PDF entraron en cada
+    uno y que quedo afuera.
+    """
+
+    def _avisar(mensaje: str) -> None:
+        if progress:
+            try:
+                progress(mensaje)
+            except Exception:
+                pass
+        logger.info(mensaje)
+
+    carpeta = Path(carpeta)
+    destino = Path(destino)
+    resumen: dict = {
+        "reportes": [],
+        "pdfs": 0,
+        "por_tipo": {},
+        "omitidos": 0,
+        "fallidos": [],
+    }
+    if not carpeta.is_dir():
+        return resumen
+
+    por_tipo: dict[str, list[Path]] = {}
+    for ruta in sorted(carpeta.rglob("*.pdf")):
+        resumen["pdfs"] += 1
+        tipo = _tipo_desde_nombre_pdf(ruta)
+        if not tipo:
+            # Retenciones, guias y liquidaciones: la reconstruccion no las
+            # soporta, asi que ni se leen.
+            resumen["omitidos"] += 1
+            continue
+        por_tipo.setdefault(tipo, []).append(ruta)
+
+    if not por_tipo:
+        return resumen
+
+    destino.mkdir(parents=True, exist_ok=True)
+    for tipo, rutas in sorted(por_tipo.items()):
+        extraer, guardar = _FUENTES_PDF[tipo]
+        filas = []
+        for indice, ruta in enumerate(rutas, 1):
+            if indice == 1 or indice % 25 == 0 or indice == len(rutas):
+                _avisar(f"Leyendo PDF de {tipo}: {indice}/{len(rutas)}")
+            try:
+                filas.append(extraer(ruta))
+            except Exception as err:
+                resumen["fallidos"].append(f"{ruta.name}: {err}")
+                logger.warning(f"No se pudo leer el PDF '{ruta.name}': {err}")
+        if not filas:
+            continue
+        # Nombre propio para no confundirlo con un reporte de la descarga, y
+        # para que una segunda pasada no lo tome a el como fuente.
+        salida = destino / f"emitidos_reporte_pdf_{tipo}_desde_pdf.xlsx"
+        try:
+            if guardar(filas, salida):
+                resumen["reportes"].append(salida)
+                resumen["por_tipo"][tipo] = len(filas)
+                _avisar(f"Reporte de {tipo} armado con {len(filas)} comprobante(s).")
+        except Exception as err:
+            resumen["fallidos"].append(f"reporte de {tipo}: {err}")
+            logger.warning(f"No se pudo escribir el reporte de {tipo}: {err}")
+
+    return resumen

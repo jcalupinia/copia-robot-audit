@@ -6204,7 +6204,8 @@ with tab2:
             placeholder="F:\\1729109106001\\AUTORIZADO\\Factura\\2026\\Marzo",
             help=(
                 "La carpeta del mes descargado. Se buscan dentro los Excel "
-                "emitidos_reporte_pdf_*.xlsx, incluidas las subcarpetas."
+                "emitidos_reporte_pdf_*.xlsx, incluidas las subcarpetas. Si no "
+                "hay ninguno pero si estan los PDF, el reporte se arma con ellos."
             ),
         )
         _xml_destino = st.text_input(
@@ -6234,20 +6235,69 @@ with tab2:
                     for r in _xml_dir.rglob("emitidos_reporte_pdf_*.xlsx")
                     if not r.name.startswith("~$")
                 )
+                _xml_salida = (
+                    Path(str(_xml_destino).strip()).expanduser()
+                    if str(_xml_destino or "").strip()
+                    else _xml_dir / "XML_reconstruido"
+                )
+                _xml_informe = _xml_salida / "informe_cobertura.xlsx"
+                _xml_desde_pdf = None
                 if not _xml_reportes:
+                    # El Excel solo se escribe si la descarga incluyo PDF. Si no
+                    # esta pero quedaron los PDF, los datos siguen ahi: el
+                    # reporte se arma leyendolos, que es lo mismo que hace el
+                    # robot durante la descarga.
+                    _pdfs = [
+                        r for r in _xml_dir.rglob("*.pdf") if not r.name.startswith("~$")
+                    ]
+                    if _pdfs:
+                        try:
+                            from robot.xml_desde_reporte import (
+                                construir_reportes_desde_pdfs,
+                            )
+                        except ImportError as _imp_err:
+                            st.error(
+                                "No se pudo cargar robot/xml_desde_reporte.py.\n\n"
+                                f"**Detalle:** {_imp_err}"
+                            )
+                            st.stop()
+                        with st.spinner(
+                            f"No hay reporte Excel: armandolo desde {len(_pdfs)} PDF "
+                            "(tarda alrededor de medio segundo por documento)..."
+                        ):
+                            _xml_desde_pdf = construir_reportes_desde_pdfs(
+                                _xml_dir, _xml_salida / "reporte_desde_pdf"
+                            )
+                        _xml_reportes = list(_xml_desde_pdf.get("reportes") or [])
+                        if _xml_reportes:
+                            st.info(
+                                "No habia reporte Excel, asi que se armo leyendo "
+                                f"{sum(_xml_desde_pdf['por_tipo'].values())} PDF: "
+                                + ", ".join(
+                                    f"{_n} de {_t.replace('_', ' ')}"
+                                    for _t, _n in sorted(
+                                        _xml_desde_pdf["por_tipo"].items()
+                                    )
+                                )
+                                + "."
+                            )
+
+                if not _xml_reportes:
+                    _detalle = ""
+                    if _xml_desde_pdf and _xml_desde_pdf.get("omitidos"):
+                        _detalle = (
+                            f" Se encontraron {_xml_desde_pdf['omitidos']} PDF, pero "
+                            "de tipos que la reconstrucci\u00f3n no soporta "
+                            "(retenciones, gu\u00edas, liquidaciones)."
+                        )
                     st.error(
-                        "No se encontr\u00f3 ning\u00fan emitidos_reporte_pdf_*.xlsx en "
-                        "esa carpeta ni en sus subcarpetas. Revisa que sea una "
-                        "descarga de **Emitidos** con formato PDF."
+                        "En esa carpeta no hay ni un **emitidos_reporte_pdf_*.xlsx** "
+                        "ni PDF de Emitidos que sirvan." + _detalle + "\n\n"
+                        "El reporte solo se genera si la descarga incluy\u00f3 el "
+                        "formato **PDF**: una descarga de solo XML no lo produce, y "
+                        "el `emitidos_reporte_xml_*.xlsx` tiene otras columnas."
                     )
                 else:
-                    _xml_salida = (
-                        Path(str(_xml_destino).strip()).expanduser()
-                        if str(_xml_destino or "").strip()
-                        else _xml_dir / "XML_reconstruido"
-                    )
-                    _xml_informe = _xml_salida / "informe_cobertura.xlsx"
-
                     try:
                         from robot.xml_desde_reporte import generar_xml_desde_reporte
                     except ImportError as _imp_err:
