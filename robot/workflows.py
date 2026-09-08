@@ -2627,6 +2627,10 @@ def _flujo_emitidos(
                         xml_dir,
                         nombre_base,
                         claves_guardadas,
+                        # El mismo nombre que usa el PDF de esta fila. Es lo que
+                        # busca la guarda `_xml_previo` antes de volver a pedirlo
+                        # y lo que el colector del reporte sabe reconocer.
+                        nombre_destino=nombre_base,
                     )
                     if resultado_xml:
                         if descargar_xml:
@@ -3403,8 +3407,24 @@ def _flujo_emitidos(
             try:
                 estado_default_reporte = estado_visible if modo_no_autorizados else None
                 xml_files_emitidos = _xml_files_por_tipo(carpeta_estado, tipo_prefijo)
+                if not xml_files_emitidos:
+                    # Se bajaron XML pero el colector no reconocio ninguno: el
+                    # reporte sale vacio y hasta ahora eso pasaba en silencio,
+                    # porque `construir_reporte` avisa por print() y el flujo
+                    # anotaba la ruta igual, como si el archivo existiera.
+                    logger.warning(
+                        f"Se descargaron {n_xml} XML pero ninguno quedo bajo un "
+                        f"nombre o carpeta que el reporte reconozca "
+                        f"('{tipo_prefijo}' en {carpeta_estado}). No hay reporte XML."
+                    )
                 construir_reporte(carpeta_estado, xml_report_path, estado_default_reporte, xml_files=xml_files_emitidos)
-                info_base["reporte_xml"] = str(xml_report_path)
+                if xml_report_path.exists():
+                    info_base["reporte_xml"] = str(xml_report_path)
+                else:
+                    logger.warning(
+                        f"El reporte XML de emitidos no llego a escribirse: "
+                        f"{xml_report_path.name}"
+                    )
             except Exception as err:
                 logger.warning(f"No se pudo construir el reporte XML de emitidos: {err}")
 

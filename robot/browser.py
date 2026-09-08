@@ -584,7 +584,16 @@ def _descargar_xml_emitido_por_clave(
     xml_dir: Path,
     fallback_nombre: str,
     claves_guardadas: set[str],
+    nombre_destino: Optional[str] = None,
 ) -> Optional[Path]:
+    """Baja un XML emitido del WS del SRI y lo deja en `xml_dir`.
+
+    `nombre_destino` fija el nombre del archivo. Conviene pasarlo: el nombre que
+    esta funcion arma por su cuenta (a partir de la serie, el receptor y el
+    total) no lo conoce nadie mas del flujo, asi que la guarda de "esto ya se
+    bajo" no acertaba nunca y el colector del reporte no encontraba los
+    archivos. Sin el, se conserva el comportamiento viejo.
+    """
     clave = (clave_acceso or "").strip()
     if not clave:
         raise ValueError("Clave de acceso vacia para la descarga SOAP.")
@@ -644,15 +653,29 @@ def _descargar_xml_emitido_por_clave(
 
     clave_meta = (meta.get("clave_acceso") or clave).strip()
     if clave_meta and clave_meta in claves_guardadas:
+        # Ya se guardo en esta misma corrida. Devolver None dejaba la fila sin
+        # contar, el dia daba incompleto y el reintento volvia a bajarlo TODO:
+        # otra fuente de duplicados. Con nombre fijo se sabe cual es el archivo,
+        # asi que se devuelve el que ya esta en disco.
+        if nombre_destino:
+            ya_esta = xml_dir / f"{_sanear_nombre_archivo(nombre_destino)}.xml"
+            if ya_esta.exists():
+                return ya_esta
         return None
 
     contenido_xml = meta.get("xml_contenido") or comprobante_xml
     if not contenido_xml.lstrip().startswith("<?xml"):
         contenido_xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + contenido_xml.lstrip()
 
-    nombre_archivo = _construir_nombre_xml_emitido(meta, fallback_nombre)
-    destino_base = xml_dir / nombre_archivo
-    destino_final = _resolver_destino_unico(destino_base, ".xml")
+    if nombre_destino:
+        # Nombre deterministico: lo arma el llamador con la clave de acceso
+        # adentro, asi que un archivo que ya exista con ese nombre ES este
+        # mismo comprobante. Se sobrescribe en vez de dejar una copia con
+        # sufijo _1, que es de donde salian los duplicados.
+        destino_final = xml_dir / f"{_sanear_nombre_archivo(nombre_destino)}.xml"
+    else:
+        destino_base = xml_dir / _construir_nombre_xml_emitido(meta, fallback_nombre)
+        destino_final = _resolver_destino_unico(destino_base, ".xml")
     destino_final.write_text(contenido_xml, encoding="utf-8")
 
     if clave_meta:
