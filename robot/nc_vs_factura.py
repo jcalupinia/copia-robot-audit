@@ -554,7 +554,10 @@ def _consultar_factura_por_clave_ws(
         return None
 
     import html
-    match = re.search(r"(<autorizacion[\s\S]*?</autorizacion>)", cuerpo, flags=re.IGNORECASE)
+    # Ver browser.py: `<autorizacion` tambien matchea `<autorizaciones>`.
+    match = re.search(
+        r"(<autorizacion(?:\s[^>]*)?>[\s\S]*?</autorizacion>)", cuerpo, flags=re.IGNORECASE
+    )
     if not match:
         return None
     autorizacion_xml = html.unescape(match.group(1))

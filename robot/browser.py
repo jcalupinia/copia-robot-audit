@@ -69,6 +69,15 @@ SOAP_ENVELOPE_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+class ComprobanteNoDisponibleEnWS(RuntimeError):
+    """El WS del SRI contesto, y lo que contesto es que no tiene el comprobante.
+
+    Se separa de un error de red o de un HTTP != 200 porque significa algo
+    distinto: la consulta funciono. Reintentarla no va a hacer aparecer el XML,
+    y sirve para saber cuando dejar de pedirle al WS los XML de un dia entero.
+    """
+
+
 def _portal_indisponible(page) -> bool:
     try:
         contenido = page.content()
@@ -597,15 +606,38 @@ def _descargar_xml_emitido_por_clave(
     if not cuerpo:
         raise RuntimeError("El servicio SOAP devolvio respuesta vacia.")
 
-    match = re.search(r"(<autorizacion[\s\S]*?</autorizacion>)", cuerpo, flags=re.IGNORECASE)
+    # `<autorizacion` a secas tambien matchea el envoltorio plural
+    # `<autorizaciones>` que trae la respuesta real del SRI, y entonces el
+    # bloque recortado quedaba desbalanceado: un "no lo tengo" terminaba como
+    # error de parseo y un comprobante bueno se rescataba de casualidad por un
+    # fallback, perdiendo estado y numero de autorizacion por el camino.
+    match = re.search(
+        r"(<autorizacion(?:\s[^>]*)?>[\s\S]*?</autorizacion>)", cuerpo, flags=re.IGNORECASE
+    )
     if not match:
-        raise RuntimeError("El servicio SOAP no devolvio un bloque <autorizacion>.")
+        raise ComprobanteNoDisponibleEnWS(
+            "El servicio SOAP no devolvio un bloque <autorizacion>."
+        )
     autorizacion_xml = html.unescape(match.group(1))
+
+    # El WS contesta con la autorizacion aunque ya no guarde el XML: trae el
+    # estado y ningun <comprobante>. Se distingue aca, antes de intentar
+    # interpretarlo, para no confundir "no lo tengo" con "no se entiende".
+    if not re.search(r"<comprobante[\s>]", autorizacion_xml, flags=re.IGNORECASE):
+        estado_match = re.search(
+            r"<estado>\s*([^<]*)</estado>", autorizacion_xml, flags=re.IGNORECASE
+        )
+        estado = (estado_match.group(1).strip() if estado_match else "") or "desconocido"
+        raise ComprobanteNoDisponibleEnWS(
+            f"El servicio SOAP retorno estado '{estado}' sin comprobante."
+        )
 
     comprobante_xml, meta_aut = _extraer_comprobante_desde_autorizacion(autorizacion_xml)
     if not comprobante_xml or not comprobante_xml.strip():
         estado = (meta_aut or {}).get("estado", "desconocido") if meta_aut else "desconocido"
-        raise RuntimeError(f"El servicio SOAP retorno estado '{estado}' sin comprobante.")
+        raise ComprobanteNoDisponibleEnWS(
+            f"El servicio SOAP retorno estado '{estado}' sin comprobante."
+        )
 
     meta = _parse_emitido_comprobante(comprobante_xml, meta_aut)
     meta.setdefault("xml_contenido", comprobante_xml)

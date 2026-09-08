@@ -1612,6 +1612,11 @@ def descargar_sri(
             # Dias que siguieron incompletos despues de los reintentos. Se
             # resumen al final para no tener que leer el log entero.
             dias_incompletos: list[str] = []
+            # Dias cuyos XML el WS del SRI ya no guarda. No son un error ni una
+            # descarga incompleta: son comprobantes que existen pero cuyo XML el
+            # SRI dejo de servir. Se listan aparte para no mezclarlos con lo que
+            # si habria que reintentar.
+            dias_sin_xml_ws: list[str] = []
 
             def _reiniciar_emitidos_para_siguiente_dia(fecha_actual: str, total_docs_dia: int) -> None:
                 nonlocal modulo_page
@@ -1797,6 +1802,8 @@ def descargar_sri(
                             f"{_reintento} tomo {time.time() - _t_reintento:.1f}s "
                             f"({resultado_dia.get('n_registros', 0)} registros)"
                         )
+                    if resultado_dia.get("xml_ws_agotado"):
+                        dias_sin_xml_ws.append(fecha_actual)
                     if not resultado_dia.get("descarga_completa", True):
                         dias_incompletos.append(
                             f"{fecha_actual}: {resultado_dia.get('mensaje_verificacion')}"
@@ -1890,6 +1897,19 @@ def descargar_sri(
                         )
                     else:
                         logger.info("[resumen] todos los dias se descargaron completos.")
+                    resultado_mes["dias_sin_xml_ws"] = list(dias_sin_xml_ws)
+                    if dias_sin_xml_ws:
+                        logger.warning(
+                            f"[resumen] el WS del SRI ya no tiene los XML de "
+                            f"{len(dias_sin_xml_ws)} dia(s): "
+                            + ", ".join(dias_sin_xml_ws)
+                        )
+                        _notificar_usuario_accion(
+                            f"[AVISO] {len(dias_sin_xml_ws)} dia(s) sin XML: el web "
+                            f"service del SRI ya no los guarda ({dias_sin_xml_ws[0]}"
+                            + (f" ... {dias_sin_xml_ws[-1]}" if len(dias_sin_xml_ws) > 1 else "")
+                            + "). Los comprobantes igual quedan en el reporte."
+                        )
                     _resumen_mes = _resumen_tiempos_pdf(
                         tiempos_pdf_mes, f"{_mes_a_texto(mes_actual)} {anio}"
                     )

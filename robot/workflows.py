@@ -28,6 +28,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from robot._logging import get_logger
 from robot.parser import construir_reporte
 from robot.browser import (
+    ComprobanteNoDisponibleEnWS,
     _asegurar_en_tabla_emitidos,
     _click_consultar_emitidos,
     _descargar_pdf_emitidos_post_con_viewstate,
@@ -78,6 +79,8 @@ from robot.config import (
     PDF_OBJETIVO_S,
     TABLA_ESTABLE_LECTURAS,
     TABLA_VACIA_MS,
+    XML_WS_DIAS_LIMITE,
+    XML_WS_SONDEOS,
     FILL_TIMEOUT_MS,
     DOWNLOAD_TIMEOUT,
     ESTADOS_EMITIDOS_MAP,
@@ -250,6 +253,30 @@ def _debe_omitir_soap_xml(fecha_emision: str, descargar_xml: bool, dias_limite: 
         limite = 30
     dias = (datetime.now().date() - fecha_dt.date()).days
     return dias > limite
+
+
+def _xml_ws_sin_stock(
+    fecha_emision: str,
+    sin_comprobante: int,
+    hubo_alguno: bool,
+    dias_limite: int = XML_WS_DIAS_LIMITE,
+) -> bool:
+    """Decide si dejar de pedirle XML al WS del SRI por el resto del dia.
+
+    Cortar por fecha a secas seria mas simple pero peligroso: el dia que el SRI
+    cambie el plazo de retencion, el robot dejaria de bajar XML que SI estan, y
+    sin decir nada. Por eso la fecha sola no alcanza -- hace falta que el propio
+    WS haya contestado varias veces que no tiene el comprobante.
+
+    Y nunca corta si alguno del dia si vino: eso prueba que el WS todavia sirve
+    esa fecha y que los que faltan son casos sueltos, no el plazo vencido.
+    """
+    if hubo_alguno or sin_comprobante < XML_WS_SONDEOS:
+        return False
+    fecha_dt = _parse_datetime_local(fecha_emision) if fecha_emision else None
+    if not fecha_dt:
+        return False
+    return (datetime.now().date() - fecha_dt.date()).days > dias_limite
 
 
 def _build_download_row_id(*parts) -> str:
@@ -2250,6 +2277,14 @@ def _flujo_emitidos(
         descargar_pdf = False
 
     omitir_soap_xml = _debe_omitir_soap_xml(fecha_emision, descargar_xml)
+    # Estado del WS de XML para ESTE dia. `xml_ws_agotado` se enciende una sola
+    # vez, cuando el WS ya dejo claro que no tiene los comprobantes de la fecha;
+    # a partir de ahi no se le pregunta mas y las filas restantes se cuentan
+    # aparte en vez de quedar como faltantes.
+    xml_ws_agotado = False
+    xml_ws_omitidos = 0
+    xml_ws_sin_comprobante: set = set()
+    xml_ws_con_stock: set = set()
 
     if fecha_emision:
         fecha_selector = "input#frmPrincipal\:calendarFechaDesde_input"
@@ -2576,6 +2611,73 @@ def _flujo_emitidos(
         claves_guardadas = set()
         request_context = page.context.request
 
+        def _bajar_xml_por_soap(clave: str, nombre_base: str, row_id_fila: str):
+            """Pide un XML al WS del SRI y lleva la cuenta de lo que contesta.
+
+            Vive aca dentro porque toca los contadores del dia y lo llaman dos
+            caminos -- el normal y el de "No Autorizados" -- que escritos por
+            separado terminan divergiendo.
+            """
+            nonlocal n_xml, lote_xml_ok, xml_ws_agotado
+            for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
+                try:
+                    resultado_xml = _descargar_xml_emitido_por_clave(
+                        request_context,
+                        clave,
+                        xml_dir,
+                        nombre_base,
+                        claves_guardadas,
+                    )
+                    if resultado_xml:
+                        if descargar_xml:
+                            n_xml += 1
+                            descargados_xml.add(row_id_fila)
+                        else:
+                            xml_temp_paths.append(resultado_xml)
+                        lote_xml_ok += 1
+                        xml_ws_con_stock.add(row_id_fila)
+                        return resultado_xml
+                except ComprobanteNoDisponibleEnWS as err:
+                    # El WS respondio bien: no lo tiene. El segundo intento
+                    # tampoco lo va a traer, asi que no se gasta.
+                    xml_ws_sin_comprobante.add(row_id_fila)
+                    logger.warning(
+                        f"El WS del SRI no tiene el XML de '{nombre_base}': {err}"
+                    )
+                    break
+                except Exception as err:
+                    # Estos avisos salian por `print()` y nunca llegaban al
+                    # archivo de log, asi que un dia entero podia irse en
+                    # llamadas fallidas sin dejar rastro.
+                    logger.warning(
+                        f"No se pudo obtener XML SOAP para '{nombre_base}' "
+                        f"(intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}"
+                    )
+                if intento_xml < DOWNLOAD_ROW_RETRY_ATTEMPTS:
+                    try:
+                        page.wait_for_timeout(250)
+                    except Exception:
+                        pass
+
+            if not xml_ws_agotado and _xml_ws_sin_stock(
+                fecha_emision,
+                len(xml_ws_sin_comprobante),
+                bool(xml_ws_con_stock),
+            ):
+                xml_ws_agotado = True
+                # Las filas que se sondearon no son "faltantes": el XML no
+                # existe. Dejarlas como esperadas daria el dia por incompleto y
+                # dispararia los reintentos del dia entero, que es exactamente
+                # el tiempo que se quiere dejar de gastar.
+                esperados_xml.difference_update(xml_ws_sin_comprobante)
+                _notificar_usuario_accion(
+                    f"[INFO] Emitidos {fecha_emision or 's/f'}: el web service del "
+                    f"SRI ya no tiene los XML de esta fecha (mas de "
+                    f"{XML_WS_DIAS_LIMITE} dias). Se deja de pedirlos por el resto "
+                    "del dia; los comprobantes igual quedan en el reporte."
+                )
+            return None
+
         # RESUME: si el caller indica que veniamos parados en pagina N fila M
         # de este mismo dia, navegamos a esa pagina y guardamos el row index
         # a saltear en el primer for. El flag se consume despues de la
@@ -2832,7 +2934,7 @@ def _flujo_emitidos(
                     f"fila{idx+1}",
                 )
                 registros_esperados += 1
-                if descargar_xml and not omitir_soap_xml:
+                if descargar_xml and not omitir_soap_xml and not xml_ws_agotado:
                     esperados_xml.add(row_id)
                 if descargar_pdf:
                     esperados_pdf.add(row_id)
@@ -2841,38 +2943,16 @@ def _flujo_emitidos(
                 if es_rechazado:
                     try:
                         if descargar_xml_para_reporte:
-                            if clave_texto:
-                                for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
-                                    try:
-                                        resultado_xml = _descargar_xml_emitido_por_clave(
-                                            request_context,
-                                            clave_texto,
-                                            xml_dir,
-                                            nombre_base_pdf,
-                                            claves_guardadas,
-                                        )
-                                        if resultado_xml:
-                                            xml_path_report = resultado_xml
-                                            if descargar_xml:
-                                                n_xml += 1
-                                                descargados_xml.add(row_id)
-                                            else:
-                                                xml_temp_paths.append(xml_path_report)
-                                            lote_xml_ok += 1
-                                            break
-                                    except Exception as err:
-                                        print(
-                                            f"[WARN] No se pudo obtener XML SOAP para '{nombre_base_pdf}' "
-                                            f"(intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}"
-                                        )
-                                    if intento_xml < DOWNLOAD_ROW_RETRY_ATTEMPTS:
-                                        try:
-                                            page.wait_for_timeout(250)
-                                        except Exception:
-                                            pass
+                            if clave_texto and not xml_ws_agotado:
+                                xml_path_report = _bajar_xml_por_soap(
+                                    clave_texto, nombre_base_pdf, row_id
+                                )
+                            elif clave_texto:
+                                xml_ws_omitidos += 1
                             else:
-                                print(
-                                    f"[WARN] La fila '{nombre_base_pdf}' no tiene clave de acceso para solicitar el XML."
+                                logger.warning(
+                                    f"La fila '{nombre_base_pdf}' no tiene clave de "
+                                    "acceso para solicitar el XML."
                                 )
 
                         if descargar_pdf:
@@ -3001,35 +3081,14 @@ def _flujo_emitidos(
                             n_xml += 1
                             descargados_xml.add(row_id)
                         lote_xml_ok += 1
+                    elif clave_texto and not xml_ws_agotado:
+                        xml_path_report = _bajar_xml_por_soap(
+                            clave_texto, nombre_base_pdf, row_id
+                        )
                     elif clave_texto:
-                        for intento_xml in range(1, DOWNLOAD_ROW_RETRY_ATTEMPTS + 1):
-                            try:
-                                resultado_xml = _descargar_xml_emitido_por_clave(
-                                    request_context,
-                                    clave_texto,
-                                    xml_dir,
-                                    nombre_base_pdf,
-                                    claves_guardadas,
-                                )
-                                if resultado_xml:
-                                    xml_path_report = resultado_xml
-                                    if descargar_xml:
-                                        n_xml += 1
-                                        descargados_xml.add(row_id)
-                                    else:
-                                        xml_temp_paths.append(xml_path_report)
-                                    lote_xml_ok += 1
-                                    break
-                            except Exception as err:
-                                print(
-                                    f"[WARN] No se pudo obtener XML SOAP para '{nombre_base_pdf}' "
-                                    f"(intento {intento_xml}/{DOWNLOAD_ROW_RETRY_ATTEMPTS}): {err}"
-                                )
-                            if intento_xml < DOWNLOAD_ROW_RETRY_ATTEMPTS:
-                                try:
-                                    page.wait_for_timeout(250)
-                                except Exception:
-                                    pass
+                        # El WS ya dijo que no tiene los XML de esta fecha. La
+                        # fila sigue su curso -- PDF y reporte -- sin la llamada.
+                        xml_ws_omitidos += 1
                     else:
                         logger.warning(f"La fila '{nombre_base_pdf}' no tiene clave de acceso para solicitar el XML.")
 
@@ -3317,6 +3376,14 @@ def _flujo_emitidos(
             break
         info_base["n_xml"] = n_xml
         info_base["n_pdf"] = n_pdf
+        info_base["xml_ws_agotado"] = xml_ws_agotado
+        info_base["xml_ws_omitidos"] = xml_ws_omitidos
+        if xml_ws_agotado:
+            logger.warning(
+                f"[XML no disponible] {fecha_emision}: el WS del SRI no tiene los "
+                f"XML de esta fecha. Se omitieron {xml_ws_omitidos} llamada(s) "
+                f"tras {len(xml_ws_sin_comprobante)} respuesta(s) sin comprobante."
+            )
 
         fecha_slug = re.sub(r"[^0-9]+", "", fecha_emision) or "consulta"
         if descargar_xml and n_xml > 0:

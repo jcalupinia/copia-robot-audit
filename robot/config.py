@@ -365,6 +365,18 @@ CLICK_PDF_TIMEOUT_MS = int(os.getenv("SRI_CLICK_PDF_TIMEOUT_MS", "5000"))
 # mirada si el portal se puso lento.
 PDF_OBJETIVO_S = float(os.getenv("SRI_PDF_OBJETIVO_S", "1.5"))
 
+# El WS de autorizacion del SRI deja de servir los comprobantes EMITIDOS al mes
+# de autorizados; pasado ese plazo responde sin comprobante. Preguntarle igual
+# cuesta dos llamadas por fila y no trae nada, asi que pasada esta antiguedad el
+# robot deja de insistir -- pero solo despues de que el WS lo confirme, nunca
+# por la fecha a secas (ver `_xml_ws_sin_stock` en workflows.py).
+XML_WS_DIAS_LIMITE = int(os.getenv("SRI_XML_WS_DIAS_LIMITE", "30"))
+
+# Cuantas respuestas "no lo tengo" seguidas hacen falta antes de dar por vacio
+# el dia. Con una sola alcanzaria para que un comprobante anulado suelto corte
+# un dia que si tenia XML.
+XML_WS_SONDEOS = max(1, int(os.getenv("SRI_XML_WS_SONDEOS", "3")))
+
 OVERLAY_SELECTORS = ["#disablingDiv", "#disablingOverlay"]
 
 
