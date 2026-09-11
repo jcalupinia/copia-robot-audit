@@ -5856,13 +5856,20 @@ with tab2:
             st.session_state["ret_vs_fact_carpeta_input"] = _pending
 
         st.text_input(
-            "Carpeta con Comprobantes de Retención ya descargados",
+            "Carpeta con Comprobantes de Retención ya descargados"
+            + (" (opcional)" if _ret_direccion == "inverso" else ""),
             key="ret_vs_fact_carpeta_input",
             help=(
                 "Acepta PDF o XML. Puede ser el mes específico o cualquier "
                 "nivel superior; se explora recursivamente. Si la carpeta "
                 "cuelga de la carpeta del RUC, las facturas recibidas se "
                 "ubican solas."
+                + (
+                    " En esta dirección puedes dejarla vacía: las retenciones "
+                    "del período que marcan tus facturas se bajan del portal."
+                    if _ret_direccion == "inverso"
+                    else ""
+                )
             ),
         )
         if st.button(
@@ -5964,10 +5971,20 @@ with tab2:
             ).strip()
             _ret_ruc_val = str(st.session_state.get("ret_vs_fact_ruc") or "").strip()
             _ret_clave_val = str(st.session_state.get("ret_vs_fact_clave") or "").strip()
-            if not _ret_clean or not Path(_ret_clean).expanduser().is_dir():
+            _ret_fact_clean = str(_ret_facturas_dir or "").strip()
+            _ret_ret_ok = bool(_ret_clean) and Path(_ret_clean).expanduser().is_dir()
+            _ret_fact_ok = bool(_ret_fact_clean) and Path(_ret_fact_clean).expanduser().is_dir()
+            # Yendo de la factura a la retencion alcanza con una de las dos: si
+            # faltan las retenciones se bajan del portal sobre el periodo que
+            # marcan las facturas.
+            if not (_ret_ret_ok or (_ret_direccion == "inverso" and _ret_fact_ok)):
                 st.error(
-                    "La carpeta indicada no existe. Selecciona una ruta válida "
-                    "con Comprobantes de Retención descargados."
+                    "Indica una carpeta válida con Comprobantes de Retención"
+                    + (
+                        " o una con Facturas descargadas."
+                        if _ret_direccion == "inverso"
+                        else " descargados."
+                    )
                 )
             elif not (_ret_ruc_val and _ret_clave_val):
                 st.error(
@@ -5975,7 +5992,11 @@ with tab2:
                     "buscan en el portal."
                 )
             else:
-                _ret_out_dir = Path(_ret_clean).expanduser()
+                _ret_out_dir = (
+                    Path(_ret_clean).expanduser()
+                    if _ret_ret_ok
+                    else Path(_ret_fact_clean).expanduser()
+                )
                 _ret_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 _ret_excel = _ret_out_dir / (
                     f"Retenciones_vs_Facturas_{_ret_ts}.xlsx"
@@ -6127,6 +6148,13 @@ with tab2:
                     "solo los agentes de retención retienen, y la factura no "
                     "trae ningún campo que diga si tu contraparte lo es. Es la "
                     "hoja **Facturas sin retención** del Excel."
+                )
+            if _ret_result.get("retenciones_descargadas"):
+                st.caption(
+                    f"Se bajaron {_ret_result['retenciones_descargadas']} "
+                    "retención(es) del portal para completar el período "
+                    f"**{_ret_result.get('retenciones_periodo', '')}** "
+                    "(incluye el mes siguiente, por el plazo legal para emitirlas)."
                 )
             if _ret_result.get("sin_retencion_reciente"):
                 st.info(

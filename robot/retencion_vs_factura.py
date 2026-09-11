@@ -1945,6 +1945,223 @@ NIVEL_NUMERO_FECHA = "RUC + numero + fecha"
 NIVEL_NUMERO = "RUC + numero"
 
 
+
+def _origen_retenciones(sentido: str) -> str:
+    """Modulo del portal donde vive la RETENCION de cada sentido.
+
+    Es el espejo de `_origen_facturas`: si la retencion la emiti yo esta en
+    Emitidos, y si me la emitieron a mi esta en Recibidos.
+    """
+    return "Emitidos" if _normalizar_sentido(sentido) == SENTIDO_EMITIDAS else "Recibidos"
+
+
+def _meses_entre(desde: datetime, hasta: datetime) -> list[tuple[int, int]]:
+    """Todos los (anio, mes) del intervalo, extremos incluidos."""
+    meses: list[tuple[int, int]] = []
+    anio, mes = desde.year, desde.month
+    while (anio, mes) <= (hasta.year, hasta.month):
+        meses.append((anio, mes))
+        mes += 1
+        if mes > 12:
+            mes, anio = 1, anio + 1
+    return meses
+
+
+def descargar_retenciones(
+    *,
+    ruc: str,
+    clave: str,
+    destino: Path,
+    periodos: Iterable[tuple[int, int]],
+    sentido: str = SENTIDO_EMITIDAS,
+    progress: Optional[Callable[[str], None]] = None,
+) -> list[dict]:
+    """Baja del portal los comprobantes de retencion de los meses indicados.
+
+    A diferencia de las facturas, aca NO se puede usar el modo rapido. El
+    listado del portal es una lista plana -- clave, fechas e importes -- que no
+    trae el documento sustento, y sin el no hay forma de saber a que factura
+    apunta cada retencion, que es todo el sentido del cruce. Hay que bajar el
+    comprobante entero y abrirlo.
+
+    El formato depende del modulo y no es un detalle: en Recibidos el XML sale
+    del enlace de la propia tabla y esta siempre disponible; en Emitidos sale
+    del WS publico, que deja de servirlo al mes, asi que ahi se baja el PDF y
+    se lee el RIDE.
+    """
+    from robot.downloader import descargar_sri
+
+    sentido = _normalizar_sentido(sentido)
+    origen = _origen_retenciones(sentido)
+    # Recibidos: el XML cuelga de la tabla y no caduca. Emitidos: el XML sale
+    # del WS con ventana de ~30 dias, asi que lo unico confiable es el PDF.
+    formatos = ["XML"] if origen == "Recibidos" else ["PDF"]
+    ruc_limpio = re.sub(r"\D", "", str(ruc or ""))
+    destino_ruc = Path(destino) / ruc_limpio if ruc_limpio else Path(destino)
+
+    def _emit(msg: str) -> None:
+        if progress:
+            try:
+                progress(msg)
+            except Exception:
+                pass
+        logger.info(msg)
+
+    por_anio: dict[int, list[int]] = {}
+    for anio, mes in periodos:
+        por_anio.setdefault(anio, []).append(mes)
+
+    resultados = []
+    for anio, meses in sorted(por_anio.items()):
+        meses = sorted(set(meses))
+        inicio, fin = min(meses), max(meses)
+        nombres = ", ".join(_MESES[m] for m in meses)
+        if origen == "Emitidos":
+            # Emitidos filtra por UN dia: un mes son ~30 consultas, y encima
+            # con descarga de PDF en cada fila. Conviene decirlo antes de
+            # empezar y no despues de diez minutos de silencio.
+            dias = sum(calendar.monthrange(anio, m)[1] for m in meses)
+            _emit(
+                f"Bajando retenciones emitidas de {nombres} {anio} en PDF. "
+                f"Emitidos filtra por dia: son {dias} consultas y puede tardar "
+                "varios minutos."
+            )
+        else:
+            _emit(
+                f"Bajando retenciones recibidas de {nombres} {anio} en XML "
+                "(una consulta por mes)."
+            )
+        resultados.append(
+            descargar_sri(
+                ruc=ruc,
+                clave=clave,
+                anio=anio,
+                mes=inicio,
+                mes_fin=fin if fin > inicio else None,
+                dia=0,
+                tipo="Comprobante de Retencion",
+                formatos=formatos,
+                destino=destino_ruc,
+                origen=origen,
+                estado_emitidos="Autorizados" if origen == "Emitidos" else None,
+            )
+        )
+    return resultados
+
+
+def _fusionar_retenciones(base: list[dict], extra: list[dict]) -> list[dict]:
+    """Suma las retenciones recien bajadas sin repetir las que ya estaban."""
+
+    def _huella(ret: dict) -> str:
+        clave = re.sub(r"\D", "", str(ret.get("clave_acceso") or ""))
+        if len(clave) == 49:
+            return f"clave|{clave}"
+        return "num|" + _norm(ret.get("numero"))
+
+    vistos = {_huella(r) for r in base}
+    salida = list(base)
+    for ret in extra:
+        huella = _huella(ret)
+        if huella in vistos:
+            continue
+        vistos.add(huella)
+        salida.append(ret)
+    return salida
+
+
+def completar_retenciones_faltantes(
+    *,
+    retenciones: list[dict],
+    carpetas_facturas: Optional[Iterable[str | Path]],
+    ruc: str,
+    clave: str,
+    destino_descargas: Optional[str | Path],
+    sentido: str,
+    resumen: dict,
+    emit: Callable[[str], None],
+    cancelado: Callable[[], bool],
+) -> list[dict]:
+    """Trae del portal las retenciones de los meses que las facturas exigen.
+
+    Yendo de la factura a la retencion, una factura de un mes sin retenciones
+    descargadas no es una factura no retenida: es una factura sobre la que no
+    se sabe nada. Darla por no retenida seria una conclusion falsa, asi que se
+    bajan las retenciones que falten antes de emitir el veredicto.
+
+    El periodo sale de las facturas y se estira `DIAS_MARGEN_RETENCION` hacia
+    ADELANTE: la retencion se emite despues de la factura, hasta 5 dias
+    habiles, asi que las de las facturas del final del periodo caen en el mes
+    siguiente. Sin ese corrimiento serian justo las que se pierden.
+    """
+    rutas = [Path(c).expanduser() for c in (carpetas_facturas or [])]
+    if not rutas:
+        return retenciones
+
+    _periodos_fact, desde, hasta = _periodos_desde_facturas(rutas)
+    if not desde or not hasta:
+        return retenciones
+
+    hasta_ret = hasta + timedelta(days=DIAS_MARGEN_RETENCION)
+    necesarios = _meses_entre(desde, hasta_ret)
+    resumen["retenciones_periodo"] = (
+        f"{_MESES[desde.month]} {desde.year} - {_MESES[hasta_ret.month]} {hasta_ret.year}"
+    )
+
+    en_disco = {
+        (f.year, f.month)
+        for f in (_parse_fecha(r.get("fecha_emision")) for r in retenciones)
+        if f
+    }
+    faltantes = [per for per in necesarios if per not in en_disco]
+    if not faltantes:
+        emit(
+            "Las retenciones descargadas ya cubren todos los meses que las "
+            f"facturas exigen ({resumen['retenciones_periodo']})."
+        )
+        return retenciones
+
+    nombres = ", ".join(f"{_MESES[m]} {a}" for a, m in faltantes)
+    emit(
+        f"Faltan las retenciones de: {nombres}. Se piden al portal -- sin "
+        "ellas, las facturas de esos meses no se pueden dar por no retenidas."
+    )
+    if cancelado():
+        return retenciones
+
+    base_destino = Path(
+        destino_descargas or (rutas[0].parent / "_retenciones_descargadas")
+    ).expanduser()
+    try:
+        descargar_retenciones(
+            ruc=ruc,
+            clave=clave,
+            destino=base_destino,
+            periodos=faltantes,
+            sentido=sentido,
+            progress=emit,
+        )
+    except Exception as err:
+        logger.warning(f"Fallo la descarga de retenciones: {err}")
+        resumen["portal_error"] = str(err)
+        emit(
+            f"No se pudieron bajar las retenciones faltantes ({err}). Las "
+            "facturas de esos meses van a salir sin veredicto confiable."
+        )
+
+    ruc_limpio = re.sub(r"\D", "", str(ruc or ""))
+    carpeta_bajada = base_destino / ruc_limpio if ruc_limpio else base_destino
+    bajadas = cargar_retenciones(carpeta_bajada)
+    if bajadas:
+        antes = len(retenciones)
+        retenciones = _fusionar_retenciones(retenciones, bajadas)
+        nuevas = len(retenciones) - antes
+        resumen["retenciones_descargadas"] = nuevas
+        emit(f"{nuevas} retencion(es) nueva(s) desde el portal.")
+    else:
+        emit("El portal no devolvio ninguna retencion para esos meses.")
+    return retenciones
+
+
 def _indexar_retenciones(retenciones: list[dict]) -> dict[str, list[dict]]:
     """Indexa las retenciones por la factura que dicen sustentar.
 
@@ -2281,6 +2498,10 @@ def generar_reporte_facturas(
         # deduce. Por eso hay que mostrarselo, o el alcance del reporte termina
         # siendo un efecto secundario de que bajo y no una decision.
         "rango_facturas": "",
+        # Meses de retencion que el periodo de facturas exige, ya con el
+        # corrimiento del plazo legal, y cuantas se bajaron para completarlos.
+        "retenciones_periodo": "",
+        "retenciones_descargadas": 0,
         "meses_sin_datos": [],
         "portal_error": "",
         "excel_path": "",
@@ -2291,23 +2512,43 @@ def generar_reporte_facturas(
     origen_facturas = _origen_facturas(sentido)
     resumen["sentido"] = sentido
 
-    carpeta = Path(carpeta_retenciones).expanduser()
-    if not carpeta.is_dir():
-        resumen["message"] = f"La carpeta de retenciones no existe: {carpeta}"
-        return resumen
+    carpeta = Path(carpeta_retenciones).expanduser() if carpeta_retenciones else None
 
     relacion = "ventas" if sentido == SENTIDO_RECIBIDAS else "compras"
     _emit(f"Facturas de {origen_facturas} ({relacion}) contra retenciones {sentido}.")
-    _emit("Leyendo comprobantes de retencion...")
-    retenciones = cargar_retenciones(carpeta)
+    if carpeta and carpeta.is_dir():
+        _emit("Leyendo comprobantes de retencion...")
+        retenciones = cargar_retenciones(carpeta)
+        _emit(f"{len(retenciones)} retencion(es) en disco.")
+    else:
+        retenciones = []
+        _emit("Sin carpeta de retenciones en disco.")
+
+    # Las facturas mandan: si cubren meses sin retenciones descargadas, esas
+    # facturas no son "no retenidas" sino desconocidas. Se piden al portal antes
+    # de emitir un veredicto que seria falso.
+    if ruc and clave:
+        retenciones = completar_retenciones_faltantes(
+            retenciones=retenciones,
+            carpetas_facturas=carpetas_facturas,
+            ruc=ruc,
+            clave=clave,
+            destino_descargas=destino_descargas,
+            sentido=sentido,
+            resumen=resumen,
+            emit=_emit,
+            cancelado=_cancelado,
+        )
+
     resumen["total_retenciones"] = len(retenciones)
     if not retenciones:
         resumen["message"] = (
-            "No se encontraron comprobantes de retencion legibles en la carpeta. "
-            "Sin ellos no hay contra que cruzar las facturas."
+            "No hay comprobantes de retencion: ni en la carpeta indicada ni en "
+            "el portal para los meses que cubren las facturas. Sin ellos no hay "
+            "contra que cruzar."
         )
         return resumen
-    _emit(f"{len(retenciones)} retencion(es) leida(s).")
+    _emit(f"{len(retenciones)} retencion(es) en total.")
 
     if _cancelado():
         resumen["message"] = "Cancelado por el usuario."
