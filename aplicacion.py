@@ -5821,6 +5821,8 @@ with tab2:
         _ret_sentido = (
             "recibidas" if _ret_sentido_label.startswith("Recibidas") else "emitidas"
         )
+        # Donde vive la factura de cada sentido, para nombrarla en los campos.
+        _ret_origen_facturas = "Emitidos" if _ret_sentido == "recibidas" else "Recibidos"
         # El costo de la consulta depende de las dos elecciones. Emitidos
         # filtra por UN dia, asi que barrer el mes entero -lo que exige la
         # direccion inversa- son ~30 consultas en vez de las pocas fechas que
@@ -5875,6 +5877,34 @@ with tab2:
                 st.rerun()
             elif _err:
                 st.warning(_err)
+
+        # Yendo de la factura a la retencion, el periodo del reporte sale de las
+        # facturas que el usuario ya tiene. Sin esta carpeta el periodo se
+        # deduce de las retenciones, y entonces un mes sin ninguna retencion
+        # queda invisible -- justo el mes donde ninguna factura fue retenida.
+        _ret_facturas_dir = ""
+        if _ret_direccion == "inverso":
+            _ret_facturas_dir = st.text_input(
+                f"Carpeta con Facturas de {_ret_origen_facturas} ya descargadas "
+                "(recomendado)",
+                key="ret_vs_fact_carpeta_facturas",
+                help=(
+                    "Define el período del reporte: se analizan los meses que "
+                    "cubren esas facturas. Si la dejas vacía, el período sale "
+                    "de las retenciones y los meses sin ninguna retención no se "
+                    "revisan. Acepta XML o los Excel del modo rápido."
+                ),
+            )
+            if st.button(
+                "Seleccionar carpeta de Facturas",
+                key="btn_ret_vs_fact_select_fact_dir",
+            ):
+                _sel_f, _err_f = _select_directory_dialog(_ret_facturas_dir or None)
+                if _sel_f:
+                    st.session_state["ret_vs_fact_carpeta_facturas"] = _sel_f
+                    st.rerun()
+                elif _err_f:
+                    st.warning(_err_f)
 
         # Las facturas se buscan siempre en el portal: sin credenciales el
         # reporte quedaria sin la contraparte de cada retencion.
@@ -5994,6 +6024,11 @@ with tab2:
                         _resultado_ret = _ret_funcion(
                             carpeta_retenciones=_ret_clean,
                             salida_excel=_ret_excel,
+                            carpetas_facturas=(
+                                [_ret_facturas_dir.strip()]
+                                if str(_ret_facturas_dir or "").strip()
+                                else None
+                            ),
                             sentido=_ret_sentido,
                             ruc=_ret_ruc_val,
                             clave=_ret_clave_val,
@@ -6068,6 +6103,21 @@ with tab2:
 
             # Pegado a las tarjetas: explica el numero ambar del reporte
             # inverso antes de que se lea como una acusacion.
+            # El periodo no lo eligio el usuario: se dedujo. Hay que decirselo,
+            # o el alcance del reporte queda siendo un efecto secundario de que
+            # carpetas cargo, y una factura fuera de rango parece no existir.
+            if _ret_result.get("rango_facturas"):
+                st.caption(
+                    f"Período analizado: **{_ret_result['rango_facturas']}**, "
+                    "deducido de las facturas que indicaste. Si te falta un mes, "
+                    "descárgalo y vuelve a generar el reporte."
+                )
+            elif _ret_result.get("direccion") == "inverso":
+                st.warning(
+                    "No indicaste carpeta de facturas, así que el período salió "
+                    "de las retenciones: **los meses sin ninguna retención no se "
+                    "revisaron**, y son justo donde ninguna factura fue retenida."
+                )
             if _ret_result.get("direccion") == "inverso" and _ret_result.get(
                 "sin_retencion"
             ):

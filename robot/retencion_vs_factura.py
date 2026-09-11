@@ -981,6 +981,33 @@ def construir_indice_facturas(
     return indice
 
 
+def _periodos_desde_facturas(
+    rutas: Iterable[Path],
+) -> tuple[list[tuple[int, int]], Optional[datetime], Optional[datetime]]:
+    """Meses y rango que cubren las facturas que el usuario ya tiene bajadas.
+
+    Hay que leerlas ANTES de decidir que pedirle al portal, porque en la
+    direccion inversa son ellas las que definen el periodo. Se indexan dos veces
+    -- aca y despues junto con lo que traiga el portal -- y eso es barato frente
+    a la alternativa: pedirle el rango al usuario produce rangos equivocados,
+    porque nadie piensa en el plazo legal que separa a la factura de su
+    retencion.
+
+    Devuelve `([], None, None)` si no hay ninguna factura legible.
+    """
+    fechas: list[datetime] = []
+    for entrada, factura in construir_indice_facturas(rutas).items():
+        # Cada factura entra dos veces en el indice; la de clave es la copia.
+        if entrada.startswith("clave|"):
+            continue
+        fecha = _parse_fecha(factura.get("fecha_emision"))
+        if fecha:
+            fechas.append(fecha)
+    if not fechas:
+        return [], None, None
+    return sorted({(f.year, f.month) for f in fechas}), min(fechas), max(fechas)
+
+
 def descargar_listados_facturas(
     *,
     ruc: str,
@@ -1447,6 +1474,38 @@ def _preparar_indice_facturas(
             "buscan en el portal."
         )
 
+    # Las carpetas explicitas se resuelven ANTES del periodo: yendo de la
+    # factura a la retencion son ellas las que lo definen.
+    rutas = [Path(c).expanduser() for c in (carpetas_facturas or [])]
+
+    # En la direccion inversa el universo son las FACTURAS, asi que el periodo
+    # tiene que salir de ellas. Sacarlo de las retenciones -- como se hacia --
+    # dejaba ciego cualquier mes sin una sola retencion, y las facturas de ese
+    # mes son TODAS "sin retencion": exactamente el hallazgo que se busca.
+    if mes_completo and rutas:
+        periodos_disco, desde_disco, hasta_disco = _periodos_desde_facturas(rutas)
+        if periodos_disco:
+            nuevos = [per for per in periodos_disco if per not in periodos]
+            periodos = sorted(set(periodos) | set(periodos_disco))
+            resumen["rango_facturas"] = (
+                f"{desde_disco:%d/%m/%Y} - {hasta_disco:%d/%m/%Y}"
+            )
+            mensaje = (
+                f"Facturas en disco: del {desde_disco:%d/%m/%Y} al "
+                f"{hasta_disco:%d/%m/%Y}. El periodo del reporte sale de ellas."
+            )
+            if nuevos:
+                mensaje += (
+                    f" Aportan {len(nuevos)} mes(es) que ninguna retencion "
+                    "nombra, que antes quedaban fuera del reporte."
+                )
+            emit(mensaje)
+        else:
+            emit(
+                "No se pudo leer ninguna factura de las carpetas indicadas; el "
+                "periodo se deduce de las retenciones, como antes."
+            )
+
     # Fechas que se le piden al portal. Con `mes_completo` se piden todos los
     # dias de cada mes involucrado, no solo los que las retenciones nombran.
     fechas_a_pedir = fechas_sustento
@@ -1456,9 +1515,6 @@ def _preparar_indice_facturas(
             for anio, mes in periodos
             for dia in range(1, calendar.monthrange(anio, mes)[1] + 1)
         ]
-
-    # Carpetas de facturas: explicitas, o deducidas de las fechas de sustento.
-    rutas = [Path(c).expanduser() for c in (carpetas_facturas or [])]
 
     # Si hay credenciales, se trae el listado del portal. Una consulta por mes
     # -no por factura- para minimizar la exposicion al captcha.
@@ -2221,6 +2277,10 @@ def generar_reporte_facturas(
         "retenciones_sin_factura": 0,
         "con_discrepancia": 0,
         "coincidencia_clave": 0,
+        # Rango que cubren las facturas en disco. El usuario no lo elige: se
+        # deduce. Por eso hay que mostrarselo, o el alcance del reporte termina
+        # siendo un efecto secundario de que bajo y no una decision.
+        "rango_facturas": "",
         "meses_sin_datos": [],
         "portal_error": "",
         "excel_path": "",
