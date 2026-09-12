@@ -5902,6 +5902,15 @@ with tab2:
                     "revisan. Acepta XML o los Excel del modo rápido."
                 ),
             )
+            st.checkbox(
+                "Volver a consultar el portal aunque ya tenga las facturas",
+                key="ret_vs_fact_refrescar",
+                help=(
+                    "Por defecto no se vuelven a pedir las fechas que ya tienen "
+                    "facturas en disco, que es lo que más tarda cuando están en "
+                    "Emitidos. Marca esto si esa descarga pudo quedar incompleta."
+                ),
+            )
             if st.button(
                 "Seleccionar carpeta de Facturas",
                 key="btn_ret_vs_fact_select_fact_dir",
@@ -6051,6 +6060,9 @@ with tab2:
                                 else None
                             ),
                             sentido=_ret_sentido,
+                            refrescar_portal=bool(
+                                st.session_state.get("ret_vs_fact_refrescar")
+                            ),
                             ruc=_ret_ruc_val,
                             clave=_ret_clave_val,
                             destino_descargas=(
@@ -6142,13 +6154,25 @@ with tab2:
             if _ret_result.get("direccion") == "inverso" and _ret_result.get(
                 "sin_retencion"
             ):
-                st.warning(
-                    f"{_ret_result['sin_retencion']} factura(s) sin retención "
-                    "asociada. **Eso no significa que falte una retención**: "
-                    "solo los agentes de retención retienen, y la factura no "
-                    "trae ningún campo que diga si tu contraparte lo es. Es la "
-                    "hoja **Facturas sin retención** del Excel."
-                )
+                # Quien tenia que retener cambia el peso del hallazgo: en
+                # compras el agente de retencion es el propio usuario.
+                if _ret_result.get("sentido") == "emitidas":
+                    st.warning(
+                        f"{_ret_result['sin_retencion']} factura(s) de **compra** "
+                        "sin retención emitida. Si eres agente de retención, "
+                        "revísalas una por una: puede ser correcto —hay "
+                        "proveedores y bienes que no llevan retención— pero aquí "
+                        "el que debía emitirla eres tú. Es la hoja **Facturas "
+                        "sin retención** del Excel."
+                    )
+                else:
+                    st.warning(
+                        f"{_ret_result['sin_retencion']} factura(s) de **venta** "
+                        "sin retención asociada. **Eso no significa que falte una "
+                        "retención**: solo los agentes de retención retienen, y "
+                        "la factura no trae ningún campo que diga si tu cliente "
+                        "lo es. Es la hoja **Facturas sin retención** del Excel."
+                    )
             if _ret_result.get("retenciones_descargadas"):
                 st.caption(
                     f"Se bajaron {_ret_result['retenciones_descargadas']} "

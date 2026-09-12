@@ -981,19 +981,20 @@ def construir_indice_facturas(
     return indice
 
 
-def _periodos_desde_facturas(
-    rutas: Iterable[Path],
-) -> tuple[list[tuple[int, int]], Optional[datetime], Optional[datetime]]:
-    """Meses y rango que cubren las facturas que el usuario ya tiene bajadas.
+def _cobertura_facturas(rutas: Iterable[Path]) -> dict:
+    """Que periodo y que dias cubren las facturas que el usuario ya tiene.
 
-    Hay que leerlas ANTES de decidir que pedirle al portal, porque en la
-    direccion inversa son ellas las que definen el periodo. Se indexan dos veces
-    -- aca y despues junto con lo que traiga el portal -- y eso es barato frente
-    a la alternativa: pedirle el rango al usuario produce rangos equivocados,
-    porque nadie piensa en el plazo legal que separa a la factura de su
-    retencion.
+    Hay que leerlas ANTES de decidir que pedirle al portal, y sirve para dos
+    cosas distintas:
 
-    Devuelve `([], None, None)` si no hay ninguna factura legible.
+    - El periodo del reporte en la direccion inversa. Pedirle el rango al
+      usuario daria rangos equivocados, porque nadie piensa en el plazo legal
+      que separa a la factura de su retencion.
+    - Saber que fechas NO hace falta volver a consultar. En Emitidos, que
+      filtra por dia, eso es la diferencia entre 90 consultas y ninguna.
+
+    Devuelve `periodos`, `desde`, `hasta` y `dias` -- este ultimo con los
+    (anio, mes, dia) que ya tienen al menos una factura en disco.
     """
     fechas: list[datetime] = []
     for entrada, factura in construir_indice_facturas(rutas).items():
@@ -1004,8 +1005,13 @@ def _periodos_desde_facturas(
         if fecha:
             fechas.append(fecha)
     if not fechas:
-        return [], None, None
-    return sorted({(f.year, f.month) for f in fechas}), min(fechas), max(fechas)
+        return {"periodos": [], "desde": None, "hasta": None, "dias": set()}
+    return {
+        "periodos": sorted({(f.year, f.month) for f in fechas}),
+        "desde": min(fechas),
+        "hasta": max(fechas),
+        "dias": {(f.year, f.month, f.day) for f in fechas},
+    }
 
 
 def descargar_listados_facturas(
@@ -1437,6 +1443,7 @@ def _preparar_indice_facturas(
     emit: Callable[[str], None],
     cancelado: Callable[[], bool],
     mes_completo: bool = False,
+    refrescar_portal: bool = False,
 ) -> Optional[dict]:
     """Deja armado el indice de facturas contra el que se cruzan las retenciones.
 
@@ -1482,8 +1489,13 @@ def _preparar_indice_facturas(
     # tiene que salir de ellas. Sacarlo de las retenciones -- como se hacia --
     # dejaba ciego cualquier mes sin una sola retencion, y las facturas de ese
     # mes son TODAS "sin retencion": exactamente el hallazgo que se busca.
-    if mes_completo and rutas:
-        periodos_disco, desde_disco, hasta_disco = _periodos_desde_facturas(rutas)
+    # Lo que cubren las facturas que el usuario ya tiene. Sirve para el periodo
+    # del reporte y para no volver a pedirle al portal lo que ya esta bajado.
+    cobertura = _cobertura_facturas(rutas) if rutas else {}
+
+    if mes_completo and cobertura.get("periodos"):
+        periodos_disco = cobertura["periodos"]
+        desde_disco, hasta_disco = cobertura["desde"], cobertura["hasta"]
         if periodos_disco:
             nuevos = [per for per in periodos_disco if per not in periodos]
             periodos = sorted(set(periodos) | set(periodos_disco))
@@ -1500,11 +1512,11 @@ def _preparar_indice_facturas(
                     "nombra, que antes quedaban fuera del reporte."
                 )
             emit(mensaje)
-        else:
-            emit(
-                "No se pudo leer ninguna factura de las carpetas indicadas; el "
-                "periodo se deduce de las retenciones, como antes."
-            )
+    elif mes_completo and rutas:
+        emit(
+            "No se pudo leer ninguna factura de las carpetas indicadas; el "
+            "periodo se deduce de las retenciones, como antes."
+        )
 
     # Fechas que se le piden al portal. Con `mes_completo` se piden todos los
     # dias de cada mes involucrado, no solo los que las retenciones nombran.
@@ -1516,11 +1528,37 @@ def _preparar_indice_facturas(
             for dia in range(1, calendar.monthrange(anio, mes)[1] + 1)
         ]
 
+    # Lo que ya esta en disco no se vuelve a pedir. Es el grueso del costo
+    # cuando las facturas viven en Emitidos, que consulta dia por dia: un
+    # trimestre son ~90 consultas que se ahorran enteras. Se hace solo si el
+    # usuario senalo la carpeta -- senalarla es afirmar "estas son mis
+    # facturas" -- y se puede forzar el refresco si sospecha que esa descarga
+    # quedo incompleta.
+    if rutas and not refrescar_portal and cobertura.get("dias"):
+        _antes = len([f for f in fechas_a_pedir if f])
+        fechas_a_pedir = [
+            f
+            for f in fechas_a_pedir
+            if f and (f.year, f.month, f.day) not in cobertura["dias"]
+        ]
+        _omitidas = _antes - len(fechas_a_pedir)
+        if _omitidas:
+            emit(
+                f"{_omitidas} de {_antes} fecha(s) ya tienen facturas en disco y "
+                "no se vuelven a consultar. Si esa descarga pudo quedar "
+                "incompleta, marca 'volver a consultar el portal'."
+            )
+
     # Si hay credenciales, se trae el listado del portal. Una consulta por mes
     # -no por factura- para minimizar la exposicion al captcha.
     if ruc and clave:
         if not periodos:
             emit("No se pudo deducir el mes de ninguna factura sustento.")
+        elif not fechas_a_pedir:
+            emit(
+                "Todas las fechas ya estan cubiertas por las facturas en disco: "
+                "no hace falta consultar el portal."
+            )
         else:
             carpeta_descarga = Path(
                 destino_descargas
@@ -1673,6 +1711,7 @@ def generar_reporte_retenciones(
     clave: Optional[str] = None,
     destino_descargas: Optional[str | Path] = None,
     sentido: str = SENTIDO_EMITIDAS,
+    refrescar_portal: bool = False,
     cancel_event: Optional[threading.Event] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> dict:
@@ -2097,7 +2136,8 @@ def completar_retenciones_faltantes(
     if not rutas:
         return retenciones
 
-    _periodos_fact, desde, hasta = _periodos_desde_facturas(rutas)
+    cobertura = _cobertura_facturas(rutas)
+    desde, hasta = cobertura["desde"], cobertura["hasta"]
     if not desde or not hasta:
         return retenciones
 
@@ -2455,6 +2495,7 @@ def generar_reporte_facturas(
     clave: Optional[str] = None,
     destino_descargas: Optional[str | Path] = None,
     sentido: str = SENTIDO_EMITIDAS,
+    refrescar_portal: bool = False,
     cancel_event: Optional[threading.Event] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> dict:
@@ -2567,6 +2608,7 @@ def generar_reporte_facturas(
         emit=_emit,
         cancelado=_cancelado,
         mes_completo=True,
+        refrescar_portal=refrescar_portal,
     )
     if preparado is None:
         resumen["message"] = "Cancelado por el usuario."
@@ -2631,15 +2673,28 @@ def generar_reporte_facturas(
                 resumen["sin_retencion_reciente"] += 1
                 observacion = (
                     f"Sin retencion, pero la factura es posterior al "
-                    f"{corte_confiable:%d/%m/%Y} y la ultima retencion descargada "
-                    f"es del {ultima_retencion:%d/%m/%Y}. Todavia esta dentro del "
-                    "plazo para emitirla: descarga las retenciones del mes "
-                    "siguiente antes de darla por no retenida."
+                    f"{corte_confiable:%d/%m/%Y} y la ultima retencion conocida "
+                    f"es del {ultima_retencion:%d/%m/%Y}. Todavia corre el plazo "
+                    "para emitirla, asi que no se puede dar por no retenida."
+                )
+            elif sentido == SENTIDO_EMITIDAS:
+                # Facturas de COMPRA: el agente de retencion es el propio
+                # usuario. Decirle aca "solo los agentes de retencion retienen"
+                # lo tranquiliza justo cuando deberia revisar, porque el que
+                # tenia que emitirla es el.
+                observacion = (
+                    "Ninguna retencion tuya nombra esta factura de compra. Si "
+                    "eres agente de retencion, revisala: puede ser correcto -- "
+                    "hay proveedores y bienes que no llevan retencion -- pero "
+                    "aca el que debia emitirla eres tu."
                 )
             else:
+                # Facturas de VENTA: retiene la contraparte. La ausencia no es
+                # un incumplimiento del usuario y el texto no debe sugerirlo.
                 observacion = (
-                    "Ninguna de las retenciones de la carpeta nombra esta factura. "
-                    "Puede ser correcto: solo los agentes de retencion retienen."
+                    "Ninguna retencion recibida nombra esta factura de venta. "
+                    "Puede ser correcto: solo los agentes de retencion retienen, "
+                    "y la factura no dice si tu cliente lo es."
                 )
             filas.append(
                 _fila_factura(factura, None, None, "Sin retencion asociada", observacion)
