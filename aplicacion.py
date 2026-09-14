@@ -5891,6 +5891,14 @@ with tab2:
         # queda invisible -- justo el mes donde ninguna factura fue retenida.
         _ret_facturas_dir = ""
         if _ret_direccion == "inverso":
+            # El selector de carpeta no puede escribir la key del widget: una vez
+            # instanciado, Streamlit rechaza la asignacion. Se deja en una clave
+            # aparte y se vuelca aca, ANTES de crearlo. Mismo patron que usa el
+            # campo de retenciones unas lineas mas arriba.
+            if "_ret_vs_fact_fact_pending" in st.session_state:
+                st.session_state["ret_vs_fact_carpeta_facturas"] = (
+                    st.session_state.pop("_ret_vs_fact_fact_pending")
+                )
             _ret_facturas_dir = st.text_input(
                 f"Carpeta con Facturas de {_ret_origen_facturas} ya descargadas "
                 "(recomendado)",
@@ -5917,7 +5925,7 @@ with tab2:
             ):
                 _sel_f, _err_f = _select_directory_dialog(_ret_facturas_dir or None)
                 if _sel_f:
-                    st.session_state["ret_vs_fact_carpeta_facturas"] = _sel_f
+                    st.session_state["_ret_vs_fact_fact_pending"] = _sel_f
                     st.rerun()
                 elif _err_f:
                     st.warning(_err_f)
