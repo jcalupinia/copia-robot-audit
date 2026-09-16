@@ -2379,9 +2379,36 @@ def _verificar_correspondencia(
 
     # Lo que la retencion afirma de la factura contra lo que dice el SRI. Solo
     # existe si la retencion vino en XML.
-    _chequear(
-        "importe total", documento.get("importe_total"), factura.get("importe_total")
-    )
+    #
+    # Antes de darlo por diferencia hay que descartar un patron muy frecuente:
+    # el emisor carga en `importeTotal` lo que EFECTIVAMENTE PAGO -- el total
+    # menos lo que retuvo -- en vez del total de la factura. Eso no invalida
+    # nada: las bases y los valores retenidos siguen siendo los correctos, y es
+    # el unico campo mal. Mezclarlo con una diferencia de verdad obliga a
+    # revisar a mano filas que estan bien.
+    neto_en_vez_de_total = False
+    _total_ret = _a_float(documento.get("importe_total"))
+    _total_fac = _a_float(factura.get("importe_total"))
+    if _total_ret is not None and _total_fac is not None:
+        comparadas += 1
+        if abs(_total_ret - _total_fac) > TOLERANCIA_IMPORTE:
+            _retenido = sum(
+                _a_float(linea.get("valor_retenido")) or 0.0
+                for linea in documento.get("lineas", [])
+            )
+            if _retenido and abs(_total_ret + _retenido - _total_fac) <= TOLERANCIA_IMPORTE:
+                neto_en_vez_de_total = True
+                detalles.append(
+                    f"importe total: la retencion declara {_total_ret:.2f}, que es "
+                    f"el NETO A PAGAR ({_total_fac:.2f} - {_retenido:.2f} retenido). "
+                    "El emisor cargo el valor pagado en vez del total de la "
+                    "factura; las bases y los valores retenidos estan bien."
+                )
+            else:
+                difiere = True
+                detalles.append(
+                    f"importe total: {_total_ret:.2f} vs {_total_fac:.2f}"
+                )
     _chequear(
         "subtotal",
         documento.get("total_sin_impuestos"),
@@ -2414,12 +2441,21 @@ def _verificar_correspondencia(
                 f"{subtotal:.2f}"
             )
 
+    # Los matices no son discrepancias: la fila cuadra, pero con una
+    # particularidad que conviene nombrar para no tener que deducirla del
+    # detalle. Solo "Difiere" cuenta como importes que no cuadran.
+    matices = []
+    if neto_en_vez_de_total:
+        matices.append("total declarado = neto pagado")
+    if parcial:
+        matices.append("base Renta parcial")
+
     if not comparadas:
         veredicto = "Sin datos para verificar"
     elif difiere:
         veredicto = "Difiere"
-    elif parcial:
-        veredicto = "Coincide (base Renta parcial)"
+    elif matices:
+        veredicto = "Coincide (" + ", ".join(matices) + ")"
     else:
         veredicto = "Coincide"
 
