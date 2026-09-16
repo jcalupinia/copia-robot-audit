@@ -1170,13 +1170,19 @@ def descargar_listados_facturas(
     return resultados
 
 
-def inferir_base_ruc(carpeta: Path) -> Optional[Path]:
+def inferir_base_ruc(carpeta: Optional[Path]) -> Optional[Path]:
     """Sube por el arbol buscando la carpeta [RUC] que contiene 'Recibidos'.
 
     Las descargas quedan como [base]/[RUC]/[Emitidos|Recibidos]/[Tipo]/[anio]/
     [Mes]/[XML|PDF], asi que desde la carpeta de retenciones se puede ubicar
     sola la de facturas recibidas.
+
+    Acepta None: desde que la carpeta de retenciones es opcional hay caminos que
+    llegan sin nada que deducir, y reventar ahi con "expected str, bytes or
+    os.PathLike object" no le dice nada a nadie.
     """
+    if not carpeta:
+        return None
     carpeta = Path(carpeta).resolve()
     for candidata in [carpeta, *carpeta.parents]:
         if (candidata / "Recibidos").is_dir() or (candidata / "Emitidos").is_dir():
@@ -1524,8 +1530,13 @@ def _preparar_indice_facturas(
         periodos_disco = cobertura["periodos"]
         desde_disco, hasta_disco = cobertura["desde"], cobertura["hasta"]
         if periodos_disco:
-            nuevos = [per for per in periodos_disco if per not in periodos]
-            periodos = sorted(set(periodos) | set(periodos_disco))
+            # REEMPLAZA, no suma. El universo son las facturas que el usuario
+            # tiene: si se unieran los meses que las retenciones nombran, una
+            # sola retencion de abril que sustenta una factura de marzo
+            # arrastraria marzo entero -- 31 consultas dia por dia en Emitidos --
+            # para responder algo que no se pregunto.
+            fuera = [per for per in periodos if per not in periodos_disco]
+            periodos = periodos_disco
             resumen["rango_facturas"] = (
                 f"{desde_disco:%d/%m/%Y} - {hasta_disco:%d/%m/%Y}"
             )
@@ -1533,10 +1544,11 @@ def _preparar_indice_facturas(
                 f"Facturas en disco: del {desde_disco:%d/%m/%Y} al "
                 f"{hasta_disco:%d/%m/%Y}. El periodo del reporte sale de ellas."
             )
-            if nuevos:
+            if fuera:
                 mensaje += (
-                    f" Aportan {len(nuevos)} mes(es) que ninguna retencion "
-                    "nombra, que antes quedaban fuera del reporte."
+                    f" {len(fuera)} mes(es) que nombran las retenciones quedan "
+                    "fuera del periodo; sus retenciones saldran como 'sin "
+                    "factura'. Agrega esas facturas si te interesan."
                 )
             emit(mensaje)
     elif mes_completo and rutas:
@@ -1566,19 +1578,23 @@ def _preparar_indice_facturas(
     # usuario senalo la carpeta -- senalarla es afirmar "estas son mis
     # facturas" -- y se puede forzar el refresco si sospecha que esa descarga
     # quedo incompleta.
-    if rutas and not refrescar_portal and cobertura.get("dias"):
+    # Se confia por MES y no por dia: un mes tiene facturas en unos pocos dias,
+    # asi que saltear solo esos dejaba pidiendo los otros 20 para que vuelvan
+    # vacios. Senalar la carpeta es afirmar "este mes es el que tengo", y para
+    # dudar de eso esta la casilla de refresco.
+    if rutas and not refrescar_portal and cobertura.get("periodos"):
+        _cubiertos = set(cobertura["periodos"])
         _antes = len([f for f in fechas_a_pedir if f])
         fechas_a_pedir = [
-            f
-            for f in fechas_a_pedir
-            if f and (f.year, f.month, f.day) not in cobertura["dias"]
+            f for f in fechas_a_pedir if f and (f.year, f.month) not in _cubiertos
         ]
         _omitidas = _antes - len(fechas_a_pedir)
         if _omitidas:
+            _meses = ", ".join(f"{_MESES[m]} {a}" for a, m in sorted(_cubiertos))
             emit(
-                f"{_omitidas} de {_antes} fecha(s) ya tienen facturas en disco y "
-                "no se vuelven a consultar. Si esa descarga pudo quedar "
-                "incompleta, marca 'volver a consultar el portal'."
+                f"Ya tienes las facturas de {_meses}: se omiten {_omitidas} de "
+                f"{_antes} consulta(s). Si esa descarga pudo quedar incompleta, "
+                "marca 'volver a consultar el portal'."
             )
 
     # Si hay credenciales, se trae el listado del portal. Una consulta por mes
@@ -1592,9 +1608,11 @@ def _preparar_indice_facturas(
                 "no hace falta consultar el portal."
             )
         else:
+            # En la direccion inversa la carpeta de retenciones puede no
+            # existir, asi que no sirve como ancla: se cae a la de facturas.
+            _ancla = carpeta_retenciones or (rutas[0] if rutas else Path.cwd())
             carpeta_descarga = Path(
-                destino_descargas
-                or (Path(carpeta_retenciones).parent / "_facturas_listado")
+                destino_descargas or (Path(_ancla).parent / "_facturas_listado")
             ).expanduser()
             meses_txt = ", ".join(f"{_MESES[m]} {a}" for a, m in periodos)
             emit(
@@ -1649,10 +1667,15 @@ def _preparar_indice_facturas(
                 rutas.append(carpeta_descarga)
         if cancelado():
             return None
+    # Sin carpeta de retenciones -- legitimo yendo de la factura a la
+    # retencion -- se deduce desde la de facturas, que es la que el usuario si
+    # senalo. Antes se le pasaba None a `inferir_base_ruc` y reventaba con
+    # "expected str, bytes or os.PathLike object, not NoneType".
+    _pista_raiz = carpeta_retenciones or (rutas[0] if rutas else None)
     raiz = (
         Path(base_ruc).expanduser()
         if base_ruc
-        else inferir_base_ruc(carpeta_retenciones)
+        else (inferir_base_ruc(_pista_raiz) if _pista_raiz else None)
     )
     if raiz:
         if not base_ruc:
