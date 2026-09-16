@@ -999,7 +999,9 @@ def construir_indice_facturas(
     return indice
 
 
-def _cobertura_facturas(rutas: Iterable[Path]) -> dict:
+def _cobertura_facturas(
+    rutas: Iterable[Path], ruc_emisor_default: str = ""
+) -> dict:
     """Que periodo y que dias cubren las facturas que el usuario ya tiene.
 
     Hay que leerlas ANTES de decidir que pedirle al portal, y sirve para dos
@@ -1015,7 +1017,7 @@ def _cobertura_facturas(rutas: Iterable[Path]) -> dict:
     (anio, mes, dia) que ya tienen al menos una factura en disco.
     """
     fechas: list[datetime] = []
-    for entrada, factura in construir_indice_facturas(rutas).items():
+    for entrada, factura in construir_indice_facturas(rutas, ruc_emisor_default).items():
         # Cada factura entra dos veces en el indice; la de clave es la copia.
         if entrada.startswith("clave|"):
             continue
@@ -1507,9 +1509,16 @@ def _preparar_indice_facturas(
     # tiene que salir de ellas. Sacarlo de las retenciones -- como se hacia --
     # dejaba ciego cualquier mes sin una sola retencion, y las facturas de ese
     # mes son TODAS "sin retencion": exactamente el hallazgo que se busca.
+    # El respaldo del RUC emisor se resuelve ANTES de leer nada: sin el, un
+    # reporte de modo rapido de Emitidos no aporta una sola factura y el periodo
+    # se deducia de las retenciones sin que nada lo avisara.
+    ruc_emisor_default = _ruc_emisor_de_las_facturas(sentido, retenciones, ruc, emit)
+    if ruc_emisor_default:
+        emit(f"Emisor de las facturas (sujeto retenido): {ruc_emisor_default}")
+
     # Lo que cubren las facturas que el usuario ya tiene. Sirve para el periodo
     # del reporte y para no volver a pedirle al portal lo que ya esta bajado.
-    cobertura = _cobertura_facturas(rutas) if rutas else {}
+    cobertura = _cobertura_facturas(rutas, ruc_emisor_default) if rutas else {}
 
     if mes_completo and cobertura.get("periodos"):
         periodos_disco = cobertura["periodos"]
@@ -1656,29 +1665,6 @@ def _preparar_indice_facturas(
         )
     if rutas:
         emit(f"Indexando facturas de {origen_facturas} en {len(rutas)} carpeta(s)...")
-    # En sentido "recibidas" las facturas las emitio el propio contribuyente, y
-    # el listado de Emitidos no trae columna de RUC emisor -- ahi la columna de
-    # identificacion es la del receptor. Se toma del sujeto retenido, que en ese
-    # sentido es siempre el mismo, y si no de las credenciales.
-    ruc_emisor_default = ""
-    if sentido == SENTIDO_RECIBIDAS:
-        sujetos = {
-            re.sub(r"\D", "", str(r.get("identificacion_sujeto") or ""))
-            for r in retenciones
-        }
-        sujetos.discard("")
-        if len(sujetos) == 1:
-            ruc_emisor_default = sujetos.pop()
-        elif ruc:
-            ruc_emisor_default = re.sub(r"\D", "", str(ruc))
-        if len(sujetos) > 1:
-            emit(
-                f"Ojo: las retenciones nombran {len(sujetos)} sujetos retenidos "
-                "distintos. En retenciones recibidas se esperaria uno solo."
-            )
-        if ruc_emisor_default:
-            emit(f"Emisor de las facturas (sujeto retenido): {ruc_emisor_default}")
-
     indice = construir_indice_facturas(rutas, ruc_emisor_default)
     # Cada factura entra dos veces (por RUC+numero y por clave de acceso), asi
     # que para contar y para los meses cubiertos se usa solo la primera forma.
@@ -2008,6 +1994,42 @@ NIVEL_NUMERO = "RUC + numero"
 
 
 
+def _ruc_emisor_de_las_facturas(
+    sentido: str,
+    retenciones: list[dict],
+    ruc: Optional[str],
+    emit: Optional[Callable[[str], None]] = None,
+) -> str:
+    """RUC que hay que suponerle al emisor cuando el listado no lo trae.
+
+    En sentido "recibidas" las facturas las emitio el propio contribuyente, y el
+    listado de Emitidos no trae columna de RUC emisor: ahi la de identificacion
+    es la del RECEPTOR. Sin este respaldo no se indexa ni una fila, y un reporte
+    de modo rapido de Emitidos se descarta entero -- en silencio.
+
+    Se toma del sujeto retenido, que en ese sentido es siempre el mismo, y si no
+    de las credenciales.
+    """
+    if _normalizar_sentido(sentido) != SENTIDO_RECIBIDAS:
+        return ""
+    sujetos = {
+        re.sub(r"\D", "", str(r.get("identificacion_sujeto") or ""))
+        for r in retenciones
+    }
+    sujetos.discard("")
+    respaldo = ""
+    if len(sujetos) == 1:
+        respaldo = next(iter(sujetos))
+    elif ruc:
+        respaldo = re.sub(r"\D", "", str(ruc))
+    if emit and len(sujetos) > 1:
+        emit(
+            f"Ojo: las retenciones nombran {len(sujetos)} sujetos retenidos "
+            "distintos. En retenciones recibidas se esperaria uno solo."
+        )
+    return respaldo
+
+
 def _origen_retenciones(sentido: str) -> str:
     """Modulo del portal donde vive la RETENCION de cada sentido.
 
@@ -2159,7 +2181,9 @@ def completar_retenciones_faltantes(
     if not rutas:
         return retenciones
 
-    cobertura = _cobertura_facturas(rutas)
+    cobertura = _cobertura_facturas(
+        rutas, _ruc_emisor_de_las_facturas(sentido, retenciones, ruc)
+    )
     desde, hasta = cobertura["desde"], cobertura["hasta"]
     if not desde or not hasta:
         return retenciones
