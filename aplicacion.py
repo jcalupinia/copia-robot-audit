@@ -5805,46 +5805,88 @@ with tab2:
             "inverso" if _ret_direccion_label.startswith("A qué") else "directo"
         )
 
-        _ret_sentido_label = st.radio(
-            "¿Qué retenciones tienes?",
-            [
-                "Emitidas — yo retuve a mi proveedor",
-                "Recibidas — me retuvieron sobre una venta",
-            ],
-            key="ret_vs_fact_sentido",
-            help=(
-                "Define dónde se buscan las facturas. En las emitidas la "
-                "factura la emitió el proveedor, así que está en Recibidos. "
-                "En las recibidas la emitiste tú, así que está en Emitidos."
-            ),
-        )
-        _ret_sentido = (
-            "recibidas" if _ret_sentido_label.startswith("Recibidas") else "emitidas"
-        )
-        # Donde vive la factura de cada sentido, para nombrarla en los campos.
+        # La pregunta va sobre el documento que el usuario TIENE, que cambia con
+        # la direccion: yendo de la retencion a la factura tiene retenciones, y
+        # al reves puede no tener ninguna y solo facturas. Preguntar siempre por
+        # las retenciones obligaba a traducir mentalmente, y esa traduccion se
+        # presta a invertirla.
+        #
+        # Cada direccion usa su propia `key`: un mismo radio con dos juegos de
+        # opciones se queda con el valor guardado del otro y Streamlit protesta.
+        if _ret_direccion == "directo":
+            _ret_sentido_label = st.radio(
+                "¿Qué retenciones tienes?",
+                [
+                    "Emitidas — yo retuve a mi proveedor",
+                    "Recibidas — me retuvieron sobre una venta",
+                ],
+                key="ret_vs_fact_sentido_ret",
+                help=(
+                    "Define dónde se busca la factura de cada retención. Si la "
+                    "retención la emitiste tú, la factura es de compra y está "
+                    "en Recibidos; si te la emitieron, es de venta y está en "
+                    "Emitidos."
+                ),
+            )
+            _ret_sentido = (
+                "recibidas"
+                if _ret_sentido_label.startswith("Recibidas")
+                else "emitidas"
+            )
+        else:
+            _ret_sentido_label = st.radio(
+                "¿Qué facturas tienes?",
+                [
+                    "Emitidas — las que yo emití (ventas)",
+                    "Recibidas — las que me emitieron (compras)",
+                ],
+                key="ret_vs_fact_sentido_fact",
+                help=(
+                    "Define qué retenciones hay que revisar. Sobre una venta te "
+                    "retiene el cliente, así que la retención es recibida; "
+                    "sobre una compra retienes tú, así que es emitida."
+                ),
+            )
+            # La inversion vive en el modulo y esta cubierta por un test: una
+            # factura emitida solo puede tener una retencion RECIBIDA, y al
+            # reves. Escrita a mano aca es de las que se invierten sin que nadie
+            # lo note hasta que el reporte sale vacio.
+            from robot.retencion_vs_factura import sentido_desde_facturas
+
+            _ret_sentido = sentido_desde_facturas(_ret_sentido_label)
+
+        # Donde vive cada documento, ya resuelto. Se muestra para que el usuario
+        # no tenga que deducirlo: es justo el paso donde se confunde.
         _ret_origen_facturas = "Emitidos" if _ret_sentido == "recibidas" else "Recibidos"
-        # El costo de la consulta depende de las dos elecciones. Emitidos
-        # filtra por UN dia, asi que barrer el mes entero -lo que exige la
-        # direccion inversa- son ~30 consultas en vez de las pocas fechas que
-        # las retenciones nombran.
-        if _ret_sentido == "recibidas":
-            if _ret_direccion == "inverso":
+        _ret_origen_retenciones = "Emitidos" if _ret_sentido == "emitidas" else "Recibidos"
+        st.caption(
+            f"Tus **facturas** se buscarán en **{_ret_origen_facturas}** · "
+            f"las **retenciones**, en **{_ret_origen_retenciones}**."
+        )
+        # Emitidos filtra por UN dia, asi que cualquier lado que caiga ahi es el
+        # caro. Cual de los dos depende de la combinacion: en la direccion
+        # inversa con facturas de venta son las facturas, y con facturas de
+        # compra son las retenciones, que ademas hay que bajar en PDF.
+        if _ret_direccion == "inverso":
+            if _ret_sentido == "recibidas":
                 st.warning(
-                    "Las facturas se buscarán en **Emitidos**, que filtra por "
-                    "día. Para poder decir qué facturas NO tienen retención hay "
-                    "que revisar el mes completo, o sea ~30 consultas por mes. "
-                    "Es la combinación más lenta: puede tomar varios minutos."
+                    "Tus **facturas** están en Emitidos, que filtra por día, y "
+                    "para saber cuáles no tienen retención hay que revisar el "
+                    "mes completo: ~30 consultas por mes. Indica abajo la "
+                    "carpeta de facturas y esas fechas no se vuelven a pedir."
                 )
             else:
-                st.caption(
-                    "Las facturas se buscarán en **Emitidos**. Ese módulo del "
-                    "portal filtra por día, así que la consulta va día por día "
-                    "y tarda más que en Recibidos."
+                st.warning(
+                    "Las **retenciones** están en Emitidos, que filtra por día, "
+                    "y hay que bajar el PDF de cada una. Si falta algún mes "
+                    "puede tomar varios minutos; los meses que ya tengas "
+                    "descargados no se vuelven a pedir."
                 )
-        elif _ret_direccion == "inverso":
+        elif _ret_sentido == "recibidas":
             st.caption(
-                "Las facturas se buscarán en **Recibidos**, que resuelve el mes "
-                "entero en una sola consulta."
+                "Las facturas están en **Emitidos**, que filtra por día. Solo "
+                "se piden las fechas que nombran tus retenciones, no el mes "
+                "entero."
             )
 
         if "ret_vs_fact_carpeta_input" not in st.session_state:
@@ -5946,11 +5988,16 @@ with tab2:
                 key="ret_vs_fact_clave",
                 placeholder="********",
             )
+        # En las cuatro combinaciones es el mismo RUC -- el del contribuyente
+        # auditado -- y decirlo asi evita la duda de si hay que poner el de la
+        # contraparte.
         st.caption(
-            "Debe ser el RUC que **emitió** las retenciones"
-            if _ret_sentido == "emitidas"
-            else "Debe ser el RUC al que **le retuvieron**: es quien emitió "
-            "las facturas de sustento."
+            "Siempre es el RUC del contribuyente auditado: el que "
+            + (
+                "**emitió las retenciones** y recibió las facturas."
+                if _ret_sentido == "emitidas"
+                else "**emitió las facturas** de venta y recibió las retenciones."
+            )
         )
 
         if _ret_direccion == "directo":

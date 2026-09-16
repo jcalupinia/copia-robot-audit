@@ -106,6 +106,24 @@ def _normalizar_sentido(sentido: object) -> str:
     return SENTIDO_RECIBIDAS if texto.startswith("recib") else SENTIDO_EMITIDAS
 
 
+def sentido_desde_facturas(tipo_factura: object) -> str:
+    """Sentido del cruce a partir del tipo de factura que tiene el usuario.
+
+    Yendo de la factura a la retencion, lo que el usuario tiene son FACTURAS y
+    puede no tener ni una retencion. Preguntarle igual "que retenciones tienes"
+    lo obliga a traducir, y esa traduccion se presta a invertirla.
+
+    La regla: la factura y su retencion viven en modulos opuestos. Sobre una
+    venta te retiene el cliente -- retencion recibida -- y sobre una compra
+    retienes tu -- retencion emitida.
+    """
+    return (
+        SENTIDO_RECIBIDAS
+        if _norm(tipo_factura).startswith("emitid")
+        else SENTIDO_EMITIDAS
+    )
+
+
 def _origen_facturas(sentido: str) -> str:
     """Modulo del portal donde vive la factura sustento de cada sentido."""
     return "Emitidos" if _normalizar_sentido(sentido) == SENTIDO_RECIBIDAS else "Recibidos"
