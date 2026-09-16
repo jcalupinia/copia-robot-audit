@@ -1531,8 +1531,13 @@ def _preparar_indice_facturas(
                 )
             emit(mensaje)
     elif mes_completo and rutas:
+        # Senalo la carpeta pero no se leyo ni una factura. Es distinto de no
+        # haberla senalado, y el aviso tiene que decirlo: el indice acepta XML y
+        # los Excel del modo rapido, pero NO los PDF sueltos.
+        resumen["facturas_ilegibles"] = True
         emit(
-            "No se pudo leer ninguna factura de las carpetas indicadas; el "
+            "No se pudo leer ninguna factura de las carpetas indicadas. El "
+            "indice lee XML y los Excel del modo rapido, no PDF sueltos. El "
             "periodo se deduce de las retenciones, como antes."
         )
 
@@ -2561,6 +2566,8 @@ def generar_reporte_facturas(
         # corrimiento del plazo legal, y cuantas se bajaron para completarlos.
         "retenciones_periodo": "",
         "retenciones_descargadas": 0,
+        # Se indico carpeta de facturas pero no se pudo leer ninguna.
+        "facturas_ilegibles": False,
         "meses_sin_datos": [],
         "portal_error": "",
         "excel_path": "",

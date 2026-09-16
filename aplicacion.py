@@ -6200,6 +6200,14 @@ with tab2:
                     "deducido de las facturas que indicaste. Si te falta un mes, "
                     "descárgalo y vuelve a generar el reporte."
                 )
+            elif _ret_result.get("facturas_ilegibles"):
+                st.warning(
+                    "Indicaste una carpeta de facturas pero **no se pudo leer "
+                    "ninguna**. El índice acepta XML y los Excel del modo rápido "
+                    "(`*_reporte_*.xlsx`), pero **no PDF sueltos**. El período "
+                    "salió de las retenciones, así que los meses sin ninguna "
+                    "retención no se revisaron."
+                )
             elif _ret_result.get("direccion") == "inverso":
                 st.warning(
                     "No indicaste carpeta de facturas, así que el período salió "
