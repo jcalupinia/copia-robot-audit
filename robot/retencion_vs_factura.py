@@ -2312,6 +2312,65 @@ def _comparar(valor_a: object, valor_b: object) -> Optional[bool]:
     return abs(a - b) <= TOLERANCIA_IMPORTE
 
 
+def _cifras_del_comprobante(factura: dict, documento: dict) -> list[tuple[str, float]]:
+    """Cifras conocidas del par retencion/factura, con nombre.
+
+    Sirven para reconocer un campo mal cargado: si lo que la retencion declara
+    coincide exacto con OTRA de estas, no es que los numeros no cuadren, es que
+    el emisor puso el valor equivocado en ese casillero.
+    """
+    retenido = sum(
+        _a_float(linea.get("valor_retenido")) or 0.0
+        for linea in documento.get("lineas", [])
+    )
+    total = _a_float(factura.get("importe_total"))
+    subtotal = _a_float(factura.get("total_sin_impuestos"))
+    iva = _a_float(factura.get("iva_factura"))
+
+    cifras: list[tuple[str, float]] = []
+    if total is not None:
+        cifras.append(("el total de la factura", total))
+        if retenido:
+            # El caso mas comun de todos: se carga lo que se pago.
+            cifras.append(
+                (
+                    f"el NETO A PAGAR ({total:.2f} - {retenido:.2f} retenido)",
+                    round(total - retenido, 2),
+                )
+            )
+    if subtotal is not None:
+        cifras.append(("el subtotal de la factura", subtotal))
+    if iva is not None:
+        cifras.append(("el IVA de la factura", iva))
+    for linea in documento.get("lineas", []):
+        impuesto = str(linea.get("impuesto") or "").strip().upper() or "?"
+        base = _a_float(linea.get("base"))
+        valor = _a_float(linea.get("valor_retenido"))
+        if base is not None:
+            cifras.append((f"la base de retencion de {impuesto}", base))
+        if valor is not None:
+            cifras.append((f"el valor retenido de {impuesto}", valor))
+    if retenido:
+        cifras.append(("el total retenido", round(retenido, 2)))
+    return cifras
+
+
+def _reconocer_cifra(
+    valor: float, conocidas: list[tuple[str, float]], esperado: float
+) -> str:
+    """Nombre de la cifra conocida que coincide con `valor`, si hay alguna.
+
+    Se descartan las que coinciden con el valor esperado: nombrar "el total de
+    la factura" cuando justamente se esperaba el total no explica nada.
+    """
+    for nombre, cifra in conocidas:
+        if abs(cifra - esperado) <= TOLERANCIA_IMPORTE:
+            continue
+        if abs(cifra - valor) <= TOLERANCIA_IMPORTE:
+            return nombre
+    return ""
+
+
 def _verificar_correspondencia(
     retencion: dict, documento: dict, factura: dict, por_clave: bool
 ) -> dict:
@@ -2363,83 +2422,99 @@ def _verificar_correspondencia(
     detalles: list[str] = []
     difiere = False
     comparadas = 0
+    neto_en_vez_de_total = False
+    mal_cargado = False
 
-    def _chequear(etiqueta: str, valor_ret: object, valor_fac: object) -> None:
-        nonlocal difiere, comparadas
-        veredicto = _comparar(valor_ret, valor_fac)
-        if veredicto is None:
+    conocidas = _cifras_del_comprobante(factura, documento)
+
+    def _chequear_declarado(etiqueta: str, declarado: object, esperado: object) -> None:
+        """Lo que la retencion AFIRMA de la factura, contra lo que dice el SRI.
+
+        Son campos informativos del documento sustento: si no cuadran, la
+        retencion sigue siendo valida. Lo que la sostiene son las bases y los
+        porcentajes, que se verifican aparte y con otro criterio.
+
+        Por eso, cuando el valor declarado resulta ser OTRA cifra del mismo
+        comprobante, se lo nombra y no se cuenta como discrepancia: es un error
+        de captura del emisor, no un desacuerdo sobre los numeros. Dejarlo como
+        "Difiere" a secas obliga a revisar a mano filas que estan sanas y las
+        mezcla con las que si hay que mirar.
+        """
+        nonlocal difiere, comparadas, neto_en_vez_de_total, mal_cargado
+        valor, contra = _a_float(declarado), _a_float(esperado)
+        if valor is None or contra is None:
             return
         comparadas += 1
-        if veredicto:
+        if abs(valor - contra) <= TOLERANCIA_IMPORTE:
             return
-        difiere = True
+        nombre = _reconocer_cifra(valor, conocidas, contra)
+        if not nombre:
+            difiere = True
+            detalles.append(f"{etiqueta}: {valor:.2f} vs {contra:.2f}")
+            return
+        if "NETO A PAGAR" in nombre:
+            neto_en_vez_de_total = True
+        else:
+            mal_cargado = True
         detalles.append(
-            f"{etiqueta}: {_a_float(valor_ret):.2f} vs {_a_float(valor_fac):.2f}"
+            f"{etiqueta}: la retencion declara {valor:.2f}, que es {nombre} y no "
+            f"{contra:.2f}. El emisor cargo mal ese campo del sustento; no "
+            "afecta las bases ni los valores retenidos, que se verifican aparte."
         )
 
-    # Lo que la retencion afirma de la factura contra lo que dice el SRI. Solo
-    # existe si la retencion vino en XML.
-    #
-    # Antes de darlo por diferencia hay que descartar un patron muy frecuente:
-    # el emisor carga en `importeTotal` lo que EFECTIVAMENTE PAGO -- el total
-    # menos lo que retuvo -- en vez del total de la factura. Eso no invalida
-    # nada: las bases y los valores retenidos siguen siendo los correctos, y es
-    # el unico campo mal. Mezclarlo con una diferencia de verdad obliga a
-    # revisar a mano filas que estan bien.
-    neto_en_vez_de_total = False
-    _total_ret = _a_float(documento.get("importe_total"))
-    _total_fac = _a_float(factura.get("importe_total"))
-    if _total_ret is not None and _total_fac is not None:
+    def _chequear_base(impuesto: str, base: object, tope: object, nombre_tope: str) -> bool:
+        """La base de retencion contra el tope que le impone la factura.
+
+        Puede ser MENOR: es legitimo cuando solo parte de la factura esta sujeta
+        a retencion, y se reporta como matiz. Mayor no: no se puede retener
+        sobre mas de lo que se facturo, y eso si es un error.
+
+        Vale igual para IVA y para Renta. Antes solo Renta admitia la retencion
+        parcial, asi que una de IVA sobre parte de la factura -- legitima cuando
+        hay items no sujetos -- salia marcada como diferencia.
+        """
+        nonlocal difiere, comparadas
+        valor, limite = _a_float(base), _a_float(tope)
+        if valor is None or limite is None:
+            return False
         comparadas += 1
-        if abs(_total_ret - _total_fac) > TOLERANCIA_IMPORTE:
-            _retenido = sum(
-                _a_float(linea.get("valor_retenido")) or 0.0
-                for linea in documento.get("lineas", [])
+        if valor > limite + TOLERANCIA_IMPORTE:
+            difiere = True
+            detalles.append(
+                f"base ret. {impuesto} {valor:.2f} supera el {nombre_tope} de la "
+                f"factura ({limite:.2f}): no se puede retener sobre mas de lo "
+                "facturado."
             )
-            if _retenido and abs(_total_ret + _retenido - _total_fac) <= TOLERANCIA_IMPORTE:
-                neto_en_vez_de_total = True
-                detalles.append(
-                    f"importe total: la retencion declara {_total_ret:.2f}, que es "
-                    f"el NETO A PAGAR ({_total_fac:.2f} - {_retenido:.2f} retenido). "
-                    "El emisor cargo el valor pagado en vez del total de la "
-                    "factura; las bases y los valores retenidos estan bien."
-                )
-            else:
-                difiere = True
-                detalles.append(
-                    f"importe total: {_total_ret:.2f} vs {_total_fac:.2f}"
-                )
-    _chequear(
+        elif valor < limite - TOLERANCIA_IMPORTE:
+            detalles.append(
+                f"se retuvo {impuesto} sobre {valor:.2f} de un {nombre_tope} de "
+                f"{limite:.2f}"
+            )
+            return True
+        return False
+
+    # Lo que la retencion afirma de la factura. Solo existe si vino en XML.
+    _chequear_declarado(
+        "importe total", documento.get("importe_total"), factura.get("importe_total")
+    )
+    _chequear_declarado(
         "subtotal",
         documento.get("total_sin_impuestos"),
         factura.get("total_sin_impuestos"),
     )
-    _chequear("IVA", documento.get("iva_factura"), factura.get("iva_factura"))
+    _chequear_declarado("IVA", documento.get("iva_factura"), factura.get("iva_factura"))
 
     # Las bases de retencion contra la factura. Esto si esta siempre, venga la
-    # retencion de XML o de PDF.
-    _chequear(
-        "base ret. IVA vs IVA de la factura",
-        iva_ret.get("base"),
-        factura.get("iva_factura"),
+    # retencion de XML o de PDF, y es lo que de verdad sostiene la retencion.
+    base_iva_parcial = _chequear_base(
+        "IVA", iva_ret.get("base"), factura.get("iva_factura"), "IVA"
     )
-
-    base_renta = _a_float(renta_ret.get("base"))
-    subtotal = _a_float(factura.get("total_sin_impuestos"))
-    parcial = False
-    if base_renta is not None and subtotal is not None:
-        comparadas += 1
-        if base_renta > subtotal + TOLERANCIA_IMPORTE:
-            difiere = True
-            detalles.append(
-                f"base ret. Renta {base_renta:.2f} supera el subtotal {subtotal:.2f}"
-            )
-        elif base_renta < subtotal - TOLERANCIA_IMPORTE:
-            parcial = True
-            detalles.append(
-                f"se retuvo Renta sobre {base_renta:.2f} de un subtotal de "
-                f"{subtotal:.2f}"
-            )
+    base_renta_parcial = _chequear_base(
+        "Renta",
+        renta_ret.get("base"),
+        factura.get("total_sin_impuestos"),
+        "subtotal",
+    )
 
     # Los matices no son discrepancias: la fila cuadra, pero con una
     # particularidad que conviene nombrar para no tener que deducirla del
@@ -2447,7 +2522,11 @@ def _verificar_correspondencia(
     matices = []
     if neto_en_vez_de_total:
         matices.append("total declarado = neto pagado")
-    if parcial:
+    if mal_cargado:
+        matices.append("datos del sustento mal cargados")
+    if base_iva_parcial:
+        matices.append("base IVA parcial")
+    if base_renta_parcial:
         matices.append("base Renta parcial")
 
     if not comparadas:
