@@ -6015,7 +6015,11 @@ with tab2:
                     "Define el período del reporte: se analizan los meses que "
                     "cubren esas facturas. Si la dejas vacía, el período sale "
                     "de las retenciones y los meses sin ninguna retención no se "
-                    "revisan. Acepta XML o los Excel del modo rápido."
+                    "revisan. Acepta **XML**, los **Excel** del reporte y "
+                    "los **PDF** de las facturas. Se explora en profundidad, "
+                    "así que puedes indicar la carpeta del año. Los PDF son la "
+                    "vía lenta (~0,4 s por archivo) y solo se leen en los meses "
+                    "donde no hay XML ni Excel."
                 ),
             )
             st.checkbox(
@@ -6269,10 +6273,10 @@ with tab2:
             elif _ret_result.get("facturas_ilegibles"):
                 st.warning(
                     "Indicaste una carpeta de facturas pero **no se pudo leer "
-                    "ninguna**. El índice acepta XML y los Excel del modo rápido "
-                    "(`*_reporte_*.xlsx`), pero **no PDF sueltos**. El período "
-                    "salió de las retenciones, así que los meses sin ninguna "
-                    "retención no se revisaron."
+                    "ninguna**. Se aceptan XML, los Excel del reporte y los PDF "
+                    "de las facturas: revisa que la carpeta sea la del tipo y "
+                    "período correctos. El período salió de las retenciones, así "
+                    "que los meses sin ninguna retención no se revisaron."
                 )
             elif _ret_result.get("direccion") == "inverso":
                 st.warning(

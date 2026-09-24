@@ -952,6 +952,92 @@ def _es_sustento_preimpreso(documento: dict) -> bool:
     return 10 <= len(valor) < 49
 
 
+# Leer un PDF cuesta ~0.4 s contra los milisegundos de un Excel, y el indice se
+# arma dos veces por corrida (una para deducir el periodo y otra con lo que
+# sume el portal). Sin esta memoria, un mes de 500 facturas se leeria entero
+# dos veces.
+_CACHE_PDF_FACTURA: dict[str, Optional[dict]] = {}
+
+
+def _mes_de(ruta: Path) -> Path:
+    """Carpeta del MES a la que pertenece un archivo.
+
+    Las descargas quedan como .../<Mes>/PDF/x.pdf y .../<Mes>/XML/y.xml, asi
+    que para saber si un mes ya aporto datos hay que subir un nivel desde PDF o
+    XML. Sirve para no ponerse a leer los PDF de un mes que ya tiene sus XML.
+    """
+    padre = ruta.parent
+    if padre.name.upper() in {"PDF", "XML", "TXT"}:
+        return padre.parent
+    return padre
+
+
+def _factura_desde_pdf(pdf_path: Path) -> Optional[dict]:
+    """Lee una factura desde su RIDE en PDF.
+
+    Es el ULTIMO recurso y hace falta sobre todo en Emitidos: sus XML salen del
+    WS del SRI, que deja de servirlos al mes, asi que de un mes viejo lo unico
+    que queda en disco son los PDF. En Recibidos el XML cuelga de la tabla del
+    portal y no caduca, por eso de ese lado este camino casi no se usa -- y esa
+    es justamente la asimetria por la que el cruce funcionaba en un sentido y
+    en el otro no.
+    """
+    clave_cache = str(pdf_path)
+    if clave_cache in _CACHE_PDF_FACTURA:
+        return _CACHE_PDF_FACTURA[clave_cache]
+
+    factura = None
+    try:
+        from robot.pdf_extraction import _extraer_datos_pdf_factura_emitido
+
+        datos = _extraer_datos_pdf_factura_emitido(pdf_path)
+    except Exception as err:
+        logger.warning(f"No se pudo leer la factura {pdf_path.name}: {err}")
+        datos = None
+
+    if datos:
+        clave = re.sub(r"\D", "", str(datos.get("Clave de Acceso") or ""))
+        ruc = re.sub(r"\D", "", str(datos.get("RUC Emisor") or ""))
+        numero = _numero_desde_partes(
+            datos.get("Establecimiento"),
+            datos.get("Punto de Emisi\u00f3n"),
+            datos.get("Secuencial"),
+        )
+        # La clave de acceso lleva adentro el RUC y la serie, asi que cubre lo
+        # que el layout del RIDE no haya podido leer.
+        if len(clave) == 49:
+            if not numero:
+                numero = _numero_desde_partes(clave[24:27], clave[27:30], clave[30:39])
+            if not ruc:
+                ruc = clave[10:23]
+        if ruc and numero:
+            factura = {
+                "ruc_emisor": ruc,
+                "razon_social_emisor": str(
+                    datos.get("Raz\u00f3n Social Emisor") or ""
+                ).strip(),
+                "numero": numero,
+                "clave_acceso": clave,
+                "fecha_emision": str(datos.get("Fecha de Emisi\u00f3n") or "").strip(),
+                "total_sin_impuestos": _a_float(datos.get("Total Sin Impuestos")),
+                "total_descuento": _a_float(datos.get("Total Descuento")),
+                "iva_factura": _a_float(datos.get("Monto IVA")),
+                "base_iva_factura": None,
+                "importe_total": _a_float(datos.get("Importe Total")),
+                "origen": "pdf",
+                "archivo": str(pdf_path),
+            }
+
+    _CACHE_PDF_FACTURA[clave_cache] = factura
+    return factura
+
+
+# Cual fuente le gana a cual cuando la misma factura aparece en varias. El XML
+# es el comprobante en si; el listado lo publica el portal; el PDF se lee por
+# posicion de palabras y es el mas fragil de los tres.
+_PRIORIDAD_ORIGEN = {"xml": 3, "listado": 2, "pdf": 1}
+
+
 def construir_indice_facturas(
     carpetas: Iterable[Path], ruc_emisor_default: str = ""
 ) -> dict[str, dict]:
@@ -970,13 +1056,40 @@ def construir_indice_facturas(
             archivos = [carpeta]
         else:
             archivos = sorted(carpeta.rglob("*.xml")) + sorted(carpeta.rglob("*.xlsx"))
+        # Meses que si aportaron datos por la via rapida. Se anotan para no
+        # ponerse a leer PDF de un mes que ya tiene sus XML o su Excel.
+        meses_resueltos: set = set()
         for archivo in archivos:
             if archivo.suffix.lower() == ".xml":
                 factura = _factura_desde_xml(archivo)
                 if factura:
                     candidatos.append(factura)
+                    meses_resueltos.add(_mes_de(archivo))
             elif archivo.suffix.lower() == ".xlsx" and not archivo.name.startswith("~$"):
-                candidatos.extend(_factura_desde_excel(archivo, ruc_emisor_default))
+                del_excel = _factura_desde_excel(archivo, ruc_emisor_default)
+                if del_excel:
+                    candidatos.extend(del_excel)
+                    meses_resueltos.add(_mes_de(archivo))
+
+        # Ultimo recurso: los PDF de los meses que no aportaron nada. En
+        # Emitidos un mes viejo no tiene XML -- el WS del SRI deja de servirlos
+        # al mes -- asi que sin esto el cruce se quedaba sin facturas y el
+        # reporte salia vacio, aunque el usuario tuviera todo en disco.
+        if not carpeta.is_file():
+            pendientes = [
+                pdf
+                for pdf in sorted(carpeta.rglob("*.pdf"))
+                if _mes_de(pdf) not in meses_resueltos
+            ]
+            if pendientes:
+                logger.info(
+                    f"{len(pendientes)} factura(s) sin XML ni Excel: se leen de su "
+                    "PDF. Es la via lenta (~0.4 s por archivo)."
+                )
+            for pdf in pendientes:
+                factura = _factura_desde_pdf(pdf)
+                if factura:
+                    candidatos.append(factura)
 
         for factura in candidatos:
             entradas = []
@@ -992,9 +1105,9 @@ def construir_indice_facturas(
                 entradas.append(f"clave|{clave_acceso}")
             for entrada in entradas:
                 previo = indice.get(entrada)
-                if previo is None or (
-                    previo["origen"] != "xml" and factura["origen"] == "xml"
-                ):
+                if previo is None or _PRIORIDAD_ORIGEN.get(
+                    factura["origen"], 0
+                ) > _PRIORIDAD_ORIGEN.get(previo["origen"], 0):
                     indice[entrada] = factura
     return indice
 
@@ -1557,8 +1670,8 @@ def _preparar_indice_facturas(
         # los Excel del modo rapido, pero NO los PDF sueltos.
         resumen["facturas_ilegibles"] = True
         emit(
-            "No se pudo leer ninguna factura de las carpetas indicadas. El "
-            "indice lee XML y los Excel del modo rapido, no PDF sueltos. El "
+            "No se pudo leer ninguna factura de las carpetas indicadas. Se "
+            "aceptan XML, los Excel del reporte y los PDF de las facturas. El "
             "periodo se deduce de las retenciones, como antes."
         )
 
