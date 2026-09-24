@@ -808,9 +808,14 @@ def _factura_desde_xml(xml_path: Path) -> Optional[dict]:
 # Se comparan con _norm_col, que unifica espacios y guiones bajos: el TXT del
 # portal usa RUC_EMISOR y los reportes internos "RUC Emisor".
 _ALIAS_RUC = {"ruc emisor", "ruc", "identificacion emisor"}
-_ALIAS_SERIE = {"serie comprobante", "serie", "numero comprobante", "num comprobante"}
+_ALIAS_SERIE = {
+    "serie comprobante", "serie", "numero comprobante", "num comprobante",
+    "no comprobante", "numero documento", "numero factura",
+}
 _ALIAS_CLAVE = {"clave de acceso", "clave acceso", "claveacceso", "numero autorizacion"}
-_ALIAS_TOTAL = {"importe total", "valor total", "total", "importe"}
+_ALIAS_TOTAL = {
+    "importe total", "valor total", "total", "importe", "valor total sin subsidio",
+}
 _ALIAS_FECHA_EMI = {"fecha emision", "fecha de emision"}
 _ALIAS_RAZON = {"razon social emisor", "razon social", "nombre emisor"}
 # El listado de Recibidos del portal trae el desglose, no solo el total: sus
@@ -819,6 +824,8 @@ _ALIAS_RAZON = {"razon social emisor", "razon social", "nombre emisor"}
 _ALIAS_SUBTOTAL = {
     "valor sin impuestos", "valor sin impuesto", "total sin impuestos",
     "subtotal", "base imponible", "valor neto",
+    # El reporte de recibidos lo llama `subtotalSinImpuestos`.
+    "subtotal sin impuestos",
 }
 _ALIAS_IVA = {
     "iva", "valor iva", "monto iva", "total iva", "impuesto iva",
@@ -832,14 +839,43 @@ _ALIAS_SEC = {"secuencial", "nro secuencial"}
 
 
 def _norm_col(texto: object) -> str:
-    """Normaliza un encabezado de columna tratando _ y - como espacios.
+    """Normaliza un encabezado de columna: separadores Y camelCase.
 
-    El TXT del portal titula sus columnas con guion bajo (`VALOR_SIN_IMPUESTOS`)
-    y los reportes internos con espacios (`Valor Sin Impuestos`). Sin unificar
-    los separadores, las columnas del listado no matchean ningun alias y el
-    cruce sale sin subtotal, IVA ni importe.
+    Los reportes del sistema titulan sus columnas de tres formas distintas:
+
+        VALOR_SIN_IMPUESTOS    el TXT del portal
+        Valor Sin Impuestos    los reportes de Emitidos
+        subtotalSinImpuestos   el reporte de comprobantes RECIBIDOS
+
+    La tercera es la que faltaba. Como solo se pasaba a minusculas,
+    `rucEmisor` quedaba en "rucemisor" y no matcheaba ningun alias: el reporte
+    de facturas recibidas se descartaba entero y el cruce se quedaba sin
+    facturas -- sin error, solo un reporte vacio.
     """
-    return re.sub(r"[\s_\-]+", " ", _norm(texto)).strip()
+    crudo = str(texto or "")
+    # minusculaMayuscula y letraDigito -> se separan. `iva15` pasa a "iva 15",
+    # que ademas deja reconocible la columna de IVA por tarifa.
+    crudo = re.sub(r"(?<=[a-záéíóúñ])(?=[A-Z])", " ", crudo)
+    crudo = re.sub(r"(?<=[A-Za-z])(?=\d)", " ", crudo)
+    return re.sub(r"[\s_\-]+", " ", _norm(crudo)).strip()
+
+
+def _iva_de_la_fila(fila, i_iva, i_tarifas) -> Optional[float]:
+    """IVA de la factura, venga en una columna o repartido por tarifa."""
+    if i_iva is not None:
+        return _a_float(fila[i_iva]) if i_iva < len(fila) else None
+    if not i_tarifas:
+        return None
+    total = 0.0
+    visto = False
+    for i in i_tarifas:
+        if i >= len(fila):
+            continue
+        valor = _a_float(fila[i])
+        if valor is not None:
+            total += valor
+            visto = True
+    return total if visto else None
 
 
 def _factura_desde_excel(path: Path, ruc_emisor_default: str = "") -> list[dict]:
@@ -886,6 +922,16 @@ def _factura_desde_excel(path: Path, ruc_emisor_default: str = "") -> list[dict]
         i_clave, i_total = _col(_ALIAS_CLAVE), _col(_ALIAS_TOTAL)
         i_fecha, i_razon = _col(_ALIAS_FECHA_EMI), _col(_ALIAS_RAZON)
         i_subtotal, i_iva = _col(_ALIAS_SUBTOTAL), _col(_ALIAS_IVA)
+
+        # El reporte de recibidos no trae una columna de IVA sino una por
+        # tarifa -- iva15, iva12, iva8, iva5 -- porque una factura puede
+        # mezclarlas. Para el cruce lo que importa es el IVA total, asi que se
+        # suman. Solo se usa si no hubo una columna de IVA propiamente dicha.
+        i_iva_tarifas = [
+            idx
+            for nombre, idx in idx.items()
+            if re.fullmatch(r"iva \d+", nombre) or nombre == "iva tarifa especial"
+        ] if i_iva is None else []
         if i_subtotal is None or i_iva is None:
             logger.info(
                 f"{Path(path).name}: el listado no trae subtotal/IVA "
@@ -919,7 +965,7 @@ def _factura_desde_excel(path: Path, ruc_emisor_default: str = "") -> list[dict]
                     "fecha_emision": _celda(fila, i_fecha),
                     "total_sin_impuestos": _num(fila, i_subtotal),
                     "total_descuento": None,
-                    "iva_factura": _num(fila, i_iva),
+                    "iva_factura": _iva_de_la_fila(fila, i_iva, i_iva_tarifas),
                     "base_iva_factura": None,
                     "importe_total": _num(fila, i_total),
                     "origen": "listado",
