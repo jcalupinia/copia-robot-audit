@@ -338,17 +338,25 @@ def _render_manual_consultar_modal() -> None:
 
 
 def _render_download_finished_modal() -> None:
-    """Resumen del proceso terminado, como panel y NO como `st.dialog`.
+    """Resumen del proceso terminado. Va dentro de un `st.dialog`.
 
-    `st.dialog` es un fragment por dentro, y al cerrar un run completo Streamlit
-    borra del registro todo fragment que no se haya vuelto a llamar
-    (`_fragment_storage.clear(new_fragment_ids=...)`). Al cerrarse, este panel
-    dejaba de llamarse y cualquier rerun que el navegador todavia tuviera en
-    vuelo para ese fragment moria con "Could not find fragment with id ...".
+    RIESGO CONOCIDO, aceptado a proposito: `st.dialog` es un fragment por
+    dentro, y al cerrar un run completo Streamlit borra del registro todo
+    fragment que no se haya vuelto a llamar:
 
-    Era el mas expuesto de los cinco modales porque se abre SOLO al terminar un
-    proceso largo, no por un clic, asi que la carrera lo agarraba seguido. Como
-    panel no hay fragment, y el error no puede volver por este camino.
+        exec(code, module.__dict__)
+        self._fragment_storage.clear(new_fragment_ids=ctx.new_fragment_ids)
+
+    Al cerrarse, este modal deja de llamarse y un rerun que el navegador
+    todavia tenga en vuelo para ese fragment muere con "Could not find fragment
+    with id ...". Streamlit conoce la carrera (issue #9080) pero solo silencia
+    el error cuando el rerun es automatico, y el de un dialogo no lo es.
+
+    De los cinco modales este es el mas expuesto, porque se abre SOLO al
+    terminar un proceso largo y no por un clic. Si el error reaparece, la salida
+    ya probada es convertirlo en panel con `st.container(border=True)`: sin
+    fragment no puede pasar. Se hizo, y se volvio al dialogo por preferencia de
+    interfaz.
     """
     if st.session_state.get("download_status") != "done":
         return
@@ -384,17 +392,12 @@ def _render_download_finished_modal() -> None:
     if mensaje_verificacion:
         lineas.append(f"Verificación: {mensaje_verificacion}")
 
-    with st.container(border=True):
-        st.success(
-            f"Proceso terminado. {origen} para {tipo.lower()} finalizó correctamente."
-        )
-        for linea in lineas:
-            st.caption(linea)
-        if st.button("Cerrar", key="close_download_finished_modal"):
-            st.session_state["download_finished_modal_open"] = False
-            # Aca `st.rerun()` es un rerun comun y corriente: sin fragment de
-            # por medio, no hay nada que se pueda quedar sin registrar.
-            st.rerun()
+    st.write(f"El proceso de {origen.lower()} para {tipo.lower()} ha finalizado correctamente.")
+    for linea in lineas:
+        st.caption(linea)
+    if st.button("Cerrar", key="close_download_finished_modal", use_container_width=True):
+        st.session_state["download_finished_modal_open"] = False
+        st.rerun()
 
 
 def _render_credenciales_incorrectas_modal() -> None:
@@ -4447,6 +4450,10 @@ if hasattr(st, "dialog"):
     def _tour_prompt_dialog():
         _render_first_use_prompt()
 
+    @st.dialog("Proceso terminado")
+    def _download_finished_dialog():
+        _render_download_finished_modal()
+
     @st.dialog("Cerrar aplicacion")
     def _close_app_dialog():
         _render_close_app_modal()
@@ -4460,6 +4467,9 @@ else:
 
     def _tour_prompt_dialog():
         _render_first_use_prompt()
+
+    def _download_finished_dialog():
+        _render_download_finished_modal()
 
     def _close_app_dialog():
         _render_close_app_modal()
@@ -4483,7 +4493,7 @@ if st.session_state.get("first_use_tour_active", False):
     _tour_dialog()
 
 if st.session_state.get("download_finished_modal_open", False):
-    _render_download_finished_modal()
+    _download_finished_dialog()
 
 if st.session_state.get("credenciales_modal_open", False):
     _credenciales_invalidas_dialog()
