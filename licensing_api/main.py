@@ -33,6 +33,8 @@ from licensing_api.security import (
     create_access_token,
 
     decode_access_token,
+    create_refresh_token,
+    decode_refresh_token,
     get_password_hash,
 
 )
@@ -367,7 +369,37 @@ def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
 
     token = create_access_token(user.email)
 
-    return schemas.TokenResponse(access_token=token)
+    return schemas.TokenResponse(
+        access_token=token,
+        refresh_token=create_refresh_token(user.email),
+    )
+
+
+@app.post("/auth/refresh", response_model=schemas.TokenResponse)
+def refresh_access_token(
+    request: schemas.RefreshRequest, db: Session = Depends(get_db)
+):
+    """Canjea el refresh token por un access token nuevo.
+
+    Es lo que permite que la sesion siga viva sin volver a pedir la contrasena.
+    Se revalida el usuario en cada canje, asi que desactivar una cuenta la deja
+    afuera en cuanto se le venza el access token que tenga en mano.
+    """
+    email = decode_refresh_token(request.refresh_token)
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de sesion invalido o vencido.",
+        )
+    user = crud.get_user_by_email(db, email=email)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo."
+        )
+    return schemas.TokenResponse(
+        access_token=create_access_token(user.email),
+        refresh_token=create_refresh_token(user.email),
+    )
 
 
 

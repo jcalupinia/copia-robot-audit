@@ -28,6 +28,12 @@ _PRINTABLE_ASCII_PATTERN = r"^[\x20-\x7e]+$"
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    # Opcional para no romper a un cliente viejo que no lo espera.
+    refresh_token: Optional[str] = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class LoginRequest(BaseModel):

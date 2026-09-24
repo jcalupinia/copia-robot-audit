@@ -74,6 +74,11 @@ from robot.download_resume import (
     save_checkpoint as save_download_checkpoint,
 )
 from licensing_client import LicensingClient
+from sesion_licencia import (
+    licencia_vigente,
+    marcar_licencia_activada,
+    sesion_sigue_viva,
+)
 # Actualizador de escritorio
 try:
     import desktop_launcher as _desktop_launcher
@@ -2747,6 +2752,16 @@ else:
     RUNTIME_DIR = Path(os.getenv("APP_RUNTIME_DIR", BASE_DIR))
 DESC_DIR = RUNTIME_DIR / "descargas"
 DESC_DIR.mkdir(exist_ok=True, parents=True)
+# Cada cuanto se vuelve a preguntarle al servidor por una licencia que ya
+# validó bien. Entre medio no se sale a la red: antes se validaba en cada rerun
+# de Streamlit, o sea decenas de veces por minuto.
+LICENCIA_REVALIDAR_HORAS = float(os.getenv("LICENSE_REVALIDATE_HOURS", "12"))
+
+# Cuanto sigue funcionando la app cuando el servidor no contesta. No es un
+# permiso para usarla sin licencia: es el margen para que un corte de internet,
+# o Render despertando, no deje a nadie afuera de su propio trabajo.
+LICENCIA_GRACIA_DIAS = float(os.getenv("LICENSE_OFFLINE_GRACE_DAYS", "30"))
+
 LICENSE_CLIENT = LicensingClient()
 SESSION_CACHE_DIR = Path(os.getenv("SESSION_CACHE_DIR", RUNTIME_DIR / ".session_cache"))
 SESSION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -2781,8 +2796,15 @@ def _get_or_init_client_device_id() -> str | None:
     if device_id:
         st.session_state["_device_id"] = device_id
         return str(device_id)
-    # Create a stable device id and persist it locally (avoids reload loop)
-    device_id = uuid.uuid4().hex
+    # Se deriva del equipo, no al azar. Con `uuid4()` el identificador vivia
+    # solo dentro de `user_prefs.json`: si ese archivo se perdia -- reinstalar,
+    # limpiar la carpeta, correr desde otra ruta -- el equipo estrenaba
+    # identidad, la licencia dejaba de validar contra su fingerprint y la app
+    # pedia el codigo otra vez, gastando ademas otro cupo de dispositivo.
+    # Derivandolo del hardware, el mismo equipo vuelve a calcular el MISMO id.
+    # Quien ya tenga uno guardado lo conserva (el `return` de arriba), asi que
+    # ninguna activacion existente se rompe.
+    device_id = _generate_device_fingerprint()
     st.session_state["_device_id"] = device_id
     prefs["device_id"] = device_id
     try:
@@ -2818,10 +2840,15 @@ def _persist_session_state():
     payload = {}
     for key in (
         "auth_token",
+        "refresh_token",
         "user_email",
         "license_validated",
         "device_fingerprint",
         "license_last_check",
+        # Hasta cuando vale la validacion ya hecha. Es lo que evita salir a la
+        # red en cada rerun de Streamlit y lo que sostiene la sesion cuando el
+        # servidor no contesta.
+        "license_valid_until",
     ):
         if key in st.session_state:
             payload[key] = st.session_state[key]
@@ -2877,7 +2904,11 @@ def _clear_cached_auth_only():
         data = _SESSION_CACHE_MEMORY.get(str(device_id or "default"))
     if not data:
         return
+    # Los dos tokens: dejar el refresh en disco seria dejar la sesion abierta
+    # justo cuando el usuario pidio cerrarla. El fingerprint y la licencia si
+    # se conservan, para que volver a entrar no pida el codigo otra vez.
     data.pop("auth_token", None)
+    data.pop("refresh_token", None)
     _SESSION_CACHE_MEMORY[str(device_id or "default")] = dict(data)
     try:
         if data:
@@ -4061,8 +4092,11 @@ def _render_login():
                     and st.session_state.get("device_fingerprint")
                     and cached_email == email_clean.lower()
                 )
-                token = LICENSE_CLIENT.login(email_clean, password)
-                st.session_state["auth_token"] = token
+                sesion = LICENSE_CLIENT.login(email_clean, password)
+                st.session_state["auth_token"] = sesion["access_token"]
+                # Puede venir vacio si la API todavia no tiene /auth/refresh.
+                if sesion.get("refresh_token"):
+                    st.session_state["refresh_token"] = sesion["refresh_token"]
                 st.session_state["user_email"] = email_clean
                 if cached_ok:
                     st.session_state["license_validated"] = True
@@ -4129,9 +4163,11 @@ def _render_activation():
                         code.strip(),
                         default_fp,
                     )
-                    st.session_state["license_validated"] = True
-                    st.session_state["license_last_check"] = time.time()
-                    _persist_session_state()
+                    marcar_licencia_activada(
+                        st.session_state,
+                        persistir=_persist_session_state,
+                        revalidar_horas=LICENCIA_REVALIDAR_HORAS,
+                    )
                     st.success("Licencia activada correctamente.")
                     st.rerun()
                 except Exception as err:
@@ -4144,6 +4180,41 @@ def _render_activation():
             if device_id:
                 st.session_state["_device_id"] = device_id
             st.rerun()
+def _cerrar_sesion_por_rechazo(mensaje: str):
+    """Cierra la sesion de verdad. Solo con un rechazo explicito del servidor."""
+    device_id = st.session_state.get("_device_id") or _get_device_id_from_query()
+    _clear_cached_auth_only()
+    for key in (
+        "auth_token",
+        "refresh_token",
+        "user_email",
+        "license_validated",
+        "license_last_check",
+        "license_valid_until",
+    ):
+        st.session_state.pop(key, None)
+    if device_id:
+        st.session_state["_device_id"] = device_id
+    st.warning(mensaje)
+    _render_login()
+    st.stop()
+
+
+def _sesion_sigue_viva() -> bool:
+    return sesion_sigue_viva(st.session_state, LICENSE_CLIENT, _persist_session_state)
+
+
+def _licencia_vigente(fingerprint: str) -> bool:
+    return licencia_vigente(
+        st.session_state,
+        LICENSE_CLIENT,
+        fingerprint,
+        persistir=_persist_session_state,
+        revalidar_horas=LICENCIA_REVALIDAR_HORAS,
+        gracia_dias=LICENCIA_GRACIA_DIAS,
+    )
+
+
 def _ensure_access():
     if "auth_token" not in st.session_state:
         client_device_id = _require_client_device_id()
@@ -4162,27 +4233,12 @@ def _ensure_access():
     ).hexdigest()
     st.session_state["device_fingerprint"] = fingerprint
 
-    # Validar siempre contra el backend para que la cuenta dependa de Render.
-    try:
-        LICENSE_CLIENT.get_profile(st.session_state["auth_token"])
-    except Exception:
-        _clear_cached_auth_only()
-        for key in ("auth_token", "user_email", "license_validated", "license_last_check"):
-            st.session_state.pop(key, None)
-        st.warning("Tu sesión ya no es válida. Inicia sesión nuevamente.")
-        _render_login()
-        st.stop()
+    if not _sesion_sigue_viva():
+        _cerrar_sesion_por_rechazo(
+            "Tu sesión expiró en el servidor. Inicia sesión nuevamente."
+        )
 
-    # Revalidar licencia en cada acceso (sin bypass local por cache).
-    try:
-        LICENSE_CLIENT.validate_license(st.session_state["auth_token"], fingerprint)
-        st.session_state["license_validated"] = True
-        st.session_state["license_last_check"] = time.time()
-        _persist_session_state()
-    except Exception:
-        st.session_state["license_validated"] = False
-        st.session_state.pop("license_last_check", None)
-        _persist_session_state()
+    if not _licencia_vigente(fingerprint):
         _render_activation()
         st.stop()
 
