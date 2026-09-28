@@ -61,6 +61,7 @@ from robot.downloader import (
     ESTADOS_EMITIDOS_MAP,
 )
 from robot.parser import construir_reporte, _parse_recibido_xml
+from robot.file_utils import normalizar_carpeta_destino
 from robot.historial import registrar_descarga, obtener_historial   #  FIX import correcto
 from robot.download_resume import (
     build_checkpoint_payload,
@@ -3098,7 +3099,9 @@ def _render_first_use_prompt() -> None:
 
 
 def _get_download_base_dir() -> Path:
-    base = Path(st.session_state.get("download_base_dir") or str(DESC_DIR)).expanduser()
+    base = normalizar_carpeta_destino(
+        st.session_state.get("download_base_dir") or str(DESC_DIR)
+    )
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -4955,7 +4958,7 @@ with tab1:
             seleccionada, error = _select_directory_dialog(current_dir)
             if seleccionada:
                 try:
-                    nueva_ruta = Path(seleccionada).expanduser()
+                    nueva_ruta = normalizar_carpeta_destino(seleccionada)
                     nueva_ruta.mkdir(parents=True, exist_ok=True)
                     st.session_state["download_base_dir"] = str(nueva_ruta)
                     _persist_user_preferences()
@@ -4971,7 +4974,7 @@ with tab1:
             manual_dir = st.text_input("Ruta de carpeta (manual)", value=manual_default)
             if st.button("Guardar carpeta"):
                 try:
-                    nueva_ruta = Path(manual_dir).expanduser()
+                    nueva_ruta = normalizar_carpeta_destino(manual_dir)
                     nueva_ruta.mkdir(parents=True, exist_ok=True)
                     st.session_state["download_base_dir"] = str(nueva_ruta)
                     _persist_user_preferences()

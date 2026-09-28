@@ -71,6 +71,37 @@ def _mes_a_texto(mes: int) -> str:
     ][mes - 1]
 
 
+def normalizar_carpeta_destino(ruta) -> Path:
+    """Quita espacios y puntos del final de cada tramo de una ruta.
+
+    Windows no admite que un nombre de carpeta termine en espacio o punto: al
+    crearla los recorta en silencio, pero despues la ruta CON el espacio no
+    resuelve y escribir ahi falla con FileNotFoundError. El usuario escribe
+    "F:\Cliente S.A. " en el campo manual sin darse cuenta, la carpeta se crea
+    como "Cliente S.A", y la descarga no guarda un solo archivo.
+
+    Se respeta el ancla ("F:\\", "/") y se dejan intactos los tramos que
+    quedarian vacios, como "." y "..".
+    """
+    original = Path(str(ruta or "").strip()).expanduser()
+    partes = list(original.parts)
+    if not partes:
+        return original
+    ancla = original.anchor
+    resto = partes[1:] if ancla else partes
+    limpias = []
+    for tramo in resto:
+        recortado = tramo.rstrip(" .")
+        limpias.append(recortado or tramo)
+    destino = Path(ancla, *limpias) if ancla else Path(*limpias)
+    if destino != original:
+        logger.info(
+            f"Carpeta destino normalizada: {original} -> {destino} "
+            "(Windows no admite espacios ni puntos al final)."
+        )
+    return destino
+
+
 def _sanear_nombre_archivo(texto: str, sufijo: str = "") -> str:
     """Devuelve `texto` apto para usar como nombre de archivo.
 
