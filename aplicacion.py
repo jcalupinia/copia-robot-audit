@@ -75,6 +75,7 @@ from robot.download_resume import (
 )
 from licensing_client import LicensingClient
 from sesion_licencia import (
+    configurar_registro,
     licencia_vigente,
     marcar_licencia_activada,
     sesion_sigue_viva,
@@ -2783,6 +2784,27 @@ LICENCIA_REVALIDAR_HORAS = float(os.getenv("LICENSE_REVALIDATE_HOURS", "12"))
 LICENCIA_GRACIA_DIAS = float(os.getenv("LICENSE_OFFLINE_GRACE_DAYS", "30"))
 
 LICENSE_CLIENT = LicensingClient()
+
+# Bitacora de sesion: por que entro, por que se cerro. Sin tokens ni datos
+# personales. Es lo unico que queda cuando un usuario reporta "se me cerro la
+# sesion" y los logs de la app, que van a stderr, ya se perdieron.
+SESION_EVENTOS = SESSION_CACHE_DIR / "sesion_eventos.log"
+
+
+def _anotar_evento_sesion(mensaje: str) -> None:
+    try:
+        # Se recorta para que no crezca sin limite en equipos de uso diario.
+        if SESION_EVENTOS.exists() and SESION_EVENTOS.stat().st_size > 200_000:
+            lineas = SESION_EVENTOS.read_text(encoding="utf-8").splitlines()[-400:]
+            SESION_EVENTOS.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+        marca = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with SESION_EVENTOS.open("a", encoding="utf-8") as fh:
+            fh.write(f"{marca}  {mensaje}\n")
+    except Exception:
+        pass
+
+
+configurar_registro(_anotar_evento_sesion)
 SESSION_CACHE_DIR = Path(os.getenv("SESSION_CACHE_DIR", RUNTIME_DIR / ".session_cache"))
 SESSION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 SESSION_CACHE = SESSION_CACHE_DIR / "session_cache.json"

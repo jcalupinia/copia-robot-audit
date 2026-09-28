@@ -103,3 +103,17 @@ for cache in caches:
         valor = datos.get(clave)
         print(f"   {clave:15} {_vence(valor) if valor else 'no hay'}")
     print()
+
+# ---------------------------------------------------------------- bitacora
+print("4) Ultimos eventos de sesion")
+bitacora = carpeta / "sesion_eventos.log"
+if not bitacora.exists():
+    print(f"   no hay bitacora en {bitacora}")
+    print("   (la escribe la version nueva; si falta, la app es anterior)")
+else:
+    lineas = bitacora.read_text(encoding="utf-8", errors="replace").splitlines()
+    for linea in lineas[-15:]:
+        print(f"   {linea}")
+    if not lineas:
+        print("   la bitacora esta vacia")
+print()
