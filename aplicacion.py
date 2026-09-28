@@ -2785,6 +2785,9 @@ LICENCIA_GRACIA_DIAS = float(os.getenv("LICENSE_OFFLINE_GRACE_DAYS", "30"))
 
 LICENSE_CLIENT = LicensingClient()
 
+SESSION_CACHE_DIR = Path(os.getenv("SESSION_CACHE_DIR", RUNTIME_DIR / ".session_cache"))
+SESSION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
 # Bitacora de sesion: por que entro, por que se cerro. Sin tokens ni datos
 # personales. Es lo unico que queda cuando un usuario reporta "se me cerro la
 # sesion" y los logs de la app, que van a stderr, ya se perdieron.
@@ -2805,8 +2808,6 @@ def _anotar_evento_sesion(mensaje: str) -> None:
 
 
 configurar_registro(_anotar_evento_sesion)
-SESSION_CACHE_DIR = Path(os.getenv("SESSION_CACHE_DIR", RUNTIME_DIR / ".session_cache"))
-SESSION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 SESSION_CACHE = SESSION_CACHE_DIR / "session_cache.json"
 ENABLE_SESSION_CACHE = os.getenv("ENABLE_SESSION_CACHE", "1").strip().lower() not in {"0", "false", "no"}
 PREFERENCES_FILE = Path(os.getenv("USER_PREFS_PATH", SESSION_CACHE_DIR / "user_prefs.json"))
