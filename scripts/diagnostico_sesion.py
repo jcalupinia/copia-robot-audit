@@ -27,10 +27,46 @@ from pathlib import Path
 VERSION_CON_REFRESH = (2026, 9, 24)
 
 
+APP_NAME = "ROBOT_AUDIT_SRI"
+
+
 def _raiz() -> Path:
+    """Carpeta desde la que REALMENTE corre la app.
+
+    El .exe se guarda donde sea, pero al abrirlo se copia a
+    %LOCALAPPDATA%\\ROBOT_AUDIT_SRI y se relanza desde ahi. La sesion y las
+    preferencias viven en esa carpeta, no en la de Descargas: buscarlas junto
+    al archivo descargado no encuentra nada, y parece que el usuario nunca
+    hubiera iniciado sesion.
+    """
     if len(sys.argv) > 1:
         return Path(sys.argv[1]).expanduser()
-    return Path(os.getenv("APP_RUNTIME_DIR") or Path(__file__).resolve().parent.parent)
+    if os.getenv("APP_RUNTIME_DIR"):
+        return Path(os.environ["APP_RUNTIME_DIR"])
+    local = os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
+    instalada = Path(local) / APP_NAME
+    if instalada.is_dir():
+        return instalada
+    return Path(__file__).resolve().parent.parent
+
+
+def _carpeta_cache(raiz: Path) -> Path:
+    """Donde guarda la sesion, respetando `desktop_config.json` si existe."""
+    if os.getenv("SESSION_CACHE_DIR"):
+        return Path(os.environ["SESSION_CACHE_DIR"])
+    config = raiz / "desktop_config.json"
+    if config.exists():
+        try:
+            valor = (
+                json.loads(config.read_text(encoding="utf-8-sig"))
+                .get("SESSION_CACHE_DIR") or ""
+            ).strip()
+        except Exception:
+            valor = ""
+        if valor:
+            ruta = Path(valor)
+            return ruta if ruta.is_absolute() else (raiz / ruta)
+    return raiz / ".session_cache"
 
 
 def _vence(token: str) -> str:
@@ -51,7 +87,9 @@ def _vence(token: str) -> str:
 
 
 raiz = _raiz()
-print(f"Carpeta analizada: {raiz}\n")
+print(f"Carpeta analizada: {raiz}")
+print("(la app corre desde %LOCALAPPDATA%\\ROBOT_AUDIT_SRI, no desde donde")
+print(" guardaste el .exe: al abrirlo se copia ahi y se relanza)\n")
 
 # ---------------------------------------------------------------- version
 print("1) Version de la aplicacion")
@@ -59,7 +97,17 @@ archivo_version = next(
     (p for p in (raiz / "version.txt", raiz.parent / "version.txt") if p.exists()), None
 )
 if not archivo_version:
-    print("   no se encontro version.txt: indica la carpeta del exe como argumento")
+    # En una instalacion real version.txt viaja DENTRO del .exe y se extrae a
+    # una carpeta temporal, asi que aca no esta. La fecha del ejecutable sirve
+    # igual para saber de cuando es la build.
+    exe = raiz / "ROBOT_AUDIT_SRI.exe"
+    if exe.exists():
+        cuando = datetime.fromtimestamp(exe.stat().st_mtime)
+        print(f"   ejecutable del {cuando:%d/%m/%Y %H:%M}")
+        print("   La version exacta se lee en la barra superior de la app.")
+    else:
+        print(f"   no se encontro el ejecutable en {raiz}")
+        print("   Indica la carpeta como argumento si la instalaste en otro lado.")
 else:
     version = archivo_version.read_text(encoding="utf-8-sig").strip()
     try:
@@ -73,7 +121,7 @@ else:
 
 # ---------------------------------------------------------------- sesion
 print("\n2) Sesion guardada")
-carpeta = Path(os.getenv("SESSION_CACHE_DIR") or (raiz / ".session_cache"))
+carpeta = _carpeta_cache(raiz)
 caches = sorted(carpeta.glob("session_cache*.json")) if carpeta.is_dir() else []
 if not caches:
     print(f"   no hay sesion guardada en {carpeta}")
