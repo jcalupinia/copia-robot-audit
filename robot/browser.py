@@ -1085,12 +1085,81 @@ def _click_consultar_emitidos(page) -> bool:
         return False
 
 
+# Windows corta las rutas en 260 caracteres salvo que el equipo tenga
+# habilitadas las rutas largas, que por defecto NO lo estan. Los nombres que
+# arma el robot rondan los 130 caracteres -- tipo, fecha, serie y la clave de
+# acceso de 49 digitos -- asi que basta con que el usuario elija una carpeta de
+# nombre descriptivo para pasarse del limite. El sintoma era el peor posible: el
+# proceso "termina bien" y no baja un solo archivo.
+LIMITE_RUTA_WINDOWS = 250
+
+
+def _acortar_si_no_entra(base_path: Path, extension: str) -> Path:
+    """Recorta el nombre para que la ruta completa entre en Windows.
+
+    El espacio disponible lo fija la CARPETA: lo que sobre despues de ella es
+    lo que puede medir el nombre. Se conservan los dos extremos -- el
+    principio, `tipo__fecha__`, que es por donde el reporte reconoce los
+    archivos, y el final, que lleva la clave de acceso e identifica el
+    comprobante -- y se va el medio, que solo repite la serie.
+
+    Si ni con un nombre minimo entra, el problema es la carpeta y no el nombre:
+    ahi se avisa, porque acortar mas no arregla nada y el usuario necesita
+    saber que tiene que elegir otra ruta.
+    """
+    nombre = base_path.name
+    # Se reservan 3 caracteres para el sufijo de colision (`_1`, `_2`...), que
+    # `_resolver_destino_unico` agrega DESPUES de acortar.
+    disponible = (
+        LIMITE_RUTA_WINDOWS - len(str(base_path.parent)) - 1 - len(extension) - 3
+    )
+    if disponible >= len(nombre):
+        return base_path
+
+    if disponible < 30:
+        logger.warning(
+            f"La carpeta destino es demasiado profunda: solo quedan "
+            f"{max(0, disponible)} caracteres para el nombre del archivo y "
+            "Windows corta la ruta en 260. Elige una carpeta mas corta. "
+            f"({base_path.parent})"
+        )
+        return base_path
+
+    cabeza = disponible // 2
+    cola = disponible - cabeza - 1
+    acortado = f"{nombre[:cabeza]}~{nombre[-cola:]}"
+    logger.info(f"Nombre acortado para que la ruta entre en Windows: {acortado}")
+    return base_path.with_name(acortado)
+
+
+def _escribir_descarga(destino: Path, contenido: bytes) -> bool:
+    """Guarda el archivo descargado, y DICE por que si no pudo.
+
+    Cada sitio hacia `except Exception: return None`, asi que un fallo de
+    escritura -- ruta demasiado larga, carpeta con un espacio al final, disco
+    lleno, permisos -- le llegaba al usuario como "no se obtuvo archivo", sin
+    una sola pista de que el problema estaba en la carpeta que eligio.
+    """
+    destino = Path(destino)
+    try:
+        destino.write_bytes(contenido)
+        return True
+    except OSError as err:
+        logger.warning(
+            f"No se pudo guardar '{destino.name}' en {destino.parent}: {err} "
+            f"(la ruta completa mide {len(str(destino))} caracteres; Windows "
+            "corta en 260)."
+        )
+        return False
+
+
 def _resolver_destino_unico(base_path: Path, extension: str) -> Path:
     """
     Ajusta el nombre final asegurando que exista la extension indicada
     y evitando colisiones con archivos existentes.
     """
     extension = extension if extension.startswith(".") else f".{extension}"
+    base_path = _acortar_si_no_entra(Path(base_path), extension)
     destino = base_path.with_suffix(extension)
     contador = 1
     while destino.exists():
@@ -1166,7 +1235,8 @@ def _guardar_pdf_desde_enlace(page, link_locator, base_destino: Path) -> Optiona
             if "." in nombre:
                 extension = Path(nombre).suffix or extension
         destino_final = _resolver_destino_unico(base_destino, extension)
-        Path(destino_final).write_bytes(cuerpo)
+        if not _escribir_descarga(destino_final, cuerpo):
+            return None
         return destino_final
     except PlaywrightTimeoutError as err:
         errores.append(f"Falla al capturar respuesta PDF (timeout): {err}")
@@ -1257,7 +1327,8 @@ def _guardar_pdf_desde_jsf(page, link_locator, base_destino: Path) -> Optional[P
             if "." in nombre:
                 extension = Path(nombre).suffix or extension
         destino_final = _resolver_destino_unico(base_destino, extension)
-        Path(destino_final).write_bytes(cuerpo)
+        if not _escribir_descarga(destino_final, cuerpo):
+            return None
         return destino_final
     except Exception:
         return None
@@ -1351,9 +1422,7 @@ def _descargar_pdf_recibidos_post(page, link_locator, base_destino: Path) -> Opt
         if "." in nombre:
             extension = Path(nombre).suffix or extension
     destino_final = _resolver_destino_unico(base_destino, extension)
-    try:
-        Path(destino_final).write_bytes(cuerpo)
-    except Exception:
+    if not _escribir_descarga(destino_final, cuerpo):
         return None
     return destino_final
 
@@ -1448,9 +1517,7 @@ def _descargar_pdf_emitidos_post(page, link_locator, base_destino: Path) -> Opti
         if "." in nombre:
             extension = Path(nombre).suffix or extension
     destino_final = _resolver_destino_unico(base_destino, extension)
-    try:
-        Path(destino_final).write_bytes(cuerpo)
-    except Exception:
+    if not _escribir_descarga(destino_final, cuerpo):
         return None
     return destino_final
 
@@ -1494,9 +1561,7 @@ def _ejecutar_post_pdf(
         if "." in nombre:
             extension = Path(nombre).suffix or extension
     destino_final = _resolver_destino_unico(base_destino, extension)
-    try:
-        Path(destino_final).write_bytes(cuerpo)
-    except Exception:
+    if not _escribir_descarga(destino_final, cuerpo):
         return None
     return destino_final
 
@@ -1625,7 +1690,8 @@ def _guardar_xml_desde_enlace(page, link_locator, base_destino: Path) -> Optiona
             if "." in nombre:
                 extension = Path(nombre).suffix or extension
         destino_final = _resolver_destino_unico(base_destino, extension)
-        destino_final.write_bytes(cuerpo)
+        if not _escribir_descarga(destino_final, cuerpo):
+            return None
         return destino_final
     except PlaywrightTimeoutError as err:
         errores.append(f"Falla al capturar respuesta XML (timeout): {err}")
