@@ -61,7 +61,7 @@ from robot.downloader import (
     ESTADOS_EMITIDOS_MAP,
 )
 from robot.parser import construir_reporte, _parse_recibido_xml
-from robot.file_utils import normalizar_carpeta_destino
+from robot.file_utils import mostrar_ruta, normalizar_carpeta_destino
 from robot.historial import registrar_descarga, obtener_historial   #  FIX import correcto
 from robot.download_resume import (
     build_checkpoint_payload,
@@ -4960,9 +4960,9 @@ with tab1:
                 try:
                     nueva_ruta = normalizar_carpeta_destino(seleccionada)
                     nueva_ruta.mkdir(parents=True, exist_ok=True)
-                    st.session_state["download_base_dir"] = str(nueva_ruta)
+                    st.session_state["download_base_dir"] = mostrar_ruta(nueva_ruta)
                     _persist_user_preferences()
-                    st.success(f" Carpeta configurada: {nueva_ruta}")
+                    st.success(f" Carpeta configurada: {mostrar_ruta(nueva_ruta)}")
                 except Exception as err:
                     st.error(f"No se pudo usar la carpeta indicada: {err}")
             elif error:
@@ -4976,9 +4976,9 @@ with tab1:
                 try:
                     nueva_ruta = normalizar_carpeta_destino(manual_dir)
                     nueva_ruta.mkdir(parents=True, exist_ok=True)
-                    st.session_state["download_base_dir"] = str(nueva_ruta)
+                    st.session_state["download_base_dir"] = mostrar_ruta(nueva_ruta)
                     _persist_user_preferences()
-                    st.success(f" Carpeta configurada: {nueva_ruta}")
+                    st.success(f" Carpeta configurada: {mostrar_ruta(nueva_ruta)}")
                     st.session_state["show_manual_dir"] = False
                     st.session_state["last_manual_dir_error"] = None
                 except Exception as err:
@@ -5259,7 +5259,7 @@ with tab1:
                     filtros.append(f"Punto: {resultado['punto_emision']}")
                 if filtros:
                     st.caption(" | ".join(filtros))
-                st.caption(f"Archivos organizados en: `{carpeta_tipo}`")
+                st.caption(f"Archivos organizados en: `{mostrar_ruta(carpeta_tipo)}`")
                 reporte_path = resultado.get("reporte")
                 if reporte_path and Path(reporte_path).exists():
                     with open(reporte_path, "rb") as f:
@@ -5322,7 +5322,7 @@ with tab1:
                 st.success(
                     f" Reporte rápido generado ({tipo_visible}): {n_registros} registro(s)."
                 )
-                st.caption(f"Archivos organizados en: `{carpeta_tipo}`")
+                st.caption(f"Archivos organizados en: `{mostrar_ruta(carpeta_tipo)}`")
                 # Un unico boton: el reporte del alcance que se consulto
                 # (anual > rango > mes/dia). Los tres nunca coexisten.
                 for clave, etiqueta in (
@@ -5350,7 +5350,7 @@ with tab1:
                 n_pdf = resultado.get("n_pdf", 0)
                 tipo_visible = resultado.get("tipo_visible", params.get("tipo"))
                 st.success(f" Descarga completada ({tipo_visible}). XML: {n_xml} | PDF: {n_pdf}")
-                st.caption(f"Archivos organizados en: `{carpeta_tipo}`")
+                st.caption(f"Archivos organizados en: `{mostrar_ruta(carpeta_tipo)}`")
 
                 txt_path = resultado.get("txt")
                 if txt_path and Path(txt_path).exists():
@@ -7079,11 +7079,11 @@ with tab3:
                 seleccionada, error = _select_directory_dialog(consolidar_dir_actual)
                 if seleccionada:
                     try:
-                        ruta_cons = Path(seleccionada).expanduser()
+                        ruta_cons = normalizar_carpeta_destino(seleccionada)
                         ruta_cons.mkdir(parents=True, exist_ok=True)
-                        st.session_state["consolidate_base_dir"] = str(ruta_cons)
+                        st.session_state["consolidate_base_dir"] = mostrar_ruta(ruta_cons)
                         _persist_user_preferences()
-                        st.success(f" Carpeta de consolidacion: {ruta_cons}")
+                        st.success(f" Carpeta de consolidacion: {mostrar_ruta(ruta_cons)}")
                     except Exception as err:
                         st.error(f"No se pudo usar la carpeta indicada: {err}")
                 elif error:
@@ -7107,11 +7107,11 @@ with tab3:
             )
             if st.button("Guardar carpeta de consolidacion", key="btn_save_manual_consolidate_dir"):
                 try:
-                    nueva_ruta = Path(manual_cons).expanduser()
+                    nueva_ruta = normalizar_carpeta_destino(manual_cons)
                     nueva_ruta.mkdir(parents=True, exist_ok=True)
-                    st.session_state["consolidate_base_dir"] = str(nueva_ruta)
+                    st.session_state["consolidate_base_dir"] = mostrar_ruta(nueva_ruta)
                     _persist_user_preferences()
-                    st.success(f" Carpeta de consolidacion: {nueva_ruta}")
+                    st.success(f" Carpeta de consolidacion: {mostrar_ruta(nueva_ruta)}")
                     st.session_state["show_manual_consolidate_dir"] = False
                     st.session_state["last_manual_consolidate_dir_error"] = None
                 except Exception as err:
@@ -7265,12 +7265,12 @@ with tab3:
             incluir_pdf = st.checkbox("Consolidar PDF", value=True, key="consolidar_pdf")
 
         if st.button("Consolidar desde carpeta", use_container_width=True, key="btn_run_consolidation"):
-            carpeta_base_cons = Path(
+            carpeta_base_cons = normalizar_carpeta_destino(
                 st.session_state.get(
                     "consolidate_base_dir",
                     st.session_state.get("download_base_dir", str(DESC_DIR)),
                 )
-            ).expanduser()
+            )
             if not ruc_consolidar:
                 st.error("Ingresa el RUC del contribuyente (obligatorio).")
                 st.stop()
@@ -7278,7 +7278,7 @@ with tab3:
                 st.error("El RUC debe tener exactamente 13 dígitos numéricos.")
                 st.stop()
             if not carpeta_base_cons.exists():
-                st.error(f"La carpeta seleccionada no existe: {carpeta_base_cons}")
+                st.error(f"La carpeta seleccionada no existe: {mostrar_ruta(carpeta_base_cons)}")
                 st.stop()
             if not incluir_xml and not incluir_pdf:
                 st.warning("Selecciona al menos una opcion: XML o PDF.")
@@ -7307,7 +7307,7 @@ with tab3:
                 estado_slug=estado_slug,
             )
             if not base_search.exists():
-                st.error(f"No se encontro una carpeta valida para buscar reportes: {base_search}")
+                st.error(f"No se encontro una carpeta valida para buscar reportes: {mostrar_ruta(base_search)}")
                 st.stop()
 
             prefix_base = "recibidos_reporte" if origen_consolidar == "Recibidos" else "emitidos_reporte"
@@ -7323,8 +7323,8 @@ with tab3:
                 destino_anual_dir = destino_anual_dir / periodo_suffix
             destino_anual_dir.mkdir(parents=True, exist_ok=True)
 
-            st.caption(f"Buscando reportes en: `{base_search}`")
-            st.caption(f"Guardando consolidados en: `{destino_anual_dir}`")
+            st.caption(f"Buscando reportes en: `{mostrar_ruta(base_search)}`")
+            st.caption(f"Guardando consolidados en: `{mostrar_ruta(destino_anual_dir)}`")
 
             if incluir_xml:
                 reportes_xml = _buscar_reportes_por_periodo(
@@ -7380,7 +7380,7 @@ with tab3:
                     tipo_slug,
                 )
                 if copiados_xml > 0:
-                    st.success(f"XML copiados: {copiados_xml} en `{destino_copia_xml}`")
+                    st.success(f"XML copiados: {copiados_xml} en `{mostrar_ruta(destino_copia_xml)}`")
                     if xml_por_mes:
                         detalle_mes_xml = ", ".join(
                             f"{MESES_ES[m - 1] if 1 <= m <= 12 else 'Sin_fecha'}: {n}"
@@ -7435,7 +7435,7 @@ with tab3:
                     tipo_slug,
                 )
                 if copiados_pdf > 0:
-                    st.success(f"PDF copiados: {copiados_pdf} en `{destino_copia_pdf}`")
+                    st.success(f"PDF copiados: {copiados_pdf} en `{mostrar_ruta(destino_copia_pdf)}`")
                     if pdf_por_mes:
                         detalle_mes_pdf = ", ".join(
                             f"{MESES_ES[m - 1] if 1 <= m <= 12 else 'Sin_fecha'}: {n}"

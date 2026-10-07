@@ -42,7 +42,11 @@ from robot.config import (
     RECUPERAR_COMPROBANTES_URL,
 )
 from robot.data_formatters import _parse_decimal
-from robot.file_utils import _sanear_nombre_archivo
+from robot.file_utils import (
+    PREFIJO_RUTA_LARGA,
+    _sanear_nombre_archivo,
+    mostrar_ruta,
+)
 from robot.pdf_extraction import (
     _extraer_comprobante_desde_autorizacion,
     _limpiar_cdata,
@@ -1117,6 +1121,12 @@ def _acortar_si_no_entra(base_path: Path, extension: str) -> Path:
     el nombre: ahi se avisa en lugar de recortar a ciegas, porque un nombre sin
     el prefijo del tipo bajaria bien y despues no apareceria en el reporte.
     """
+    # Con el prefijo de ruta larga el limite sube de 260 a 32767 caracteres:
+    # no hay nada que acortar y el archivo conserva su nombre completo. El
+    # recorte queda como red de seguridad para las rutas que no lo llevan.
+    if str(base_path).startswith(PREFIJO_RUTA_LARGA):
+        return base_path
+
     nombre = base_path.name
     # Se reservan 3 caracteres para el sufijo de colision (`_1`, `_2`...), que
     # `_resolver_destino_unico` agrega DESPUES de acortar.
@@ -1133,7 +1143,7 @@ def _acortar_si_no_entra(base_path: Path, extension: str) -> Path:
             f"La carpeta destino es demasiado profunda: solo quedan "
             f"{max(0, disponible)} caracteres para el nombre del archivo y "
             "Windows corta la ruta en 260. Elige una carpeta mas corta. "
-            f"({base_path.parent})"
+            f"({mostrar_ruta(base_path.parent)})"
         )
         return base_path
 
@@ -1157,9 +1167,9 @@ def _escribir_descarga(destino: Path, contenido: bytes) -> bool:
         return True
     except OSError as err:
         logger.warning(
-            f"No se pudo guardar '{destino.name}' en {destino.parent}: {err} "
-            f"(la ruta completa mide {len(str(destino))} caracteres; Windows "
-            "corta en 260)."
+            f"No se pudo guardar '{destino.name}' en "
+            f"{mostrar_ruta(destino.parent)}: {err} (la ruta completa mide "
+            f"{len(mostrar_ruta(destino))} caracteres)."
         )
         return False
 

@@ -10,6 +10,7 @@ las re-importa para mantener la API previa intacta.
 from __future__ import annotations
 
 import csv
+import os
 import re
 import unicodedata
 from pathlib import Path
@@ -71,6 +72,63 @@ def _mes_a_texto(mes: int) -> str:
     ][mes - 1]
 
 
+# --------------------------------------------------------------------------- #
+# Rutas largas de Windows
+# --------------------------------------------------------------------------- #
+# Windows corta las rutas en 260 caracteres salvo que el equipo tenga la clave
+# LongPathsEnabled en 1, que por defecto NO la tiene. El robot llega facil a ese
+# limite sin que la ruta sea rara: el usuario elige una carpeta descriptiva de
+# ~130 caracteres, el robot le agrega 75 de estructura
+# (RUC/Emitidos/Autorizados/Tipo/anio/mes/PDF) y el nombre del archivo lleva la
+# clave de acceso de 49 digitos. El sintoma era el peor posible: el proceso
+# "termina bien" y no baja un solo archivo.
+#
+# El prefijo `\\?\` le dice a la API de Windows que no aplique ese limite (pasa
+# a 32767 caracteres). Sirve sin permisos de administrador y sin tocar el
+# registro, que es lo unico viable cuando la app corre en la maquina de un
+# cliente. Verificado a 393 caracteres con mkdir, write, exists, rglob,
+# openpyxl.save y el save_as de Playwright.
+#
+# A cambio exige una ruta absoluta, con barras invertidas y sin tramos "." ni
+# "..": el prefijo le saca a Windows el trabajo de normalizarla, asi que hay que
+# entregarsela ya normalizada.
+PREFIJO_RUTA_LARGA = "\\\\?\\"
+_PREFIJO_RUTA_LARGA_UNC = PREFIJO_RUTA_LARGA + "UNC" + "\\"
+
+
+def ruta_larga(ruta) -> Path:
+    """Devuelve la ruta en la forma que ignora el limite de 260 de Windows.
+
+    Es idempotente, asi que se puede aplicar sin averiguar si ya se aplico.
+    Fuera de Windows no hay limite que levantar y la ruta se devuelve igual.
+    """
+    texto = str(ruta or "")
+    if not texto or os.name != "nt" or texto.startswith(PREFIJO_RUTA_LARGA):
+        return Path(texto)
+    # `abspath` resuelve lo relativo y los tramos "." y "..", que con el
+    # prefijo Windows ya no interpreta, y pasa todo a barras invertidas.
+    absoluta = os.path.abspath(texto)
+    if absoluta.startswith("\\\\"):
+        # Recurso de red: \\servidor\carpeta -> \\?\UNC\servidor\carpeta
+        return Path(_PREFIJO_RUTA_LARGA_UNC + absoluta[2:])
+    return Path(PREFIJO_RUTA_LARGA + absoluta)
+
+
+def mostrar_ruta(ruta) -> str:
+    """La ruta como la reconoce el usuario, sin el prefijo tecnico.
+
+    `ruta_larga` deja rutas que empiezan con `\\?\`, que es correcto para el
+    sistema de archivos pero desconcertante en un mensaje o en el log. Todo lo
+    que el usuario lee pasa por aca.
+    """
+    texto = str(ruta or "")
+    if texto.startswith(_PREFIJO_RUTA_LARGA_UNC):
+        return "\\\\" + texto[len(_PREFIJO_RUTA_LARGA_UNC):]
+    if texto.startswith(PREFIJO_RUTA_LARGA):
+        return texto[len(PREFIJO_RUTA_LARGA):]
+    return texto
+
+
 def normalizar_carpeta_destino(ruta) -> Path:
     """Quita espacios y puntos del final de cada tramo de una ruta.
 
@@ -82,6 +140,12 @@ def normalizar_carpeta_destino(ruta) -> Path:
 
     Se respeta el ancla ("F:\\", "/") y se dejan intactos los tramos que
     quedarian vacios, como "." y "..".
+
+    Al final se aplica `ruta_larga`, y con eso la longitud de la carpeta que
+    elige el usuario deja de importar: como todo el resto del robot construye
+    sus rutas colgando de la que devuelve esta funcion (`destino / RUC /
+    "Emitidos" / ...`), el prefijo se hereda solo y no hay que repetirlo en cada
+    mkdir ni en cada escritura.
     """
     original = Path(str(ruta or "").strip()).expanduser()
     partes = list(original.parts)
@@ -99,7 +163,7 @@ def normalizar_carpeta_destino(ruta) -> Path:
             f"Carpeta destino normalizada: {original} -> {destino} "
             "(Windows no admite espacios ni puntos al final)."
         )
-    return destino
+    return ruta_larga(destino)
 
 
 def _sanear_nombre_archivo(texto: str, sufijo: str = "") -> str:
