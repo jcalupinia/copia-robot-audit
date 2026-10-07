@@ -1094,18 +1094,28 @@ def _click_consultar_emitidos(page) -> bool:
 LIMITE_RUTA_WINDOWS = 250
 
 
+# Minimo de clave de acceso que se conserva al final de un nombre acortado.
+# Con ocho digitos ya se distingue un comprobante de otro al mirar la carpeta, y
+# si dos quedaran iguales `_resolver_destino_unico` les agrega `_1`, `_2`.
+COLA_MINIMA_NOMBRE = 8
+
+
 def _acortar_si_no_entra(base_path: Path, extension: str) -> Path:
     """Recorta el nombre para que la ruta completa entre en Windows.
 
     El espacio disponible lo fija la CARPETA: lo que sobre despues de ella es
-    lo que puede medir el nombre. Se conservan los dos extremos -- el
-    principio, `tipo__fecha__`, que es por donde el reporte reconoce los
-    archivos, y el final, que lleva la clave de acceso e identifica el
-    comprobante -- y se va el medio, que solo repite la serie.
+    lo que puede medir el nombre. Se conservan los dos extremos y se va el
+    medio, que repite la serie y la fecha que ya estan en la carpeta:
 
-    Si ni con un nombre minimo entra, el problema es la carpeta y no el nombre:
-    ahi se avisa, porque acortar mas no arregla nada y el usuario necesita
-    saber que tiene que elegir otra ruta.
+      - el principio, hasta el `__` del tipo (`comprobante_de_retencion__`),
+        porque es por ahi que `_xml_files_por_tipo` reconoce los archivos al
+        armar el reporte. Partirlo deja los XML fuera del reporte.
+      - el final, que lleva la cola de la clave de acceso y es lo que
+        identifica al comprobante.
+
+    Si ni conservando esos dos extremos entra, el problema es la carpeta y no
+    el nombre: ahi se avisa en lugar de recortar a ciegas, porque un nombre sin
+    el prefijo del tipo bajaria bien y despues no apareceria en el reporte.
     """
     nombre = base_path.name
     # Se reservan 3 caracteres para el sufijo de colision (`_1`, `_2`...), que
@@ -1116,7 +1126,9 @@ def _acortar_si_no_entra(base_path: Path, extension: str) -> Path:
     if disponible >= len(nombre):
         return base_path
 
-    if disponible < 30:
+    corte = nombre.find("__")
+    prefijo = nombre[: corte + 2] if corte > 0 else ""
+    if len(prefijo) + 1 + COLA_MINIMA_NOMBRE > disponible:
         logger.warning(
             f"La carpeta destino es demasiado profunda: solo quedan "
             f"{max(0, disponible)} caracteres para el nombre del archivo y "
@@ -1125,9 +1137,8 @@ def _acortar_si_no_entra(base_path: Path, extension: str) -> Path:
         )
         return base_path
 
-    cabeza = disponible // 2
-    cola = disponible - cabeza - 1
-    acortado = f"{nombre[:cabeza]}~{nombre[-cola:]}"
+    cola = disponible - len(prefijo) - 1
+    acortado = f"{prefijo}~{nombre[-cola:]}"
     logger.info(f"Nombre acortado para que la ruta entre en Windows: {acortado}")
     return base_path.with_name(acortado)
 
