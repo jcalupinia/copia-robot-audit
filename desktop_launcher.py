@@ -10,14 +10,37 @@ import time
 import threading
 import webbrowser
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import requests
 
 APP_NAME = "ROBOT_AUDIT_SRI"
 VERSION_FILENAME = "version.txt"
 
-DEFAULT_LICENSE_API_URL = os.getenv("DEFAULT_LICENSE_API_URL", "https://sri-robot-audit-ik01.onrender.com")
+DEFAULT_LICENSE_API_URL = os.getenv("DEFAULT_LICENSE_API_URL", "https://sri-api.audit-ia.ec")
+
+# Servidores de los que la app ya se mudo.
+#
+# Cada instalacion guarda su LICENSE_API_URL en desktop_config.json, dentro de
+# %LOCALAPPDATA%\\ROBOT_AUDIT_SRI, y ese archivo le gana al valor compilado en
+# el .exe (ver `_normalize_config`). La auto-actualizacion reemplaza el
+# ejecutable pero no toca el config. Sin esta lista, un equipo ya instalado
+# seguiria hablando con el servidor viejo para siempre, aunque se actualice, y
+# apagar ese servidor lo dejaria sin validar licencia y sin forma de enterarse
+# de ninguna actualizacion futura: su unica fuente de /updates/latest es
+# justamente la URL vieja.
+#
+# Al reconocer uno de estos hosts, el config se reescribe al servidor actual y
+# `_load_config` lo persiste. Ocurre una sola vez: despues ya no coincide.
+HOSTS_RETIRADOS = ("sri-robot-audit-ik01.onrender.com",)
+
+
+def _host_de(url: str) -> str:
+    """El host de una URL, vacio si no se puede leer."""
+    try:
+        return (urlsplit((url or "").strip()).hostname or "").lower()
+    except Exception:
+        return ""
 # El token de actualizaciones NO debe estar hardcodeado: se distribuye vía
 # desktop_config.json junto al .exe (o se inyecta al build con la env var
 # DEFAULT_UPDATE_TOKEN). Si queda vacío, el launcher omite el header y solo
@@ -62,7 +85,12 @@ def _normalize_config(raw: dict | None) -> dict:
         else:
             current = str(current)
         if key == "LICENSE_API_URL":
-            cfg[key] = current or value
+            if _host_de(current) in HOSTS_RETIRADOS:
+                # El equipo quedo apuntando a un servidor que ya no es: se
+                # migra al actual. Ver HOSTS_RETIRADOS.
+                cfg[key] = value
+            else:
+                cfg[key] = current or value
         elif key == "SESSION_CACHE_DIR":
             cfg[key] = current or ".session_cache"
         elif key == "UPDATE_TOKEN":
