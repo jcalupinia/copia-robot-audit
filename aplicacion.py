@@ -3451,6 +3451,45 @@ def _map_xml_to_retencion_row(cabecera: dict, retenciones: list[dict]) -> dict:
     return row
 
 
+def _raiz_de_busqueda(base_dir: Path, ruc: str) -> Path | None:
+    """Desde dónde barrer los documentos de `ruc`, o None si la ruta no es suya.
+
+    La búsqueda queda restringida al árbol del RUC. Sin eso, si `base_dir`
+    contiene varios contribuyentes, `rglob` los mezcla: dos RUCs con facturas
+    de marzo/2026 terminan en el mismo reporte.
+
+    Hay tres formas válidas de apuntar, y las tres se aceptan:
+
+        <base>/<RUC>                     la carpeta del contribuyente
+        <base>                           el padre, que la contiene
+        <base>/<RUC>/Emitidos/…/2026     más adentro de su árbol
+
+    La tercera es la de quien ya tiene abierta la carpeta del año y la elige
+    directamente. Ahí no hay que buscar el RUC hacia abajo: todo lo que cuelga
+    de esa ruta ya es de ese contribuyente, así que se barre desde donde apuntó
+    y de paso el reporte sale acotado a lo que pidió.
+
+    Se sube por el árbol igual que `inferir_base_ruc` en
+    `robot/retencion_vs_factura.py`, que resuelve lo mismo para las facturas.
+    """
+    base_dir = Path(base_dir)
+    ruc = (ruc or "").strip()
+    if not ruc:
+        return None
+    if base_dir.name == ruc and base_dir.is_dir():
+        return base_dir
+    hija = base_dir / ruc
+    if hija.is_dir():
+        return hija
+    try:
+        ancestros = {p.name for p in base_dir.resolve().parents}
+    except OSError:
+        ancestros = {p.name for p in base_dir.parents}
+    if ruc in ancestros:
+        return base_dir
+    return None
+
+
 def _build_custom_report_from_folder(
     base_dir: Path,
     *,
@@ -3472,28 +3511,22 @@ def _build_custom_report_from_folder(
             "errors": [],
         }
 
-    # La búsqueda queda restringida a la subcarpeta cuyo nombre coincida
-    # EXACTAMENTE con el RUC. Sin esto, si `base_dir` contiene varios RUCs,
-    # rglob mezcla documentos de distintos contribuyentes (ej. dos RUCs con
-    # facturas en marzo/2026 acaban en el mismo reporte). Se acepta que el
-    # usuario apunte directamente a `<base>/<RUC>` o al padre `<base>`.
-    if base_dir.name == ruc_norm and base_dir.is_dir():
-        search_root = base_dir
-    else:
-        candidate = base_dir / ruc_norm
-        if not candidate.exists() or not candidate.is_dir():
-            return {
-                "ok": False,
-                "message": (
-                    f"No se encontró una carpeta llamada '{ruc_norm}' dentro de "
-                    f"'{base_dir}'. Verifica que la carpeta fuente contenga una "
-                    "subcarpeta cuyo nombre sea exactamente el número del RUC."
-                ),
-                "xml_count": 0,
-                "pdf_count": 0,
-                "errors": [],
-            }
-        search_root = candidate
+    # Ver `_raiz_de_busqueda`: acepta la carpeta del RUC, su padre, o cualquier
+    # punto mas adentro de su arbol.
+    search_root = _raiz_de_busqueda(base_dir, ruc_norm)
+    if search_root is None:
+        return {
+            "ok": False,
+            "message": (
+                f"La carpeta '{base_dir}' no pertenece al RUC {ruc_norm}. "
+                "Elige la carpeta del contribuyente (la que se llama como el "
+                "RUC), la que la contiene, o cualquier carpeta dentro de ella "
+                "—por ejemplo la del año o la del mes."
+            ),
+            "xml_count": 0,
+            "pdf_count": 0,
+            "errors": [],
+        }
 
     target_tipo = _canonical_tipo(tipo)
     is_retencion = target_tipo == "retenciones"
@@ -3672,12 +3705,13 @@ def _build_custom_report_from_folder(
             "errors": errores,
         }
 
-    # El reporte se guarda en <base>/Reportes_personalizados/<RUC>/ para que
-    # todos los reportes personalizados queden centralizados y separados por
-    # contribuyente. Sirve tanto si el usuario apunto a la carpeta padre
-    # (`<base>`) como directo a `<base>/<RUC>` — en ambos casos `search_root`
-    # es `<base>/<RUC>` y su `.parent` es `<base>`.
-    report_dir = search_root.parent / "Reportes_personalizados" / ruc_norm
+    # El reporte se guarda DENTRO de la carpeta que eligio el usuario, en
+    # Reportes_personalizados/<RUC>/. Antes se derivaba de `search_root.parent`,
+    # que asumia que `search_root` siempre era `<base>/<RUC>`: con una ruta mas
+    # profunda el Excel aparecia en un nivel intermedio del arbol, lejos de
+    # donde el usuario lo fue a buscar. Derivarlo de `base_dir` lo deja siempre
+    # donde apunto, apunte donde apunte.
+    report_dir = base_dir / "Reportes_personalizados" / ruc_norm
     report_dir.mkdir(parents=True, exist_ok=True)
     origen_slug = _normalize_compare_text(origen)
     tipo_slug = _canonical_tipo(tipo)
