@@ -12,6 +12,8 @@ import time
 import uuid
 import json
 import re
+
+import openpyxl
 import unicodedata
 import calendar
 import base64
@@ -3451,6 +3453,101 @@ def _map_xml_to_retencion_row(cabecera: dict, retenciones: list[dict]) -> dict:
     return row
 
 
+# Los reportes que deja el robot al descargar: emitidos_reporte_xml_factura_
+# 202603.xlsx, recibidos_reporte_pdf_comprobante_de_retencion_202603.xlsx, etc.
+_REPORTE_MENSUAL_RE = re.compile(r"^(emitidos|recibidos)_reporte_(xml|pdf|txt)_", re.IGNORECASE)
+
+
+def _fecha_de_fila(row: dict):
+    """La fecha del comprobante, venga en el dialecto que venga.
+
+    Conviven tres formatos de columna segun quien escribio el reporte:
+    'Fecha de Emisión' (reportes de emitidos), 'fechaEmision' (camelCase, los
+    de retenciones) y 'FECHA_EMISION' (el TXT del portal).
+    """
+    for clave in (
+        "Fecha de Emisión", "fechaEmision", "FECHA_EMISION",
+        "Fecha de Autorización", "fechaAutorizacion", "FECHA_AUTORIZACION",
+    ):
+        fecha = _parse_report_date(row.get(clave))
+        if fecha:
+            return fecha
+    return None
+
+
+def _filas_de_reportes_mensuales(
+    search_root: Path,
+    *,
+    origen: str,
+    target_tipo: str,
+    estado_emitidos: str | None,
+    fecha_inicio: date,
+    fecha_fin: date,
+    fuentes: tuple[str, ...],
+) -> tuple[list[dict], list[str]]:
+    """Filas tomadas de los reportes mensuales que el robot ya genero.
+
+    Reusar el reporte en vez de releer los documentos es mas rapido y, sobre
+    todo, evita volver a pasar por el extractor de PDF, que es el eslabon
+    fragil. Y no hace falta traducir columnas: estos .xlsx los escribieron los
+    mismos writers de `robot/reporting.py` que arman la salida de este modulo,
+    asi que las filas vuelven con las claves que el writer espera.
+
+    `fuentes` elige de que reportes leer ("xml", o "pdf"/"txt"). El llamador los
+    pide por separado para respetar la jerarquia de fidelidad: lo derivado del
+    XML vale tanto como el XML, lo derivado del PDF no.
+    """
+    filas: list[dict] = []
+    errores: list[str] = []
+    for ruta in sorted(search_root.rglob("*.xlsx")):
+        # ~$archivo.xlsx es el bloqueo que deja Excel con el libro abierto.
+        if ruta.name.startswith("~$") or not ruta.is_file():
+            continue
+        # La salida de este mismo modulo vive ahi; leerla se duplicaria sola.
+        if "Reportes_personalizados" in ruta.parts:
+            continue
+        match = _REPORTE_MENSUAL_RE.match(ruta.name)
+        if not match or match.group(2).lower() not in fuentes:
+            continue
+        if _canonical_tipo(ruta.stem) != target_tipo:
+            continue
+        path_origen, path_estado = _infer_origin_and_status_from_path(ruta)
+        if path_origen != origen:
+            continue
+        if origen == "Emitidos" and estado_emitidos and path_estado and path_estado != estado_emitidos:
+            continue
+        try:
+            libro = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+        except Exception as err:
+            errores.append(f"{ruta.name}: {err}")
+            continue
+        try:
+            for hoja in libro.worksheets:
+                filas_hoja = hoja.iter_rows(values_only=True)
+                try:
+                    cabecera = next(filas_hoja)
+                except StopIteration:
+                    continue
+                columnas = [str(c).strip() if c is not None else "" for c in cabecera]
+                if not any(columnas):
+                    continue
+                for valores in filas_hoja:
+                    fila = {
+                        col: val
+                        for col, val in zip(columnas, valores)
+                        if col
+                    }
+                    if not any(v not in (None, "") for v in fila.values()):
+                        continue
+                    fecha_doc = _fecha_de_fila(fila)
+                    if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
+                        continue
+                    filas.append(fila)
+        finally:
+            libro.close()
+    return filas, errores
+
+
 def _raiz_de_busqueda(base_dir: Path, ruc: str) -> Path | None:
     """Desde dónde barrer los documentos de `ruc`, o None si la ruta no es suya.
 
@@ -3540,6 +3637,43 @@ def _build_custom_report_from_folder(
     pdf_count = 0
     errores: list[str] = []
 
+    # Las fuentes se recorren de mas fiel a menos, y `seen_keys` hace que cada
+    # comprobante lo aporte la primera que lo tenga:
+    #
+    #   1. reportes _reporte_xml_   derivados del XML: misma fidelidad, mucho
+    #                               mas rapido que releer miles de archivos
+    #   2. XML                      la fuente original
+    #   3. reportes _reporte_pdf_   derivados del PDF: evitan volver a pasar
+    #                               por el extractor, que es el eslabon fragil
+    #   4. PDF                      ultimo recurso
+    #
+    # El orden importa: confiar en un reporte derivado del PDF por encima del
+    # XML degradaria el dato sin que se note.
+    reporte_count = 0
+
+    def _sumar_reportes(fuentes: tuple[str, ...]) -> None:
+        nonlocal reporte_count
+        filas_reporte, errores_reporte = _filas_de_reportes_mensuales(
+            search_root,
+            origen=origen,
+            target_tipo=target_tipo,
+            estado_emitidos=estado_emitidos,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+            fuentes=fuentes,
+        )
+        errores.extend(errores_reporte)
+        for fila in filas_reporte:
+            key = _report_row_key(fila)
+            if key and key in seen_keys:
+                continue
+            if key:
+                seen_keys.add(key)
+            rows.append(fila)
+            reporte_count += 1
+
+    _sumar_reportes(("xml",))
+
     for xml_path in sorted(search_root.rglob("*.xml")):
         path_origen, path_estado = _infer_origin_and_status_from_path(xml_path)
         if path_origen != origen:
@@ -3628,6 +3762,10 @@ def _build_custom_report_from_folder(
         r"^factura__\d{8}__Factura_\d{3}-\d{3}-\d{9}",
         re.IGNORECASE,
     )
+
+    # Antes de abrir un solo PDF: lo que ya quedo resumido en un reporte no
+    # necesita volver a pasar por el extractor.
+    _sumar_reportes(("pdf", "txt"))
 
     for pdf_path in sorted(search_root.rglob("*.pdf")):
         path_origen, path_estado = _infer_origin_and_status_from_path(pdf_path)
@@ -3740,6 +3878,7 @@ def _build_custom_report_from_folder(
             "message": "No se pudo generar el archivo Excel del reporte personalizado.",
             "xml_count": xml_count,
             "pdf_count": pdf_count,
+            "reporte_count": reporte_count,
             "errors": errores,
         }
     return {
@@ -3747,6 +3886,7 @@ def _build_custom_report_from_folder(
         "path": output_path,
         "xml_count": xml_count,
         "pdf_count": pdf_count,
+        "reporte_count": reporte_count,
         "rows": len(rows),
         "errors": errores,
     }
@@ -5710,7 +5850,9 @@ with tab2:
                 output_path = Path(custom_report_result["path"])
                 st.success(
                     f"Reporte generado. Documentos incluidos: {custom_report_result.get('rows', 0)} "
-                    f"(XML: {custom_report_result.get('xml_count', 0)} | PDF: {custom_report_result.get('pdf_count', 0)})."
+                    f"(reportes mensuales: {custom_report_result.get('reporte_count', 0)} | "
+                    f"XML: {custom_report_result.get('xml_count', 0)} | "
+                    f"PDF: {custom_report_result.get('pdf_count', 0)})."
                 )
                 if custom_report_result.get("errors"):
                     st.caption(f"PDF con advertencias omitidos: {len(custom_report_result.get('errors') or [])}")
