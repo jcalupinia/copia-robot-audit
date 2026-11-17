@@ -63,6 +63,11 @@ from robot.downloader import (
     ESTADOS_EMITIDOS_MAP,
 )
 from robot.parser import construir_reporte, _parse_recibido_xml
+from robot.report_dialects import (
+    columnas_de_salida as _columnas_de_salida,
+    es_confiable as _reporte_es_confiable,
+    filas_de_libro as _filas_de_libro,
+)
 from robot.file_utils import mostrar_ruta, normalizar_carpeta_destino
 from robot.historial import registrar_descarga, obtener_historial   #  FIX import correcto
 from robot.download_resume import (
@@ -3457,6 +3462,14 @@ def _map_xml_to_retencion_row(cabecera: dict, retenciones: list[dict]) -> dict:
 # 202603.xlsx, recibidos_reporte_pdf_comprobante_de_retencion_202603.xlsx, etc.
 _REPORTE_MENSUAL_RE = re.compile(r"^(emitidos|recibidos)_reporte_(xml|pdf|txt)_", re.IGNORECASE)
 
+# Y el que queda al lado de las carpetas PDF/TXT/XML, sin prefijo de origen:
+# reporte_comprobante_de_retencion_2026_03.xlsx. Lo escribe el mismo
+# `construir_reporte` a partir de los XML cuando la descarga no dejo el
+# `recibidos_reporte_xml_*`, asi que es una fuente "xml" mas, con las mismas
+# siete hojas. Sin esto, en esas descargas el detalle de retenciones --que
+# vive solo ahi-- se quedaba afuera del reporte por fechas.
+_REPORTE_MULTIHOJA_RE = re.compile(r"^reporte_(?!personalizado_).+_\d{4}_\d{2}$", re.IGNORECASE)
+
 
 def _fecha_de_fila(row: dict):
     """La fecha del comprobante, venga en el dialecto que venga.
@@ -3484,20 +3497,32 @@ def _filas_de_reportes_mensuales(
     fecha_inicio: date,
     fecha_fin: date,
     fuentes: tuple[str, ...],
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[dict], list[str]]:
     """Filas tomadas de los reportes mensuales que el robot ya genero.
 
     Reusar el reporte en vez de releer los documentos es mas rapido y, sobre
     todo, evita volver a pasar por el extractor de PDF, que es el eslabon
-    fragil. Y no hace falta traducir columnas: estos .xlsx los escribieron los
-    mismos writers de `robot/reporting.py` que arman la salida de este modulo,
-    asi que las filas vuelven con las claves que el writer espera.
+    fragil.
+
+    Lo que hay que traducir: estos .xlsx NO estan todos escritos en el mismo
+    dialecto de columnas. Los `*_reporte_pdf_*` hablan el de la salida
+    (camelCase), pero los `*_reporte_xml_*` los escribe `construir_reporte` de
+    robot/parser.py con varias hojas y titulos legibles, y los
+    `*_reporte_txt_*` traen los encabezados crudos del portal. Leerlos como si
+    todos hablaran el dialecto de la salida fue el bug de las filas vacias;
+    `robot/report_dialects.py` los traduce y explica el caso con detalle.
 
     `fuentes` elige de que reportes leer ("xml", o "pdf"/"txt"). El llamador los
     pide por separado para respetar la jerarquia de fidelidad: lo derivado del
     XML vale tanto como el XML, lo derivado del PDF no.
+
+    Devuelve `(filas, provisionales, errores)`. Las provisionales vienen de
+    libros que no alcanzan a llenar el esquema; el llamador las usa solo para
+    los comprobantes que ninguna otra fuente aporto.
     """
+    columnas = _columnas_de_salida(target_tipo, origen)
     filas: list[dict] = []
+    provisionales: list[dict] = []
     errores: list[str] = []
     for ruta in sorted(search_root.rglob("*.xlsx")):
         # ~$archivo.xlsx es el bloqueo que deja Excel con el libro abierto.
@@ -3507,7 +3532,13 @@ def _filas_de_reportes_mensuales(
         if "Reportes_personalizados" in ruta.parts:
             continue
         match = _REPORTE_MENSUAL_RE.match(ruta.name)
-        if not match or match.group(2).lower() not in fuentes:
+        if match:
+            fuente = match.group(2).lower()
+        elif _REPORTE_MULTIHOJA_RE.match(ruta.stem):
+            fuente = "xml"
+        else:
+            continue
+        if fuente not in fuentes:
             continue
         if _canonical_tipo(ruta.stem) != target_tipo:
             continue
@@ -3522,30 +3553,19 @@ def _filas_de_reportes_mensuales(
             errores.append(f"{ruta.name}: {err}")
             continue
         try:
-            for hoja in libro.worksheets:
-                filas_hoja = hoja.iter_rows(values_only=True)
-                try:
-                    cabecera = next(filas_hoja)
-                except StopIteration:
-                    continue
-                columnas = [str(c).strip() if c is not None else "" for c in cabecera]
-                if not any(columnas):
-                    continue
-                for valores in filas_hoja:
-                    fila = {
-                        col: val
-                        for col, val in zip(columnas, valores)
-                        if col
-                    }
-                    if not any(v not in (None, "") for v in fila.values()):
-                        continue
-                    fecha_doc = _fecha_de_fila(fila)
-                    if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
-                        continue
-                    filas.append(fila)
+            filas_libro, cobertura = _filas_de_libro(libro, columnas)
+        except Exception as err:
+            errores.append(f"{ruta.name}: {err}")
+            continue
         finally:
             libro.close()
-    return filas, errores
+        destino = filas if _reporte_es_confiable(cobertura) else provisionales
+        for fila in filas_libro:
+            fecha_doc = _fecha_de_fila(fila)
+            if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
+                continue
+            destino.append(fila)
+    return filas, provisionales, errores
 
 
 def _raiz_de_busqueda(base_dir: Path, ruc: str) -> Path | None:
@@ -3650,10 +3670,14 @@ def _build_custom_report_from_folder(
     # El orden importa: confiar en un reporte derivado del PDF por encima del
     # XML degradaria el dato sin que se note.
     reporte_count = 0
+    # Filas de reportes que no alcanzan a llenar el esquema (ver
+    # `_COBERTURA_MINIMA` en robot/report_dialects.py). Se vacian al final,
+    # despues del XML y del PDF, para que nunca le ganen a una fuente fiel.
+    filas_provisionales: list[dict] = []
 
     def _sumar_reportes(fuentes: tuple[str, ...]) -> None:
         nonlocal reporte_count
-        filas_reporte, errores_reporte = _filas_de_reportes_mensuales(
+        filas_reporte, provisionales, errores_reporte = _filas_de_reportes_mensuales(
             search_root,
             origen=origen,
             target_tipo=target_tipo,
@@ -3663,6 +3687,7 @@ def _build_custom_report_from_folder(
             fuentes=fuentes,
         )
         errores.extend(errores_reporte)
+        filas_provisionales.extend(provisionales)
         for fila in filas_reporte:
             key = _report_row_key(fila)
             if key and key in seen_keys:
@@ -3833,6 +3858,18 @@ def _build_custom_report_from_folder(
             seen_keys.add(key)
         rows.append(row)
         pdf_count += 1
+
+    # Ultimo recurso. En modo rapido el TXT del portal es lo unico que se
+    # descarga: sin esto, un reporte por fechas sobre esa carpeta no
+    # encontraria nada.
+    for fila in filas_provisionales:
+        key = _report_row_key(fila)
+        if key and key in seen_keys:
+            continue
+        if key:
+            seen_keys.add(key)
+        rows.append(fila)
+        reporte_count += 1
 
     if not rows:
         return {
