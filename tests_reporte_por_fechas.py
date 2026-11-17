@@ -257,12 +257,62 @@ def probar_prioridad_de_fuentes() -> None:
     print()
 
 
+def probar_matriz_completa() -> None:
+    """Los 6 tipos, los 2 orígenes y los 3 tamaños de rango.
+
+    Emitidos y Recibidos dejan estructuras distintas —Emitidos intercala el
+    estado de autorización— y cada tipo tiene su propio slug en el nombre del
+    reporte. Esto fija que ninguna combinación se quede afuera.
+    """
+    print("matriz: 6 tipos x 2 orígenes x 3 rangos")
+    from datetime import date
+
+    tipos = [
+        ("Facturas", "Factura", "factura"),
+        ("Retenciones", "Comprobante de Retencion", "comprobante_de_retencion"),
+        ("Notas de crédito", "Nota de Credito", "nota_de_credito"),
+        ("Notas de débito", "Nota de Debito", "nota_de_debito"),
+        ("Liquidación de compra", "Liquidacion de Compra", "liquidacion_de_compra"),
+        ("Guía de remisión", "Guia de Remision", "guia_de_remision"),
+    ]
+    rangos = [
+        ("día", date(2026, 6, 15), date(2026, 6, 15)),
+        ("mes", date(2026, 6, 1), date(2026, 6, 30)),
+        ("año", date(2026, 1, 1), date(2026, 12, 31)),
+    ]
+    for origen in ("Emitidos", "Recibidos"):
+        for ui_tipo, carpeta, slug in tipos:
+            with tempfile.TemporaryDirectory() as tmp:
+                raiz = Path(tmp) / RUC
+                if origen == "Emitidos":
+                    mes_dir = raiz / "Emitidos" / "Autorizados" / carpeta / "2026" / "Junio" / "PDF"
+                else:
+                    mes_dir = raiz / "Recibidos" / carpeta / "2026" / "Junio" / "PDF"
+                escribir_reporte(
+                    mes_dir / f"{origen.lower()}_reporte_pdf_{slug}_202606.xlsx",
+                    [{"Clave de Acceso": "9" * 49, "Fecha de Emisión": "15/06/2026",
+                      "Secuencial": "001"}],
+                )
+                malos = []
+                for etiqueta, ini, fin in rangos:
+                    r = app._build_custom_report_from_folder(
+                        raiz, ruc=RUC, origen=origen, tipo=ui_tipo,
+                        fecha_inicio=ini, fecha_fin=fin,
+                        estado_emitidos="Autorizados" if origen == "Emitidos" else None,
+                    )
+                    if not (r.get("ok") and r.get("reporte_count") == 1):
+                        malos.append(etiqueta)
+                chequear(f"{origen} · {ui_tipo}", malos, [])
+    print()
+
+
 if __name__ == "__main__":
     probar_raiz_de_busqueda()
     probar_mensaje_de_error()
     probar_que_pasa_el_guard()
     probar_lectura_de_reportes()
     probar_prioridad_de_fuentes()
+    probar_matriz_completa()
     if _fallos:
         print(f"FALLARON {len(_fallos)}:")
         for f in _fallos:
