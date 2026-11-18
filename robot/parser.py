@@ -424,6 +424,9 @@ def _parse_recibido_xml(xml_path: Path):
         'AMBIENTE': meta['ambiente'],
         'TIPO_EMISION': _safe_str(info_trib.findtext('tipoEmision')),
         'CONTRIBUYENTE_RIMPE': _safe_str(info_trib.findtext('contribuyenteRimpe')),
+        'AGENTE_RETENCION': _safe_str(info_trib.findtext('agenteRetencion')),
+        # `contribuyenteEspecial` va en el bloque infoXxx, no en infoTributaria.
+        'CONTRIBUYENTE_ESPECIAL': '',
         'VERSION_XML': doc_node.attrib.get('version', ''),
         'ESTAB': estab,
         'PTO_EMI': pto_emi,
@@ -469,6 +472,7 @@ def _parse_recibido_xml(xml_path: Path):
     if info_node is not None:
         cabecera['DIR_ESTABLECIMIENTO'] = _safe_str(info_node.findtext('dirEstablecimiento'))
         cabecera['OBLIGADO_CONTABILIDAD'] = _safe_str(info_node.findtext('obligadoContabilidad'))
+        cabecera['CONTRIBUYENTE_ESPECIAL'] = _safe_str(info_node.findtext('contribuyenteEspecial'))
         cabecera['COD_DOC_MODIFICADO'] = _safe_str(info_node.findtext('codDocModificado'))
         cabecera['NUM_DOC_MODIFICADO'] = _safe_str(info_node.findtext('numDocModificado'))
         cabecera['FECHA_EMISION_DOC_SUSTENTO'] = _safe_str(info_node.findtext('fechaEmisionDocSustento'))
@@ -612,7 +616,14 @@ def _parse_recibido_xml(xml_path: Path):
                 cabecera[f'PLAZO_{pago_num}'] = plazo
                 cabecera[f'UNIDAD_TIEMPO_{pago_num}'] = unidad_tiempo
 
-        info_adicional = info_node.find('infoAdicional')
+        # `infoAdicional` es hermano de infoFactura/infoCompRetencion, no su
+        # hijo: cuelga del nodo raiz del comprobante, en los tres esquemas
+        # (factura, nota de credito, retencion). Buscarlo dentro de `info_node`
+        # lo dejaba siempre vacio, para todos los tipos de documento, y con el
+        # la columna 'Campos Adicionales' de los reportes.
+        info_adicional = doc_node.find('infoAdicional')
+        if info_adicional is None:
+            info_adicional = info_node.find('infoAdicional')
         adicionales_items = []
         if info_adicional is not None:
             for campo in info_adicional.findall('campoAdicional'):
@@ -707,18 +718,46 @@ def _parse_recibido_xml(xml_path: Path):
             detalles_rows.append(detalle_row)
 
         if cod_doc == '07':
-            impuestos_ret = doc_node.findall('.//impuestos/impuesto')
             total_retenido = 0.0
-            for imp in impuestos_ret:
+            # Un comprobante de retencion trae sus lineas en uno de dos
+            # lugares, segun la version del esquema, y los dos estan en uso:
+            #
+            #   1.0.0  impuestos/impuesto, y cada linea repite su documento de
+            #          sustento en codDocSustento / numDocSustento
+            #   2.0.0  docsSustento/docSustento/retenciones/retencion, y el
+            #          documento de sustento es del docSustento que las
+            #          agrupa, no de cada linea
+            #
+            # Leer solo el 1.0.0 dejaba sin un solo valor retenido a todo
+            # comprobante emitido con el esquema nuevo: en una muestra real de
+            # 100 retenciones recibidas, 35 eran 2.0.0 y salian en cero.
+            lineas_retencion: list[tuple] = []
+            for doc_sust in doc_node.findall('.//docsSustento/docSustento'):
+                sustento = (
+                    _safe_str(doc_sust.findtext('codDocSustento')),
+                    _safe_str(doc_sust.findtext('numDocSustento')),
+                    _safe_str(doc_sust.findtext('fechaEmisionDocSustento')),
+                )
+                for nodo_ret in doc_sust.findall('.//retenciones/retencion'):
+                    lineas_retencion.append((nodo_ret, sustento))
+            if not lineas_retencion:
+                for imp in doc_node.findall('.//impuestos/impuesto'):
+                    # 'tipoDocumento' y 'numeroDocumento' no existen en ninguna
+                    # version del esquema; quedan como alternativa por si algun
+                    # emisor los usa.
+                    lineas_retencion.append((imp, (
+                        _safe_str(imp.findtext('codDocSustento') or imp.findtext('tipoDocumento')),
+                        _safe_str(imp.findtext('numDocSustento') or imp.findtext('numeroDocumento')),
+                        _safe_str(imp.findtext('fechaEmisionDocSustento')),
+                    )))
+
+            for imp, (tipo_doc, numero_doc, fecha_doc) in lineas_retencion:
                 codigo = _safe_str(imp.findtext('codigo'))
                 codigo_ret = _safe_str(imp.findtext('codigoRetencion'))
                 base = _safe_float(imp.findtext('baseImponible'))
                 porcentaje = _safe_float(imp.findtext('porcentajeRetener'))
                 valor = _safe_float(imp.findtext('valorRetenido'))
                 total_retenido += valor
-                numero_doc = _safe_str(imp.findtext('numeroDocumento'))
-                fecha_doc = _safe_str(imp.findtext('fechaEmisionDocSustento'))
-                tipo_doc = _safe_str(imp.findtext('tipoDocumento'))
 
                 retenciones_rows.append(
                     {

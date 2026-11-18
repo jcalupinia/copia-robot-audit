@@ -3372,6 +3372,35 @@ def _report_row_key(row: dict) -> str:
     return "|".join(part for part in (numero, fecha, ruc) if part)
 
 
+def _texto_info_adicional(cabecera: dict) -> str:
+    """Los campos adicionales del XML, legibles.
+
+    `_parse_recibido_xml` los deja como JSON porque el reporte mensual los
+    vuelve a procesar. Aca van a una celda que lee una persona, asi que se
+    escriben igual que en el reporte de PDF: "nombre: valor" por linea.
+    """
+    crudo = cabecera.get("INFO_ADICIONAL_JSON") or ""
+    if not str(crudo).strip():
+        return ""
+    try:
+        items = json.loads(crudo)
+    except Exception:
+        return str(crudo)
+    if not isinstance(items, list):
+        return str(crudo)
+    lineas = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        nombre = str(item.get("nombre") or "").strip()
+        valor = str(item.get("valor") or "").strip()
+        if nombre and valor:
+            lineas.append(f"{nombre}: {valor}")
+        elif nombre or valor:
+            lineas.append(nombre or valor)
+    return "\n".join(lineas)
+
+
 def _map_xml_to_standard_row(cabecera: dict, detalles: list[dict]) -> dict:
     row = {col: "" for col in PDF_REPORT_COLUMNS}
     row["tipoDocumento"] = cabecera.get("DESCRIPCION_DOC", "")
@@ -3382,6 +3411,8 @@ def _map_xml_to_standard_row(cabecera: dict, detalles: list[dict]) -> dict:
     row["direccionSucursalEmisor"] = cabecera.get("DIR_ESTABLECIMIENTO", "")
     row["obligadoContabilidad"] = cabecera.get("OBLIGADO_CONTABILIDAD", "")
     row["tipoContribuyenteRIMPE"] = cabecera.get("CONTRIBUYENTE_RIMPE", "")
+    row["contribuyenteEspecial"] = cabecera.get("CONTRIBUYENTE_ESPECIAL", "")
+    row["agenteRetencion"] = cabecera.get("AGENTE_RETENCION", "")
     row["numeroComprobante"] = cabecera.get("SERIE_COMPROBANTE", "")
     row["establecimiento"] = cabecera.get("ESTAB", "")
     row["puntoEmision"] = cabecera.get("PTO_EMI", "")
@@ -3407,7 +3438,7 @@ def _map_xml_to_standard_row(cabecera: dict, detalles: list[dict]) -> dict:
     row["ambiente"] = cabecera.get("AMBIENTE", "")
     row["emision"] = cabecera.get("TIPO_EMISION", "")
     row["claveAcceso"] = cabecera.get("CLAVE_ACCESO", "")
-    row["informacionAdicional"] = cabecera.get("INFO_ADICIONAL_JSON", "")
+    row["informacionAdicional"] = _texto_info_adicional(cabecera)
     return row
 
 
@@ -3420,6 +3451,8 @@ def _map_xml_to_retencion_row(cabecera: dict, retenciones: list[dict]) -> dict:
     row["direccionMatrizEmisor"] = cabecera.get("DIR_MATRIZ", "")
     row["direccionSucursalEmisor"] = cabecera.get("DIR_ESTABLECIMIENTO", "")
     row["obligadoContabilidad"] = cabecera.get("OBLIGADO_CONTABILIDAD", "")
+    row["numeroContribuyenteEspecial"] = cabecera.get("CONTRIBUYENTE_ESPECIAL", "")
+    row["numeroAgenteRetencion"] = cabecera.get("AGENTE_RETENCION", "")
     row["fechaAutorizacion"] = cabecera.get("FECHA_AUTORIZACION", "")
     row["ambiente"] = cabecera.get("AMBIENTE", "")
     row["emision"] = cabecera.get("TIPO_EMISION", "")
@@ -3431,7 +3464,7 @@ def _map_xml_to_retencion_row(cabecera: dict, retenciones: list[dict]) -> dict:
     row["razonSocialSujetoRetenido"] = cabecera.get("RAZON_SOCIAL_COMPRADOR", "")
     row["identificacionSujetoRetenido"] = cabecera.get("IDENTIFICACION_COMPRADOR", "")
     row["claveAcceso"] = cabecera.get("CLAVE_ACCESO", "")
-    row["informacionAdicional"] = cabecera.get("INFO_ADICIONAL_JSON", "")
+    row["informacionAdicional"] = _texto_info_adicional(cabecera)
     iva_idx = 0
     ir_idx = 0
     for item in retenciones or []:
@@ -3660,15 +3693,20 @@ def _build_custom_report_from_folder(
     # Las fuentes se recorren de mas fiel a menos, y `seen_keys` hace que cada
     # comprobante lo aporte la primera que lo tenga:
     #
-    #   1. reportes _reporte_xml_   derivados del XML: misma fidelidad, mucho
-    #                               mas rapido que releer miles de archivos
-    #   2. XML                      la fuente original
+    #   1. XML                      la fuente original y firmada
+    #   2. reportes _reporte_xml_   derivados del XML: para los meses cuyos
+    #                               documentos ya no estan en disco
     #   3. reportes _reporte_pdf_   derivados del PDF: evitan volver a pasar
     #                               por el extractor, que es el eslabon fragil
     #   4. PDF                      ultimo recurso
     #
-    # El orden importa: confiar en un reporte derivado del PDF por encima del
-    # XML degradaria el dato sin que se note.
+    # El XML va primero aunque leerlo cueste mas. El reporte derivado del XML
+    # no es equivalente al XML: `construir_reporte` escribe etiquetas en vez de
+    # codigos ("1 - Emision normal" en lugar de "1") y rellena los huecos con
+    # el literal "No Disponible", que despues tapa el valor real. Mientras los
+    # XML esten en disco, leerlos sale mas fiel; el reporte queda para cuando
+    # no estan. Lo que si hay que evitar a toda costa es releer los PDF: ese
+    # extractor es el eslabon fragil, y de ahi que su reporte vaya antes.
     reporte_count = 0
     # Filas de reportes que no alcanzan a llenar el esquema (ver
     # `_COBERTURA_MINIMA` en robot/report_dialects.py). Se vacian al final,
@@ -3697,8 +3735,6 @@ def _build_custom_report_from_folder(
             rows.append(fila)
             reporte_count += 1
 
-    _sumar_reportes(("xml",))
-
     for xml_path in sorted(search_root.rglob("*.xml")):
         path_origen, path_estado = _infer_origin_and_status_from_path(xml_path)
         if path_origen != origen:
@@ -3711,6 +3747,8 @@ def _build_custom_report_from_folder(
             if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
                 continue
             key = _report_row_key(row)
+            if key and key in seen_keys:
+                continue
             if key:
                 seen_keys.add(key)
             rows.append(row)
@@ -3722,6 +3760,8 @@ def _build_custom_report_from_folder(
             if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
                 continue
             key = _report_row_key(row)
+            if key and key in seen_keys:
+                continue
             if key:
                 seen_keys.add(key)
             rows.append(row)
@@ -3733,6 +3773,8 @@ def _build_custom_report_from_folder(
             if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
                 continue
             key = _report_row_key(row)
+            if key and key in seen_keys:
+                continue
             if key:
                 seen_keys.add(key)
             rows.append(row)
@@ -3744,6 +3786,8 @@ def _build_custom_report_from_folder(
             if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
                 continue
             key = _report_row_key(row)
+            if key and key in seen_keys:
+                continue
             if key:
                 seen_keys.add(key)
             rows.append(row)
@@ -3755,6 +3799,8 @@ def _build_custom_report_from_folder(
             if not fecha_doc or fecha_doc < fecha_inicio or fecha_doc > fecha_fin:
                 continue
             key = _report_row_key(row)
+            if key and key in seen_keys:
+                continue
             if key:
                 seen_keys.add(key)
             rows.append(row)
@@ -3770,10 +3816,16 @@ def _build_custom_report_from_folder(
             continue
         row = _map_xml_to_retencion_row(cabecera, retenciones) if is_retencion else _map_xml_to_standard_row(cabecera, detalles)
         key = _report_row_key(row)
+        if key and key in seen_keys:
+            continue
         if key:
             seen_keys.add(key)
         rows.append(row)
         xml_count += 1
+
+    # Los meses cuyos XML ya no estan en disco: ahi el reporte derivado del XML
+    # es lo mas fiel que queda.
+    _sumar_reportes(("xml",))
 
     # HOTFIX 2026-07-04: para facturas emitidas ONLY, permitir que el usuario
     # dropee PDFs en carpetas con nombres custom (e.g., "PDF",
